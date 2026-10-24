@@ -1,0 +1,6 @@
+{
+  "name": "Manajemen MTQ - Musabaqah Digital",
+  "description": "Platform manajemen MTQ multi-tenant dengan portal penjurian mandiri, mushaf digital beranotasi kanvas, dan rekapitulasi nilai real-time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
