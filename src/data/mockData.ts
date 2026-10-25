@@ -6,8 +6,41 @@ import {
   Question,
   ErrorCategory,
   JudgeAssessment,
-  ActivityLogItem
+  ActivityLogItem,
+  CompetitionStage,
+  JudgeAssignment,
+  AuditLogItem
 } from '../types/mtq';
+
+/**
+ * Helper terpusat untuk kalkulasi skor prototype MTQ.
+ * Menjamin presisi desimal, proteksi minus, dan konsistensi pengurangan.
+ */
+export function calculateScore(
+  errorCounts: Record<string, number>,
+  errorCategories: ErrorCategory[],
+  startingScore: number = 100.0
+): {
+  deductions: Record<string, number>;
+  totalDeductions: number;
+  finalScore: number;
+} {
+  const deductions: Record<string, number> = {};
+  let totalDeductions = 0;
+
+  errorCategories.forEach((cat) => {
+    const count = Math.max(0, Math.floor(errorCounts[cat.id] || 0));
+    const deductionAmount = Number((count * cat.defaultDeduction).toFixed(2));
+    deductions[cat.id] = deductionAmount;
+    totalDeductions += deductionAmount;
+  });
+
+  totalDeductions = Number(totalDeductions.toFixed(2));
+  const finalScore = Number(Math.max(0, startingScore - totalDeductions).toFixed(2));
+
+  return { deductions, totalDeductions, finalScore };
+}
+
 
 export const INITIAL_TENANTS: Tenant[] = [
   {
@@ -15,53 +48,86 @@ export const INITIAL_TENANTS: Tenant[] = [
     name: 'LPTQ Provinsi Jawa Barat',
     code: 'LPTQ-JBR',
     eventName: 'MTQ Nasional Tingkat Provinsi Jawa Barat XXXI 2025',
-    region: 'Jawa Barat'
+    region: 'Jawa Barat',
+    edition: 'Edisi XXXI - 2025',
+    period: '2025 - 2026',
+    primaryAdminId: 'user-admin-rh',
+    status: 'Aktif',
+    userCount: 4
   },
   {
     id: 'tenant-dki',
     name: 'LPTQ Provinsi DKI Jakarta',
     code: 'LPTQ-DKI',
     eventName: 'MTQ Tingkat Provinsi DKI Jakarta XXX 2025',
-    region: 'DKI Jakarta'
+    region: 'DKI Jakarta',
+    edition: 'Edisi XXX - 2025',
+    period: '2025 - 2026',
+    primaryAdminId: 'user-admin-dki',
+    status: 'Aktif',
+    userCount: 3
   }
 ];
 
 export const INITIAL_USERS: User[] = [
   {
+    id: 'user-superadmin',
+    tenantId: 'platform',
+    username: 'superadmin_pusat',
+    email: 'superadmin@kemenag.go.id',
+    name: 'Prof. Dr. H. Nasaruddin, MA',
+    role: 'superadmin',
+    status: 'Aktif'
+  },
+  {
     id: 'user-admin-rh',
     tenantId: 'tenant-jabar',
     username: 'admin_jabar',
+    email: 'rachmat.hidayat@lptqjabar.id',
     name: 'H. Rachmat Hidayat, S.Ag',
-    role: 'admin'
+    role: 'admin',
+    status: 'Aktif'
   },
   {
     id: 'judge-1',
     tenantId: 'tenant-jabar',
     username: 'hakim_dahlan',
+    email: 'ahmad.dahlan@lptq.id',
     name: 'KH. Ahmad Dahlan, M.Ag',
     role: 'judge',
+    status: 'Aktif',
     judgeCategory: 'Hakim 1',
     judgeField: 'Bidang Tajwid & Makhraj',
+    assignedBranch: 'Tilawah Dewasa Putra',
+    assignedStage: 'Penyisihan',
     mimbarLocation: 'Mimbar Utama Masjid Al-Jabbar'
   },
   {
     id: 'judge-2',
     tenantId: 'tenant-jabar',
     username: 'hakim_quraish',
+    email: 'm.quraish@lptq.id',
     name: 'Dr. H. M. Quraish, MA',
     role: 'judge',
+    status: 'Aktif',
     judgeCategory: 'Hakim 2',
     judgeField: 'Bidang Fasahah & Waqf',
+    assignedBranch: 'Tilawah Dewasa Putra',
+    assignedStage: 'Penyisihan',
     mimbarLocation: 'Mimbar Utama Masjid Al-Jabbar'
   },
   {
     id: 'judge-3',
     tenantId: 'tenant-jabar',
     username: 'hakim_maria',
+    email: 'siti.maria@lptq.id',
     name: 'Hj. Siti Maria, M.Ag',
     role: 'judge',
+    status: 'Aktif',
     judgeCategory: 'Hakim 3',
     judgeField: 'Bidang Lagu & Suara',
+    assignedBranch: 'Tilawah Dewasa Putra',
+    assignedStage: 'Penyisihan',
     mimbarLocation: 'Mimbar Utama Masjid Al-Jabbar'
   }
 ];
@@ -648,6 +714,115 @@ export const INITIAL_ACTIVITY_LOGS: ActivityLogItem[] = [
     title: 'Penilaian Final Dikunci',
     description: 'Penilaian peserta TLW-003 Fauzi Rahmatullah berhasil difinalisasi oleh 3 Dewan Hakim.',
     timestamp: '10:15:30 WIB'
+  }
+];
+
+export const INITIAL_STAGES: CompetitionStage[] = [
+  {
+    id: 'stage-penyisihan',
+    tenantId: 'tenant-jabar',
+    name: 'Penyisihan',
+    order: 1,
+    branchName: 'Tilawah Dewasa Putra',
+    status: 'Aktif',
+    qualificationQuota: 3,
+    qualificationMethod: 'top_n',
+    isFinalized: false
+  },
+  {
+    id: 'stage-semifinal',
+    tenantId: 'tenant-jabar',
+    name: 'Semifinal',
+    order: 2,
+    branchName: 'Tilawah Dewasa Putra',
+    status: 'Menunggu',
+    qualificationQuota: 3,
+    qualificationMethod: 'top_n',
+    isFinalized: false
+  },
+  {
+    id: 'stage-final',
+    tenantId: 'tenant-jabar',
+    name: 'Final',
+    order: 3,
+    branchName: 'Tilawah Dewasa Putra',
+    status: 'Menunggu',
+    qualificationQuota: 1,
+    qualificationMethod: 'top_n',
+    isFinalized: false
+  }
+];
+
+export const INITIAL_JUDGE_ASSIGNMENTS: JudgeAssignment[] = [
+  {
+    id: 'asg-1',
+    tenantId: 'tenant-jabar',
+    judgeId: 'judge-1',
+    judgeName: 'KH. Ahmad Dahlan, M.Ag',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    judgeField: 'Bidang Tajwid & Makhraj'
+  },
+  {
+    id: 'asg-2',
+    tenantId: 'tenant-jabar',
+    judgeId: 'judge-2',
+    judgeName: 'Dr. H. M. Quraish, MA',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    judgeField: 'Bidang Fasahah & Waqf'
+  },
+  {
+    id: 'asg-3',
+    tenantId: 'tenant-jabar',
+    judgeId: 'judge-3',
+    judgeName: 'Hj. Siti Maria, M.Ag',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    judgeField: 'Bidang Lagu & Suara'
+  }
+];
+
+export const INITIAL_AUDIT_LOGS: AuditLogItem[] = [
+  {
+    id: 'aud-1',
+    timestamp: '2025-05-12 08:30:15 WIB',
+    actor: 'Superadmin (Prof. Dr. H. Nasaruddin, MA)',
+    action: 'TENANT_CREATE',
+    target: 'LPTQ Provinsi Jawa Barat',
+    tenantName: 'LPTQ-JBR',
+    summary: 'Pembuatan profil tenant MTQ Jawa Barat XXXI 2025.',
+    outcome: 'Success'
+  },
+  {
+    id: 'aud-2',
+    timestamp: '2025-05-12 08:45:00 WIB',
+    actor: 'Superadmin (Prof. Dr. H. Nasaruddin, MA)',
+    action: 'USER_ASSIGN',
+    target: 'H. Rachmat Hidayat, S.Ag',
+    tenantName: 'LPTQ-JBR',
+    summary: 'Penetapan Administrator Utama Event MTQ Jawa Barat.',
+    outcome: 'Success'
+  },
+  {
+    id: 'aud-3',
+    timestamp: '2025-05-12 11:20:44 WIB',
+    actor: 'Admin MTQ (H. Rachmat Hidayat)',
+    action: 'JUDGE_PANEL_SETUP',
+    target: 'Dewan Hakim Mimbar 1',
+    tenantName: 'LPTQ-JBR',
+    summary: 'Konfigurasi penugasan 3 dewan hakim cabang Tilawah Dewasa.',
+    outcome: 'Success'
+  },
+  {
+    id: 'aud-4',
+    timestamp: '2025-05-12 14:02:10 WIB',
+    actor: 'Admin MTQ (H. Rachmat Hidayat)',
+    action: 'MAQRA_LOTTERY',
+    target: 'Peserta TLW-004',
+    tenantName: 'LPTQ-JBR',
+    summary: 'Penetapan soal undian Maqra 04 (QS. Maryam: 1-15).',
+    outcome: 'Success'
   }
 ];
 

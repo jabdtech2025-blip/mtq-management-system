@@ -1,0 +1,656 @@
+# MTQ MANAGEMENT SYSTEM — PROTOTYPE REFINEMENT AND UI COMPLETION
+
+## ROLE
+
+Act as a senior frontend engineer and UI/UX architect.
+
+You are working on an existing React + TypeScript + Vite project: **Manajemen MTQ — Musabaqah Digital**.
+
+The project already contains multiple UI screens and reusable components. Your task is to improve the existing prototype, fix frontend behavior inconsistencies, and complete missing user interfaces and workflows.
+
+**This is still a frontend prototype. Do not implement the production backend yet.**
+
+Use the existing codebase as the source of truth for the current implementation. Inspect the code before modifying it.
+
+---
+
+# 1. NON-NEGOTIABLE RULES
+
+1. Do not rebuild the application from scratch.
+2. Preserve the existing React, TypeScript, Vite, Tailwind CSS, and Lucide React stack.
+3. Preserve the existing green design theme and its clean, minimal visual direction.
+4. Preserve functional screens and interactions unless a change is required to fix a documented issue.
+5. Reuse existing components and types where practical.
+6. Do not replace the current application with a simplified demo or a landing page.
+7. Do not remove existing data or workflows merely to make the code easier to modify.
+8. Do not implement Supabase, Firebase, a production API, a real authentication server, or other backend services during this task.
+9. Continue using mock data, React Context, and localStorage for prototype interactions.
+10. Clearly distinguish simulated functionality from real server functionality. Do not claim that localStorage changes are synchronized across users or devices.
+11. Do not invent official MTQ scoring rules, category weights, qualification criteria, or tie-breaking rules.
+12. Keep all visible application text in Bahasa Indonesia.
+
+Before making changes, inspect:
+- `src/App.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+- `src/data/mockData.ts`
+- All files under `src/components/`
+- `src/services/quranApi.ts`
+- `src/components/layout/TopHeader.tsx`
+- `package.json`
+- Existing styling and routing/navigation logic.
+
+Then implement the improvements in the phases below. Do not stop after producing a report. Make the changes directly in the existing project, then run the available build and TypeScript checks.
+
+# 2. PHASE ONE — FIX EXISTING FRONTEND BEHAVIOR
+
+Prioritize these issues before introducing new screens.
+
+## 2.1 Annotation persistence
+
+Current concern:
+The existing `saveAnnotations()` function updates an assessment only if the assessment already exists.
+
+Fix this behavior.
+
+Requirements:
+- An annotation can be saved even if the judge has not changed an error counter first.
+- When necessary, create an initial assessment record using the participant and active judge IDs.
+- Persist the updated annotation state through the existing prototype storage mechanism.
+- Load the correct annotation set when switching between participants.
+- Never carry the previous participant's annotations into another participant's workspace.
+- Ensure annotations remain separated by participant, judge, and Mushaf page.
+- Preserve annotations from other pages when editing the current page.
+- Avoid stale React state when saving rapidly.
+
+The annotation count displayed in the UI must reflect the actual stored annotations for the current participant and judge.
+
+## 2.2 Fix the eraser
+
+Current concern:
+The eraser currently draws white strokes over the Mushaf, which can cover the original Qur'anic text.
+
+Do not use white strokes as a destructive eraser.
+
+Implement a proper prototype annotation model:
+- Store each stroke as a separate annotation object with an ID.
+- Support undo of the last stroke.
+- Support removing a selected stroke or removing strokes through the eraser interaction.
+- Redraw the annotation layer from the remaining stroke objects.
+- Keep the original Mushaf image or text untouched.
+- Make the clear-page action remove annotations for the current page only.
+- Ask for confirmation before clearing all annotations on a page.
+
+If pixel-based erasing would require a complex rendering system, prefer stroke-level erasing for the prototype and label the interaction accurately.
+
+## 2.3 Fix annotation coordinate mapping
+
+The canvas currently uses fixed internal dimensions. Improve the coordinate model so annotations remain correctly aligned when the Mushaf viewport resizes or zooms.
+
+Requirements:
+- Store annotation points in normalized page coordinates, preferably between 0 and 1.
+- Convert normalized coordinates into canvas coordinates during rendering.
+- Support responsive resizing and zoom without shifting existing strokes.
+- Support pointer events on both mouse and touch devices.
+- Avoid scrolling the page accidentally while drawing.
+- Keep the overlay aligned with the actual Mushaf page boundaries.
+
+Do not change the Mushaf source content during this work.
+
+## 2.4 Fix scoring finalization state
+
+Current concern:
+Finalizing one judge assessment changes the participant's shared status to `Final`, even when other judges may not have finished.
+
+Separate these concepts:
+
+- Individual judge assessment status.
+- Overall participant scoring progress.
+- Official competition-stage result status.
+
+For the prototype:
+- A judge assessment can be `not_started`, `in_progress`, or `finalized`.
+- Finalizing a judge assessment locks only that judge's assessment.
+- Other judges' assessments must remain independent.
+- A participant is considered fully assessed only when all required judge assignments are finalized.
+- Do not change the participant's competition-stage result merely because one judge finishes.
+- A finalized assessment must become read-only.
+- Attempts to edit a finalized assessment through the UI must be prevented.
+
+Create derived participant progress states such as:
+- Belum Dimulai.
+- Berlangsung.
+- Menunggu Hakim Lain.
+- Lengkap.
+
+These statuses must be derived from the configured required judge assignments rather than being manually inferred from a single assessment.
+
+## 2.5 Fix annotation finalization snapshot
+
+When the judge clicks “Simpan Penilaian”:
+- Validate the current assessment.
+- Capture the current score, error counts, deductions, annotation objects, and finalization timestamp together.
+- Save the resulting assessment snapshot into prototype state.
+- Mark that judge's assessment as `finalized`.
+- Make its scoring controls read-only.
+- Display a confirmation dialog before finalizing.
+- Display an understandable finalized state after successful completion.
+
+The score and Mushaf annotations must represent the same version of the assessment.
+
+Do not label localStorage as a permanent archive or production database.
+
+## 2.6 Fix state initialization and participant switching
+
+Review `PenilaianDualPanelView.tsx` for stale state and effect dependencies.
+
+Requirements:
+- When the selected participant changes, load that participant's assessment for the active judge.
+- If no assessment exists, initialize a fresh empty annotation state and zero error counts.
+- Reset temporary drawing state when participants change.
+- Prevent strokes from the previous participant remaining visible.
+- Ensure the Mushaf page changes to the participant's assigned page.
+- Prevent updates after the assessment has been finalized.
+- Handle the case where there are no participants.
+
+Avoid unnecessary re-renders or effect loops.
+
+## 2.7 Fix error count and deduction calculations
+
+Review `updateErrorCount()` and all score calculation logic.
+
+Requirements:
+- Minus cannot reduce the count below zero.
+- One click should increment or decrement the correct category by exactly one.
+- Updating one assessment must not overwrite another participant's or judge's assessment.
+- Counts, deductions, and scores must remain internally consistent.
+- Existing deductions must not be lost when another category is updated.
+- Calculate scores using one centralized helper rather than duplicating formulas across components.
+- Use numeric precision suitable for decimal scoring.
+- Do not infer an official MTQ formula beyond the currently configured prototype rules.
+- Label unverified sample scoring rules as illustrative and configurable.
+
+If the existing model assumes a starting score of 100, preserve it only as an explicitly configurable prototype rule. Do not treat it as a confirmed official formula.
+
+## 2.8 Remove fake operational indicators
+
+The current prototype uses local state and timers to display synchronization messages.
+
+Make the distinction clear.
+
+For the current prototype:
+- Show “Tersimpan di browser” after a local change has been persisted.
+- Show “Menyimpan…” only during an actual local state/storage operation.
+- If localStorage persistence fails, display an error state.
+- Do not display a green real-time server connection indicator as if an external server is connected.
+- Use “Simulasi lokal” or a similarly subtle label where required.
+
+Do not simulate a successful server connection using a timeout.
+
+## 2.9 Fix dashboard statistics
+
+Remove hard-coded statistics such as a fixed total number of judges.
+
+Derive statistics from the existing mock data wherever the necessary records exist.
+
+Requirements:
+- Total participants derives from participant records.
+- Total kafilah derives from kafilah records.
+- Judge totals derive from user records with role `judge`.
+- Assessment completion derives from assessment assignments and assessment statuses.
+- Display sensible empty and zero states.
+- Ensure progress percentages do not become `NaN` or infinity when there are no participants.
+
+Do not invent counts that appear to represent real operational data.
+
+# 3. PHASE TWO — CONSOLIDATE THE PROTOTYPE DATA MODEL
+
+Keep the prototype architecture lightweight, but make its mock data relationships consistent.
+
+Review and update `src/types/mtq.ts` and `src/data/mockData.ts` as needed.
+
+The prototype should model these entities:
+
+- Tenant / MTQ.
+- User.
+- Kafilah.
+- Participant.
+- Competition stage.
+- Participant stage participation.
+- Question or maqra.
+- Question assignment.
+- Error category.
+- Judge assignment.
+- Judge assessment.
+- Mushaf annotation.
+- Stage result.
+- Qualification decision.
+- Activity log.
+
+Do not create a complex production database schema at this stage. Add only the fields and relationships needed to make the frontend workflows coherent.
+
+## Required relationship principles
+
+- One tenant represents one MTQ event context.
+- Every user belongs to exactly one MTQ tenant in the ordinary application.
+- Superadmin is a platform-level role with explicitly defined cross-tenant controls.
+- A participant can participate in several competition stages.
+- Each participant-stage participation has its own assessment records.
+- A judge assessment belongs to a specific participant-stage participation and judge assignment.
+- A participant's scores from different stages must not overwrite one another.
+- Each judge has independent error counts and annotations.
+- A category deduction rule must be associated with a scoring-rule version in the prototype model where needed.
+- Keep a clear distinction between an individual judge assessment and an official stage result.
+
+Use stable IDs for relationships. Do not rely on display names as database keys.
+
+# 4. PHASE THREE — CORRECT TENANT AND ROLE UI
+
+## 4.1 Remove tenant switching from the header
+
+In `TopHeader.tsx`:
+- Remove the tenant dropdown.
+- Remove the ability to call `setTenantId()` directly from the standard admin interface.
+- Display the assigned MTQ name as static context.
+- Do not let a standard user switch between tenant datasets from the header.
+
+Maintain the current user's profile menu only for profile-oriented actions appropriate to the prototype. Do not use that menu as an unrestricted impersonation or role-switching control.
+
+## 4.2 Remove the demo role-switching control from the ordinary sidebar
+
+The existing sidebar allows switching between admin and judge users by clicking an icon.
+
+Remove this control from the normal product UI.
+
+For prototype testing, use one of these approaches:
+- A clearly labeled development-only demo entry point.
+- A simple mock login screen with account choices.
+- A dedicated preview mode outside ordinary application navigation.
+
+The mechanism must not look like a production user permission feature.
+
+Never represent a frontend account selector as real authentication or authorization.
+
+## 4.3 Add role-specific navigation
+
+Support separate prototype experiences for:
+
+**Superadmin**
+- Dashboard Platform.
+- Manajemen MTQ.
+- Manajemen Akun.
+- Audit Log.
+
+**Admin MTQ**
+- Dashboard.
+- Manajemen Data.
+- Kafilah & Peserta.
+- Bank Soal.
+- Master Data.
+- Manajemen Pengguna & Hakim.
+- Penilaian Hakim monitoring.
+- Rekap Nilai.
+- Hasil & Kelulusan.
+- Pengaturan Event.
+
+**Hakim**
+- Peserta Saya.
+- Penilaian.
+- Riwayat Penilaian.
+
+Users should see the navigation corresponding to their current prototype role.
+
+Clearly mark the account/role simulation as prototype-only when appropriate.
+
+# 5. PHASE FOUR — MAKE THE RECAP CONSISTENT AND CONFIGURABLE
+
+The current recap implementation hard-codes specific judge IDs and scoring component assignments.
+
+Refactor `RekapNilaiView.tsx` so the interface is driven by assessment data, judge assignments, and scoring configuration instead of fixed judge IDs.
+
+Requirements:
+
+1. Display the assigned judges dynamically.
+2. Generate a judge column group for every judge assigned to the selected competition stage/category.
+3. Display the scoring components applicable to that judge.
+4. Display counts, deductions, and judge score as distinct concepts.
+5. Show a score only when the relevant assessment data exists.
+6. Distinguish `in_progress` from `finalized`.
+7. Show the participant-level status independently from each judge's status.
+8. Compute participant completeness using the required judge assignments.
+9. Only compute an official-looking aggregate when the configured aggregation rules and required inputs are satisfied.
+10. Clearly label incomplete aggregate values as provisional.
+11. Use configured stage data rather than hard-coded filter values.
+12. Derive kafilah filter options from the current dataset.
+13. Ensure CSV export uses the same dynamic columns and values shown in the table.
+14. Escape CSV cells safely.
+15. Do not average missing scores as if they were zero.
+16. Do not create results from unfinalized assessments unless explicitly labeled provisional.
+
+Preserve the grouped-header table design with sticky participant columns and horizontal scrolling.
+
+Do not force all MTQ events to use exactly three judges.
+
+Do not assume every judge scores all components or that a judge is permanently responsible for the same category across all events.
+
+Keep scoring responsibilities and aggregation rules configurable.
+
+# 6. PHASE FIVE — COMPLETE BANK SOAL AND MAQRA WORKFLOW
+
+The existing Bank Soal UI already supports creating and previewing question/maqra entries.
+
+Extend the prototype to make assignment behavior visible and coherent.
+
+Required features:
+- Create and edit a question/maqra.
+- Assign a question to an eligible participant or group.
+- Record the stage, branch/category, level, and participant scope.
+- Show whether the participant already has an assigned maqra.
+- Show the assigned maqra on the judge assessment screen.
+- Provide a preview of the assigned Mushaf page.
+- Prevent invalid references such as an end ayah earlier than the start ayah.
+- Prevent invalid Mushaf page numbers.
+- Provide status and empty-state behavior when no maqra has been assigned.
+- Provide a simple “Penetapan Maqra” or “Pengundian Maqra” interface if required by the current product model.
+
+For a prototype, simulate assignment through local state and display that it is mock data.
+
+Do not fabricate Quranic content. Use a verified source or a clearly labeled placeholder.
+
+# 7. PHASE SIX — COMPLETE MASTER DATA INTERACTIONS
+
+The current Master Data screen displays static cards for stages, levels, branches, and some judges.
+
+Refactor it so the main prototype interactions work consistently.
+
+Provide reusable list/form interactions for:
+
+## Babak
+Example entries:
+- Penyisihan.
+- Semifinal.
+- Final.
+- Super Final.
+
+## Jenjang
+Examples:
+- Mutawassit.
+- Ulya.
+- Jami’ah.
+- Other configurable levels.
+
+## Cabang/Golongan
+Configurable examples such as Tilawah Dewasa and other competition categories.
+
+## Kategori Kesalahan & Bobot
+Examples:
+- Makharijul Huruf.
+- Idgham.
+- Fasahah.
+- Tajwid.
+- Lagu.
+- Other configured categories.
+
+## Pengguna & Penugasan Hakim
+Display account names, roles, assignments, and statuses.
+
+Support, where appropriate:
+- Add.
+- Edit.
+- Activate/deactivate.
+- Search or filter.
+- Clear validation.
+- Confirmation before meaningful destructive changes.
+
+Use mock state and localStorage only.
+
+Do not silently update finalized assessments when a category weight changes. At minimum, make the UI indicate that new scoring rules should apply to new assessments or a new rule version.
+
+Do not assume that the displayed categories or deduction weights represent official regulations.
+
+# 8. PHASE SEVEN — ADD THE MISSING OPERATIONAL SCREENS
+
+Add the screens below using the existing design system.
+
+Do not redesign existing screens unless needed for navigation consistency.
+
+## 8.1 Manajemen Pengguna & Hakim
+
+Create a working prototype screen for the current MTQ admin.
+
+Show:
+- Nama pengguna.
+- Username or email placeholder.
+- Peran.
+- Status akun.
+- Cabang/golongan assignment.
+- Babak assignment.
+- Actions.
+
+Support mock actions:
+- Add user or judge.
+- Edit profile information.
+- Assign judge to an eligible stage/category/participant scope.
+- Activate/deactivate.
+- Search and filter.
+
+Do not implement real authentication or password storage.
+
+Mock account credentials must not be represented as production-ready.
+
+## 8.2 Superadmin: Manajemen MTQ
+
+Create a basic platform-level UI for managing tenant records.
+
+Show:
+- Nama MTQ.
+- Edisi.
+- Wilayah.
+- Periode.
+- Admin utama.
+- Number of users.
+- Tenant status.
+
+Support mock interactions:
+- Add MTQ.
+- Edit MTQ.
+- Activate/deactivate.
+- Open tenant detail.
+- Assign a primary admin.
+
+For tenant reassignment, provide a controlled confirmation dialog showing source and destination MTQ.
+
+This is prototype behavior only. Do not claim server-side access is enforced.
+
+## 8.3 Superadmin: Manajemen Akun
+
+Create a global account-management screen.
+
+Show:
+- Name.
+- Username/email placeholder.
+- Role.
+- Assigned MTQ.
+- Account status.
+- Actions.
+
+Support mock actions for:
+- Create accounts.
+- Change a prototype user's MTQ assignment.
+- Change role where appropriate.
+- Activate/deactivate.
+- View audit entries.
+
+The ordinary admin interface must not expose tenant reassignment.
+
+## 8.4 Superadmin: Audit Log
+
+Create a compact audit table with:
+- Timestamp.
+- Actor.
+- Action.
+- Target user or MTQ.
+- Summary.
+- Outcome.
+
+Populate this screen with illustrative mock entries, clearly understood to be prototype data.
+
+# 9. PHASE EIGHT — COMPETITION PROGRESSION WORKFLOW
+
+Add a clear operational workflow connecting preliminary rounds to later rounds.
+
+This is a frontend prototype. Do not create an unrequested production approval backend.
+
+Support configurable stages such as:
+1. Penyisihan.
+2. Semifinal.
+3. Final.
+4. Super Final, where applicable.
+
+## 9.1 Stage management
+
+Add a “Manajemen Babak” screen or a clearly separated section under the relevant administrative navigation.
+
+Display:
+- Babak.
+- Urutan.
+- Cabang/golongan.
+- Number of participants.
+- Assessment completion.
+- Stage status.
+- Qualification configuration.
+
+Allow mock configuration of:
+- Stage order.
+- Stage name.
+- Eligible branch/category.
+- Qualification method.
+- Number of participants advancing or another explicit rule.
+- Status and schedule where applicable.
+
+Do not confuse the master-data list of available stage types with actual stages configured for a particular MTQ.
+
+## 9.2 Stage results and qualification
+
+Add a “Hasil & Kelulusan” screen.
+
+Its workflow should be:
+
+**A. Preliminary round**
+- Show required judge assessments.
+- Show completed/finalized assessments.
+- Show pending assessments.
+- Show preliminary participant scores and provisional rankings.
+- Prevent stage finalization while required assessments remain incomplete.
+- Allow the admin to review a simulated result summary.
+- Provide a “Finalisasi Hasil Babak” action when the prototype's completion rules are satisfied.
+
+**B. Determine qualifiers**
+- Show participant ID, name, kafilah, finalized score, rank, and qualification status.
+- Allow the admin to preview participants selected under a configured rule.
+- Support a configurable top-N quota or other explicitly selected rule.
+- Support an authorized manual qualification override only with a mandatory reason in the prototype.
+- Display unresolved ties rather than silently choosing participants.
+- Provide a “Konfirmasi Kelulusan” action.
+
+Qualification rules and tie-breaks are configuration, not hard-coded official rules.
+
+**C. Generate the next stage**
+- Create new participant-stage participation records for qualifiers.
+- Preserve the same participant ID and kafilah.
+- Carry forward identity and eligibility, not the previous stage's assessment.
+- Allow new question and judge assignments.
+- Keep preliminary scores and annotations separate from semifinal scores and annotations.
+- Display the advancement history clearly.
+
+Repeat the same process from semifinal to final.
+
+## 9.3 Participant stage history
+
+Add a compact stage-history section to participant details.
+
+Example:
+- Penyisihan — Hasil ditetapkan.
+- Semifinal — Penilaian berlangsung.
+- Final — Belum dimulai.
+
+Each stage should display its separate status and score when available.
+
+## 9.4 Important distinctions
+
+Do not treat these as the same action:
+- A judge finalizes an individual assessment.
+- The participant has all required judge assessments completed.
+- Admin finalizes the stage result.
+- Admin confirms who advances.
+- The next stage becomes available.
+- Official competition results are published.
+
+Make the progression visually understandable without creating excessive approval screens.
+
+# 10. PHASE NINE — DESIGN SYSTEM AND RESPONSIVENESS
+
+Preserve the existing visual direction:
+
+- Primary green and light-green active states.
+- White and light-gray surfaces.
+- Navy/slate text.
+- Subtle borders.
+- Comfortable rounded corners.
+- Consistent typography and spacing.
+- Minimal icons and buttons.
+- Compact, readable tables.
+- Tablet-first responsive behavior.
+
+Reference viewports:
+- Tablet landscape: 1024 × 768.
+- Tablet portrait: 768 × 1024.
+- Desktop: 1440 × 900.
+- Mobile: 390 × 844.
+
+Prioritize the judge assessment screen.
+
+The Mushaf and scoring panels must remain readable and properly aligned. On narrow layouts, use the existing “Mushaf” and “Nilai” tab pattern rather than compressing both panels into unusable widths.
+
+Make sure wide recap tables can scroll horizontally without causing the entire page to overflow.
+
+Do not add decorative cards or unnecessary explanations while adding the new screens.
+
+# 11. PHASE TEN — CODE QUALITY AND VERIFICATION
+
+Before finishing:
+
+1. Run the existing TypeScript check, such as `npm run lint`.
+2. Run the production build, such as `npm run build`.
+3. Fix errors introduced by your changes.
+4. Check React keys, undefined state, and stale state in effects.
+5. Check empty participant lists and missing assessment records.
+6. Check state persistence after refresh.
+7. Check that finalized assessments remain read-only.
+8. Check that changing participants does not leak annotations or score values.
+9. Check that the recap and dashboard derive their values from the same mock state.
+10. Check that navigation reaches every new screen.
+11. Check all forms, plus/minus controls, modal actions, and status transitions.
+12. Check responsiveness at the target viewports.
+
+Do not claim a command passed unless you actually ran it and inspected the result.
+
+Avoid adding dependencies unless necessary.
+
+Keep implementation changes focused and maintainable.
+
+# 12. COMPLETION REPORT
+
+After implementing the changes, provide a concise report containing:
+
+- Files modified.
+- Existing behavior bugs fixed.
+- New prototype screens added.
+- Interactions that now work.
+- Any known limitations.
+- TypeScript/build results.
+- Features that still require backend implementation.
+
+Make the changes directly in the existing repository/project rather than only returning recommendations or code snippets.
+
+The goal is to deliver a stable, coherent frontend prototype that is ready for a later backend integration phase.

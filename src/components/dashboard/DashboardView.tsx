@@ -7,7 +7,10 @@ import {
   FileSpreadsheet,
   ArrowRight,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Award,
+  Layers,
+  Sparkles
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 
@@ -16,24 +19,32 @@ export const DashboardView: React.FC = () => {
     currentTenant,
     participants,
     kafilahs,
+    users,
     setCurrentView,
     setSelectedParticipantId,
-    activityLogs
+    activityLogs,
+    getParticipantProgress
   } = useMtq();
 
-  // Statistics
+  // Statistics dynamically derived
   const totalParticipants = participants.length;
   const totalKafilah = kafilahs.length;
-  const totalHakim = 18; // Default panel configuration
+  const totalHakim = users.filter((u) => u.role === 'judge').length;
 
-  const finalCount = participants.filter((p) => p.status === 'Final').length;
-  const ongoingCount = participants.filter((p) => p.status === 'Berlangsung').length;
-  const pendingCount = participants.filter((p) => p.status === 'Menunggu').length;
+  const lengkapCount = participants.filter((p) => getParticipantProgress(p.id) === 'Lengkap').length;
+  const ongoingCount = participants.filter((p) => getParticipantProgress(p.id) === 'Berlangsung').length;
+  const pendingCount = participants.filter((p) => getParticipantProgress(p.id) === 'Belum Dimulai').length;
+  const waitingOtherCount = participants.filter((p) => getParticipantProgress(p.id) === 'Menunggu Hakim Lain').length;
 
-  const finalPercentage = totalParticipants > 0 ? Math.round((finalCount / totalParticipants) * 100) : 0;
+  const completionPercentage =
+    totalParticipants > 0 ? Math.round((lengkapCount / totalParticipants) * 100) : 0;
 
   // Active participant currently being scored
-  const ongoingParticipant = participants.find((p) => p.status === 'Berlangsung') || participants[0];
+  const ongoingParticipant =
+    participants.find((p) => getParticipantProgress(p.id) === 'Berlangsung') ||
+    participants.find((p) => p.status === 'Berlangsung') ||
+    participants[0] ||
+    null;
 
   const handleOpenActiveScoring = () => {
     if (ongoingParticipant) {
@@ -43,220 +54,203 @@ export const DashboardView: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Breadcrumb & Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <p className="text-xs font-semibold text-slate-500 tracking-wide">
             {currentTenant.name}
           </p>
-          <h1 className="text-2xl font-extrabold text-slate-900 mt-0.5">Dashboard</h1>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-0.5">
+            Dashboard Utama
+          </h1>
           <p className="text-xs text-slate-500 mt-0.5">{currentTenant.eventName}</p>
         </div>
 
-        <div>
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setCurrentView('rekap_nilai')}
-            className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all"
+            className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all cursor-pointer"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            <span>Rekap nilai</span>
+            <span>Rekap Nilai</span>
           </button>
         </div>
       </div>
 
-      {/* 4 Stat Cards Row matching screenshot */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* 4 Stat Cards Row derived dynamically */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Peserta */}
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Peserta</span>
+            <span className="text-xs font-medium text-slate-500">Total Peserta</span>
             <Users className="w-4 h-4" />
           </div>
           <p className="text-3xl font-bold text-slate-900 mt-3 tabular-nums font-mono">
             {totalParticipants}
           </p>
+          <p className="text-[11px] text-slate-400 mt-1">Terdaftar di seluruh babak</p>
         </div>
 
         {/* Grup */}
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Grup</span>
+            <span className="text-xs font-medium text-slate-500">Grup / Kafilah</span>
             <Building className="w-4 h-4" />
           </div>
           <p className="text-3xl font-bold text-slate-900 mt-3 tabular-nums font-mono">
             {totalKafilah}
           </p>
+          <p className="text-[11px] text-slate-400 mt-1">Kabupaten & Kota utusan</p>
         </div>
 
-        {/* Hakim */}
+        {/* Hakim (Derived from active judge users, NOT hardcoded 18) */}
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Hakim</span>
+            <span className="text-xs font-medium text-slate-500">Dewan Hakim</span>
             <Gavel className="w-4 h-4" />
           </div>
           <p className="text-3xl font-bold text-slate-900 mt-3 tabular-nums font-mono">
             {totalHakim}
           </p>
+          <p className="text-[11px] text-slate-400 mt-1">Akun hakim penilai aktif</p>
         </div>
 
-        {/* Penilaian Final */}
+        {/* Penilaian Selesai */}
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Penilaian final</span>
-            <CheckCircle2 className="w-4 h-4 text-slate-400" />
+            <span className="text-xs font-medium text-slate-500">Penilaian Lengkap</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 mt-3 tabular-nums font-mono">
-            {finalPercentage}%
+          <div className="flex items-baseline gap-2 mt-3">
+            <span className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
+              {lengkapCount}
+            </span>
+            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              {completionPercentage}%
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">
+            {waitingOtherCount > 0 ? `${waitingOtherCount} menunggu hakim lain` : 'Semua hakim sinkron'}
           </p>
         </div>
       </div>
 
-      {/* Middle Row: Progress Penilaian & Perlu Perhatian */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Progres Penilaian */}
-        <div className="md:col-span-2 bg-white p-6 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+      {/* Active Session & Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Active Participant Scoring Banner */}
+        <div className="lg:col-span-2 bg-gradient-to-br from-emerald-800 to-emerald-950 text-white rounded-2xl p-6 shadow-md flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">Progres penilaian</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Babak penyisihan</p>
-              </div>
-              <span className="text-lg font-bold text-slate-800 tabular-nums">
-                {finalPercentage}%
+            <div className="flex items-center gap-2 mb-3">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-white/10 px-2.5 py-0.5 rounded-full text-emerald-200 border border-white/15">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                Sesi Penilaian Aktif
               </span>
             </div>
 
-            {/* Tri-color progress bar */}
-            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex mt-6">
-              <div
-                style={{ width: `${(finalCount / totalParticipants) * 100}%` }}
-                className="bg-emerald-500 h-full transition-all"
-                title={`Final: ${finalCount}`}
-              />
-              <div
-                style={{ width: `${(ongoingCount / totalParticipants) * 100}%` }}
-                className="bg-amber-400 h-full transition-all"
-                title={`Berlangsung: ${ongoingCount}`}
-              />
-              <div
-                style={{ width: `${(pendingCount / totalParticipants) * 100}%` }}
-                className="bg-slate-200 h-full transition-all"
-                title={`Belum dimulai: ${pendingCount}`}
-              />
-            </div>
+            {ongoingParticipant ? (
+              <div className="space-y-1">
+                <p className="text-xs text-emerald-300 font-mono">
+                  NOMOR UNDIAN #{ongoingParticipant.lotteryNumber} · {ongoingParticipant.participantId}
+                </p>
+                <h3 className="text-2xl font-extrabold text-white">
+                  {ongoingParticipant.name}
+                </h3>
+                <p className="text-xs text-emerald-200/90 pt-1">
+                  {ongoingParticipant.kafilahName} · {ongoingParticipant.branchName} · {ongoingParticipant.assignedMaqra}
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-emerald-200">Belum ada peserta yang dinilai saat ini.</p>
+            )}
           </div>
 
-          <div className="grid grid-cols-3 gap-4 pt-8 mt-4 border-t border-slate-100 text-xs">
-            <div>
-              <p className="text-slate-400 font-medium">Belum dimulai</p>
-              <p className="text-base font-bold text-slate-800 mt-1 tabular-nums font-mono">
-                {pendingCount}
-              </p>
-            </div>
-            <div>
-              <p className="text-amber-600 font-medium">Berlangsung</p>
-              <p className="text-base font-bold text-amber-600 mt-1 tabular-nums font-mono">
-                {ongoingCount}
-              </p>
-            </div>
-            <div>
-              <p className="text-emerald-700 font-medium">Final</p>
-              <p className="text-base font-bold text-emerald-700 mt-1 tabular-nums font-mono">
-                {finalCount}
-              </p>
-            </div>
+          <div className="pt-6 flex flex-wrap items-center gap-3">
+            {ongoingParticipant && (
+              <button
+                onClick={handleOpenActiveScoring}
+                className="inline-flex items-center gap-2 bg-white text-emerald-950 font-bold text-xs px-4 py-2.5 rounded-xl hover:bg-emerald-50 active:scale-95 transition-all shadow-sm"
+              >
+                <span>Buka Lembar Mushaf & Penilaian</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={() => setCurrentView('penilaian_hakim')}
+              className="inline-flex items-center gap-2 bg-emerald-900/60 hover:bg-emerald-900 text-white font-medium text-xs px-4 py-2.5 rounded-xl border border-emerald-700/60 transition-all"
+            >
+              Lihat Daftar Antrean Peserta
+            </button>
           </div>
         </div>
 
-        {/* Perlu Perhatian */}
-        <div className="bg-white p-6 rounded-xl border border-slate-200/80 shadow-xs space-y-4">
-          <h3 className="text-sm font-bold text-slate-900">Perlu perhatian</h3>
-
-          <div className="space-y-4 text-xs">
-            <div className="pb-3 border-b border-slate-100">
-              <p className="font-semibold text-slate-800">2 peserta belum mendapat maqra</p>
-              <p className="text-slate-400 mt-0.5">Jadwal undian pukul 13.30 WIB</p>
+        {/* Quick Progression Navigation Card */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-slate-800 font-bold text-sm mb-3">
+              <Award className="w-4 h-4 text-emerald-700" />
+              <span>Alur Musabaqah & Kelulusan</span>
             </div>
+            <p className="text-xs text-slate-500 leading-relaxed mb-4">
+              Setelah babak penyisihan selesai, admin dapat memfinalisasi peringkat peserta dan meloloskan peserta terbaik (Top-N) ke babak Semifinal atau Final.
+            </p>
 
-            <div className="pb-3 border-b border-slate-100">
-              <p className="font-semibold text-slate-800">Rubrik “Aslah” belum dikonfirmasi</p>
-              <p className="text-slate-400 mt-0.5">Menunggu pengesahan dewan hakim</p>
+            <div className="space-y-2">
+              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
+                <span className="font-medium text-slate-700">Babak Aktif:</span>
+                <span className="font-bold text-emerald-800 font-mono">Penyisihan</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
+                <span className="font-medium text-slate-700">Peserta Lengkap:</span>
+                <span className="font-bold text-slate-900 font-mono">{lengkapCount} / {totalParticipants}</span>
+              </div>
             </div>
+          </div>
 
-            <div>
-              <p className="font-semibold text-slate-800">Semua kanal sinkronisasi aktif</p>
-              <p className="text-slate-400 mt-0.5">Tidak ada perubahan tertunda</p>
-            </div>
+          <div className="pt-4 space-y-2">
+            <button
+              onClick={() => setCurrentView('hasil_kelulusan')}
+              className="w-full py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+            >
+              Buka Hasil & Kelulusan Babak
+            </button>
+            <button
+              onClick={() => setCurrentView('stage_management')}
+              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-all"
+            >
+              Konfigurasi Babak & Kuota
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Bottom Row: Sedang Dinilai & Aktivitas Terbaru */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Sedang Dinilai */}
-        <div className="bg-white p-6 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <h3 className="text-sm font-bold text-slate-900">Sedang dinilai</h3>
-            <button
-              onClick={() => setCurrentView('penilaian_hakim')}
-              className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
-            >
-              Lihat semua <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+      {/* Activity Logs Table */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-slate-400" />
+            <h3 className="font-bold text-sm text-slate-900">
+              Aktivitas Penilaian & Penyimpanan Terbaru
+            </h3>
           </div>
-
-          {ongoingParticipant ? (
-            <div
-              onClick={handleOpenActiveScoring}
-              className="mt-4 p-4 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/20 cursor-pointer transition-all flex items-center justify-between"
-            >
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">
-                  {ongoingParticipant.name}
-                </h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {ongoingParticipant.participantId} · {ongoingParticipant.kafilahName}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-emerald-700 tabular-nums font-mono">
-                  98.00
-                </span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400 mt-4">Tidak ada sesi yang sedang berlangsung.</p>
-          )}
-
-          <div className="mt-4 pt-3 text-[11px] text-slate-400">
-            Klik kartu untuk langsung menuju lembar penilaian hakim dual-panel.
-          </div>
+          <span className="text-[10px] text-slate-400 font-medium">Tersimpan di local storage</span>
         </div>
 
-        {/* Aktivitas Terbaru */}
-        <div className="bg-white p-6 rounded-xl border border-slate-200/80 shadow-xs">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-slate-400" />
-              <h3 className="text-sm font-bold text-slate-900">Aktivitas terbaru</h3>
-            </div>
-          </div>
-
-          <div className="mt-3 space-y-3.5 text-xs">
-            {activityLogs.slice(0, 3).map((log) => (
-              <div key={log.id} className="pb-3 border-b border-slate-100 last:border-b-0 last:pb-0">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-slate-800">{log.title}</p>
-                  <span className="text-[11px] text-slate-400">{log.timestamp}</span>
-                </div>
-                <p className="text-slate-500 text-[11px] mt-0.5 line-clamp-1">
-                  {log.description}
-                </p>
+        <div className="space-y-2.5">
+          {activityLogs.slice(0, 5).map((log) => (
+            <div
+              key={log.id}
+              className="p-3 rounded-lg bg-slate-50 border border-slate-200/70 flex items-start justify-between gap-3 text-xs"
+            >
+              <div>
+                <p className="font-bold text-slate-800">{log.title}</p>
+                <p className="text-slate-600 mt-0.5">{log.description}</p>
               </div>
-            ))}
-          </div>
+              <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                {log.timestamp}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

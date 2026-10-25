@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Download,
   Search,
@@ -6,89 +6,153 @@ import {
   Eye,
   X,
   Lock,
-  Layers
+  Layers,
+  CheckCircle2,
+  Clock,
+  Sparkles
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
-import { Participant } from '../../types/mtq';
-import { QURAN_PAGES_DATA } from '../../data/mockData';
+import { Participant, JudgeAssessment } from '../../types/mtq';
 
 export const RekapNilaiView: React.FC = () => {
   const {
     currentTenant,
     participants,
     assessments,
-    users
+    users,
+    stages,
+    judgeAssignments,
+    kafilahs,
+    getParticipantProgress,
+    setSelectedParticipantId,
+    setCurrentView
   } = useMtq();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStage, setSelectedStage] = useState('Penyisihan');
+  const [selectedStage, setSelectedStage] = useState('Semua Babak');
   const [selectedKafilah, setSelectedKafilah] = useState('Semua Grup');
   const [selectedStatus, setSelectedStatus] = useState('Semua Status');
   const [inspectedParticipant, setInspectedParticipant] = useState<Participant | null>(null);
 
-  // Grouped Judges
-  const judge1 = users.find((u) => u.id === 'judge-1') || users[1];
-  const judge2 = users.find((u) => u.id === 'judge-2') || users[2];
-  const judge3 = users.find((u) => u.id === 'judge-3') || users[3];
+  // Available stages from configured stages
+  const stageOptions = useMemo(() => {
+    const list = stages.map((s) => s.name);
+    return ['Semua Babak', ...Array.from(new Set(list))];
+  }, [stages]);
 
-  const filteredParticipants = participants.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.participantId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.lotteryNumber.includes(searchQuery) ||
-      p.kafilahName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStage = selectedStage === 'Semua Babak' || p.stageName === selectedStage;
-    const matchesKafilah = selectedKafilah === 'Semua Grup' || p.kafilahName === selectedKafilah;
-    const matchesStatus = selectedStatus === 'Semua Status' || p.status === selectedStatus;
-    return matchesSearch && matchesStage && matchesKafilah && matchesStatus;
-  });
+  // Available kafilahs from active records
+  const kafilahOptions = useMemo(() => {
+    const list = kafilahs.map((k) => k.name);
+    return ['Semua Grup', ...Array.from(new Set(list))];
+  }, [kafilahs]);
+
+  // Dynamic judges assigned to the competition stage / tenant
+  const activeJudges = useMemo(() => {
+    // If specific stage is selected, filter judge assignments for that stage
+    if (selectedStage !== 'Semua Babak') {
+      const assigned = judgeAssignments.filter((ja) => ja.stageName === selectedStage);
+      if (assigned.length > 0) {
+        return assigned.map((ja) => {
+          const userObj = users.find((u) => u.id === ja.judgeId);
+          return {
+            id: ja.judgeId,
+            name: ja.judgeName,
+            field: ja.judgeField,
+            category: userObj?.judgeCategory || 'Hakim'
+          };
+        });
+      }
+    }
+
+    // Default to all judges in current tenant
+    const judgesInTenant = users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id);
+    if (judgesInTenant.length > 0) {
+      return judgesInTenant.map((u) => ({
+        id: u.id,
+        name: u.name,
+        field: u.judgeField || 'Dewan Hakim',
+        category: u.judgeCategory || 'Hakim'
+      }));
+    }
+
+    // Fallback if none defined
+    return users.slice(1, 4).map((u) => ({
+      id: u.id,
+      name: u.name,
+      field: u.judgeField || 'Dewan Hakim',
+      category: u.judgeCategory || 'Hakim'
+    }));
+  }, [selectedStage, judgeAssignments, users, currentTenant.id]);
+
+  // Filter participants
+  const filteredParticipants = useMemo(() => {
+    return participants.filter((p) => {
+      const matchesSearch =
+        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.participantId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.lotteryNumber.includes(searchQuery) ||
+        p.kafilahName.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStage = selectedStage === 'Semua Babak' || p.stageName === selectedStage;
+      const matchesKafilah = selectedKafilah === 'Semua Grup' || p.kafilahName === selectedKafilah;
+
+      const progress = getParticipantProgress(p.id);
+      const matchesStatus =
+        selectedStatus === 'Semua Status' ||
+        progress === selectedStatus ||
+        p.status === selectedStatus;
+
+      return matchesSearch && matchesStage && matchesKafilah && matchesStatus;
+    });
+  }, [participants, searchQuery, selectedStage, selectedKafilah, selectedStatus, getParticipantProgress]);
 
   const getJudgeAssessment = (participantId: string, judgeId: string) => {
     return assessments.find((a) => a.participantId === participantId && a.judgeId === judgeId);
   };
 
+  // Export CSV dynamically based on active judges and escaped cells
   const handleExportCSV = () => {
     const headers = [
       'No Undian',
       'ID Peserta',
       'Nama Peserta',
       'Grup',
-      'Nilai Hakim 1 (Tajwid)',
-      'Nilai Hakim 2 (Fasahah)',
-      'Nilai Hakim 3 (Lagu)',
+      'Babak',
+      ...activeJudges.map((j) => `Nilai ${j.name} (${j.field})`),
       'Rata-rata Akhir',
-      'Status'
+      'Status Kelengkapan'
     ];
 
     const rows = filteredParticipants.map((p) => {
-      const a1 = getJudgeAssessment(p.id, 'judge-1');
-      const a2 = getJudgeAssessment(p.id, 'judge-2');
-      const a3 = getJudgeAssessment(p.id, 'judge-3');
+      const judgeScores = activeJudges.map((j) => {
+        const asm = getJudgeAssessment(p.id, j.id);
+        return asm ? asm.finalScore : null;
+      });
 
-      const s1 = a1 ? a1.finalScore : null;
-      const s2 = a2 ? a2.finalScore : null;
-      const s3 = a3 ? a3.finalScore : null;
+      const validScores = judgeScores.filter((s): s is number => s !== null);
+      const isComplete = validScores.length === activeJudges.length && activeJudges.length > 0;
 
-      const validScores = [s1, s2, s3].filter((s): s is number => s !== null);
-      const avg =
+      const avgText =
         validScores.length > 0
-          ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2)
+          ? `${(validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2)}${
+              !isComplete ? ' (Sementara)' : ''
+            }`
           : '-';
 
+      const progress = getParticipantProgress(p.id);
+
       return [
-        p.lotteryNumber,
-        p.participantId,
-        `"${p.name}"`,
-        `"${p.kafilahName}"`,
-        s1?.toFixed(2) || '-',
-        s2?.toFixed(2) || '-',
-        s3?.toFixed(2) || '-',
-        avg,
-        p.status
+        `"${p.lotteryNumber}"`,
+        `"${p.participantId}"`,
+        `"${p.name.replace(/"/g, '""')}"`,
+        `"${p.kafilahName.replace(/"/g, '""')}"`,
+        `"${p.stageName}"`,
+        ...judgeScores.map((s) => (s !== null ? `"${s.toFixed(2)}"` : `"-"`)),
+        `"${avgText}"`,
+        `"${progress}"`
       ].join(',');
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
@@ -99,32 +163,34 @@ export const RekapNilaiView: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
-      {/* Top Header matching screenshot */}
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-extrabold text-slate-900">Rekap Nilai Real-Time</h1>
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              Rekap Nilai Real-Time
+            </h1>
             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              Matriks Live
+              Matriks Dinamis
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            {currentTenant.eventName} · Babak {selectedStage} · Cabang Tilawah Dewasa
+            {currentTenant.eventName} · {selectedStage === 'Semua Babak' ? 'Seluruh Babak' : `Babak ${selectedStage}`} · {activeJudges.length} Penilai Terkonfigurasi
           </p>
         </div>
 
         <button
           onClick={handleExportCSV}
-          className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all cursor-pointer"
+          className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all cursor-pointer self-start sm:self-auto"
         >
           <Download className="w-4 h-4" />
           <span>Ekspor CSV</span>
         </button>
       </div>
 
-      {/* Filter and Search Bar (clean without redundant label titles) */}
+      {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -137,16 +203,17 @@ export const RekapNilaiView: React.FC = () => {
           />
         </div>
 
-        {/* Clean dropdown selects without redundant text labels */}
         <div className="flex flex-wrap items-center gap-2.5">
           <select
             value={selectedStage}
             onChange={(e) => setSelectedStage(e.target.value)}
             className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
           >
-            <option value="Semua Babak">Semua Babak</option>
-            <option value="Penyisihan">Babak Penyisihan</option>
-            <option value="Final">Babak Final</option>
+            {stageOptions.map((stg) => (
+              <option key={stg} value={stg}>
+                {stg === 'Semua Babak' ? 'Semua Babak' : `Babak ${stg}`}
+              </option>
+            ))}
           </select>
 
           <select
@@ -154,13 +221,11 @@ export const RekapNilaiView: React.FC = () => {
             onChange={(e) => setSelectedKafilah(e.target.value)}
             className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
           >
-            <option value="Semua Grup">Semua Grup</option>
-            <option value="Kota Bandung">Kota Bandung</option>
-            <option value="Kabupaten Bogor">Kabupaten Bogor</option>
-            <option value="Kota Tasikmalaya">Kota Tasikmalaya</option>
-            <option value="Kabupaten Cirebon">Kabupaten Cirebon</option>
-            <option value="Kota Bekasi">Kota Bekasi</option>
-            <option value="Kabupaten Garut">Kabupaten Garut</option>
+            {kafilahOptions.map((kaf) => (
+              <option key={kaf} value={kaf}>
+                {kaf}
+              </option>
+            ))}
           </select>
 
           <select
@@ -169,283 +234,206 @@ export const RekapNilaiView: React.FC = () => {
             className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
           >
             <option value="Semua Status">Semua Status</option>
-            <option value="Berlangsung">Status: Berlangsung</option>
-            <option value="Final">Status: Final</option>
-            <option value="Menunggu">Status: Menunggu</option>
+            <option value="Belum Dimulai">Belum Dimulai</option>
+            <option value="Berlangsung">Berlangsung</option>
+            <option value="Menunggu Hakim Lain">Menunggu Hakim Lain</option>
+            <option value="Lengkap">Lengkap (Final)</option>
           </select>
-
-          <span className="text-xs text-slate-500 font-medium px-2 py-1 bg-slate-50 border border-slate-100 rounded-md">
-            {filteredParticipants.length} Peserta
-          </span>
         </div>
       </div>
 
-      {/* Yellow Alert Box */}
-      <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3.5 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2.5">
-          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-          <p className="text-slate-700">
-            Nilai berstatus <span className="font-semibold text-amber-700">Berlangsung</span> masih
-            provisional dan belum menjadi hasil resmi.
-          </p>
-        </div>
-        <span className="text-[11px] font-semibold text-slate-500">
-          Format Standar Penilaian LPTQ
-        </span>
-      </div>
-
-      {/* Consistent Sizing Grouped Header Recapitulation Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs table-fixed min-w-[1080px]">
-            {/* Explicit Consistent Column Widths */}
-            <colgroup>
-              <col className="w-14" />
-              <col className="w-24" />
-              <col className="w-44" />
-              <col className="w-36" />
-              <col className="w-16" />
-              <col className="w-16" />
-              <col className="w-16" />
-              <col className="w-20" />
-              <col className="w-16" />
-              <col className="w-16" />
-              <col className="w-20" />
-              <col className="w-16" />
-              <col className="w-20" />
-              <col className="w-24" />
-              <col className="w-16" />
-            </colgroup>
+      {/* Dynamic Grouped-Header Table with Sticky Identification & Horizontal Scrolling */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="overflow-x-auto max-w-full">
+          <table className="w-full text-left border-collapse min-w-[900px]">
             <thead>
-              {/* Row 1: High Level Categories */}
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold">
-                <th colSpan={4} className="py-3 px-3 border-r border-slate-200">
-                  Identitas Peserta Musabaqah
+              {/* Top Grouped Header */}
+              <tr className="bg-slate-100/80 text-slate-600 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
+                <th colSpan={3} className="px-4 py-2.5 border-r border-slate-200">
+                  Identitas Peserta
                 </th>
-                <th colSpan={4} className="py-3 px-3 border-r border-slate-200 text-center bg-slate-100/60">
-                  <div className="truncate">Hakim 1 — Tajwid & Makhraj</div>
-                  <div className="text-[10px] text-slate-400 font-normal truncate">
-                    {judge1.name}
-                  </div>
-                </th>
-                <th colSpan={3} className="py-3 px-3 border-r border-slate-200 text-center">
-                  <div className="truncate">Hakim 2 — Fasahah & Waqf</div>
-                  <div className="text-[10px] text-slate-400 font-normal truncate">
-                    {judge2.name}
-                  </div>
-                </th>
-                <th colSpan={2} className="py-3 px-3 text-center bg-slate-100/60">
-                  <div className="truncate">Hakim 3 — Lagu & Suara</div>
-                  <div className="text-[10px] text-slate-400 font-normal truncate">
-                    {judge3.name}
-                  </div>
-                </th>
-                <th rowSpan={2} className="py-3 px-2 text-center border-l border-slate-200 bg-emerald-50/50 text-emerald-900 font-bold">
-                  Total Rata²
-                </th>
-                <th rowSpan={2} className="py-3 px-2 text-center border-l border-slate-200">
-                  Aksi
+                {activeJudges.map((j) => (
+                  <th
+                    key={j.id}
+                    colSpan={2}
+                    className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50"
+                  >
+                    <span className="block text-slate-800">{j.name.split(',')[0]}</span>
+                    <span className="text-[10px] text-slate-400 font-normal lowercase tracking-normal">
+                      {j.field}
+                    </span>
+                  </th>
+                ))}
+                <th colSpan={2} className="px-4 py-2.5 text-center bg-emerald-50 text-emerald-900">
+                  Hasil Rekap
                 </th>
               </tr>
-              {/* Row 2: Sub-columns */}
-              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold text-[11px]">
-                <th className="py-2.5 px-2 text-center">No</th>
-                <th className="py-2.5 px-3">ID Peserta</th>
-                <th className="py-2.5 px-3">Nama Peserta</th>
-                <th className="py-2.5 px-3 border-r border-slate-200">Grup</th>
 
-                {/* Hakim 1 */}
-                <th className="py-2.5 px-2 text-center">Makhraj</th>
-                <th className="py-2.5 px-2 text-center">Idgham</th>
-                <th className="py-2.5 px-2 text-center">Tajwid</th>
-                <th className="py-2.5 px-2 text-center font-bold text-emerald-800 border-r border-slate-200 bg-emerald-50/30">
-                  Nilai H1
+              {/* Secondary Subheaders */}
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[10px] font-semibold uppercase">
+                <th className="px-4 py-2 w-16">Undian</th>
+                <th className="px-4 py-2 min-w-[160px]">Nama & Grup</th>
+                <th className="px-3 py-2 w-24 border-r border-slate-200">Babak</th>
+
+                {activeJudges.map((j) => (
+                  <React.Fragment key={j.id}>
+                    <th className="px-2 py-2 text-right w-16">Pengurangan</th>
+                    <th className="px-3 py-2 text-right w-20 border-r border-slate-200">
+                      Nilai Hakim
+                    </th>
+                  </React.Fragment>
+                ))}
+
+                <th className="px-3 py-2 text-right w-24 bg-emerald-50/50 text-emerald-950">
+                  Rata-Rata
                 </th>
-
-                {/* Hakim 2 */}
-                <th className="py-2.5 px-2 text-center">Fasahah</th>
-                <th className="py-2.5 px-2 text-center">Waqf</th>
-                <th className="py-2.5 px-2 text-center font-bold text-emerald-800 border-r border-slate-200 bg-emerald-50/30">
-                  Nilai H2
-                </th>
-
-                {/* Hakim 3 */}
-                <th className="py-2.5 px-2 text-center">Lagu</th>
-                <th className="py-2.5 px-2 text-center font-bold text-emerald-800 bg-emerald-50/30">
-                  Nilai H3
+                <th className="px-4 py-2 text-center w-28 bg-emerald-50/50 text-emerald-950">
+                  Status
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredParticipants.map((p) => {
-                const a1 = getJudgeAssessment(p.id, 'judge-1');
-                const a2 = getJudgeAssessment(p.id, 'judge-2');
-                const a3 = getJudgeAssessment(p.id, 'judge-3');
 
-                const mkh1 = a1?.errorCounts['cat-mkh'] ?? '-';
-                const idg1 = a1?.errorCounts['cat-idg'] ?? '-';
-                const tjw1 = a1?.errorCounts['cat-tjw'] ?? '-';
-                const score1 = a1 ? a1.finalScore.toFixed(2) : '-';
+            <tbody className="divide-y divide-slate-100 text-xs">
+              {filteredParticipants.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5 + activeJudges.length * 2}
+                    className="p-8 text-center text-slate-400"
+                  >
+                    Tidak ada data peserta yang cocok dengan filter.
+                  </td>
+                </tr>
+              ) : (
+                filteredParticipants.map((p) => {
+                  const progress = getParticipantProgress(p.id);
 
-                const fsh2 = a2?.errorCounts['cat-fsh'] ?? '-';
-                const wqf2 = a2?.errorCounts['cat-fsh'] ? 1 : a2 ? 0 : '-';
-                const score2 = a2 ? a2.finalScore.toFixed(2) : '-';
+                  // Collect valid judge scores
+                  const judgeAssessments = activeJudges.map((j) =>
+                    getJudgeAssessment(p.id, j.id)
+                  );
 
-                const lag3 = a3?.errorCounts['cat-lag'] ?? '-';
-                const score3 = a3 ? a3.finalScore.toFixed(2) : '-';
+                  const scores = judgeAssessments.map((a) => (a ? a.finalScore : null));
+                  const validScores = scores.filter((s): s is number => s !== null);
+                  const isAllFinalized =
+                    judgeAssessments.every((a) => a?.status === 'finalized') &&
+                    activeJudges.length > 0;
 
-                // Calculate average
-                const validScores = [a1?.finalScore, a2?.finalScore, a3?.finalScore].filter(
-                  (s): s is number => typeof s === 'number'
-                );
-                const avgScore =
-                  validScores.length > 0
-                    ? (validScores.reduce((acc, cur) => acc + cur, 0) / validScores.length).toFixed(2)
-                    : '-';
+                  const averageScore =
+                    validScores.length > 0
+                      ? validScores.reduce((a, b) => a + b, 0) / validScores.length
+                      : null;
 
-                return (
-                  <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3 px-2 text-center font-bold font-mono text-slate-900">
-                      {p.lotteryNumber}
-                    </td>
-                    <td className="py-3 px-3 font-mono font-bold text-emerald-800 truncate">
-                      {p.participantId}
-                    </td>
-                    <td className="py-3 px-3 font-semibold text-slate-900 truncate" title={p.name}>
-                      {p.name}
-                    </td>
-                    <td className="py-3 px-3 text-slate-600 border-r border-slate-200 truncate" title={p.kafilahName}>
-                      {p.kafilahName}
-                    </td>
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
+                      {/* Undian */}
+                      <td className="px-4 py-3 font-mono font-bold text-slate-900">
+                        #{p.lotteryNumber}
+                      </td>
 
-                    {/* H1 Scores */}
-                    <td className="py-3 px-2 text-center font-mono">{mkh1}</td>
-                    <td className="py-3 px-2 text-center font-mono">{idg1}</td>
-                    <td className="py-3 px-2 text-center font-mono">{tjw1}</td>
-                    <td className="py-3 px-2 text-center font-mono font-bold text-emerald-700 bg-emerald-50/20 border-r border-slate-200">
-                      {score1}
-                    </td>
+                      {/* Participant identity */}
+                      <td className="px-4 py-3 min-w-[160px]">
+                        <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {p.participantId} · {p.kafilahName}
+                        </p>
+                      </td>
 
-                    {/* H2 Scores */}
-                    <td className="py-3 px-2 text-center font-mono">{fsh2}</td>
-                    <td className="py-3 px-2 text-center font-mono">{wqf2}</td>
-                    <td className="py-3 px-2 text-center font-mono font-bold text-emerald-700 bg-emerald-50/20 border-r border-slate-200">
-                      {score2}
-                    </td>
+                      {/* Babak */}
+                      <td className="px-3 py-3 border-r border-slate-200 text-slate-600 font-medium">
+                        {p.stageName}
+                      </td>
 
-                    {/* H3 Scores */}
-                    <td className="py-3 px-2 text-center font-mono">{lag3}</td>
-                    <td className="py-3 px-2 text-center font-mono font-bold text-emerald-700 bg-emerald-50/20">
-                      {score3}
-                    </td>
+                      {/* Judge columns */}
+                      {activeJudges.map((j) => {
+                        const asm = getJudgeAssessment(p.id, j.id);
+                        const isFinal = asm?.status === 'finalized';
+                        const inProgress = asm?.status === 'in_progress';
 
-                    {/* Final Average */}
-                    <td className="py-3 px-2 text-center font-mono font-extrabold text-sm text-slate-900 bg-emerald-50/30 border-l border-slate-200">
-                      {avgScore}
-                    </td>
+                        return (
+                          <React.Fragment key={j.id}>
+                            <td className="px-2 py-3 text-right font-mono text-[11px] text-slate-500">
+                              {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
+                            </td>
+                            <td className="px-3 py-3 text-right font-mono font-bold border-r border-slate-200">
+                              {asm ? (
+                                <div className="flex items-center justify-end gap-1">
+                                  <span
+                                    className={
+                                      isFinal
+                                        ? 'text-slate-900'
+                                        : 'text-amber-700 italic'
+                                    }
+                                  >
+                                    {asm.finalScore.toFixed(2)}
+                                  </span>
+                                  {isFinal ? (
+                                    <span
+                                      className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0"
+                                      title="Finalized"
+                                    />
+                                  ) : inProgress ? (
+                                    <span
+                                      className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse"
+                                      title="Sedang Dinilai"
+                                    />
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <span className="text-slate-300 font-normal">--</span>
+                              )}
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
 
-                    {/* Action */}
-                    <td className="py-3 px-2 text-center border-l border-slate-200">
-                      <button
-                        onClick={() => setInspectedParticipant(p)}
-                        className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                        title="Inspeksi Snapshot & Anotasi Mushaf"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                      {/* Aggregated Average Score */}
+                      <td className="px-3 py-3 text-right font-mono font-extrabold text-slate-900 bg-emerald-50/30">
+                        {averageScore !== null ? (
+                          <div>
+                            <span className="text-sm">{averageScore.toFixed(2)}</span>
+                            {!isAllFinalized && (
+                              <span className="block text-[9px] text-amber-700 font-normal">
+                                Provisional
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">--</span>
+                        )}
+                      </td>
+
+                      {/* Derived Status Badge */}
+                      <td className="px-4 py-3 text-center bg-emerald-50/30">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                            progress === 'Lengkap'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : progress === 'Menunggu Hakim Lain'
+                              ? 'bg-amber-50 text-amber-800 border border-amber-300'
+                              : progress === 'Berlangsung'
+                              ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {progress}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Modal Detail Snapshot & Audit Anotasi */}
-      {inspectedParticipant && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-3xl w-full border border-slate-200 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                  {inspectedParticipant.participantId}
-                </span>
-                <h3 className="text-lg font-bold text-slate-900 mt-1">
-                  {inspectedParticipant.name} · Kafilah {inspectedParticipant.kafilahName}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {inspectedParticipant.branchName} · {inspectedParticipant.assignedMaqra}
-                </p>
-              </div>
-              <button
-                onClick={() => setInspectedParticipant(null)}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-5 flex-1 text-xs">
-              <h4 className="font-bold text-slate-900 uppercase tracking-wider text-xs">
-                Rincian Penilaian Dewan Hakim (Snapshot Audit)
-              </h4>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {[
-                  { judge: judge1, asm: getJudgeAssessment(inspectedParticipant.id, 'judge-1') },
-                  { judge: judge2, asm: getJudgeAssessment(inspectedParticipant.id, 'judge-2') },
-                  { judge: judge3, asm: getJudgeAssessment(inspectedParticipant.id, 'judge-3') }
-                ].map(({ judge, asm }, idx) => (
-                  <div key={idx} className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2">
-                    <p className="font-bold text-slate-900">{judge.name}</p>
-                    <p className="text-[11px] text-slate-500">{judge.judgeField}</p>
-                    <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
-                      <span className="text-slate-500">Skor Akhir:</span>
-                      <span className="font-mono font-bold text-base text-emerald-700">
-                        {asm ? asm.finalScore.toFixed(2) : '--'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-[11px]">
-                      <span className="text-slate-400">Pengurangan:</span>
-                      <span className="font-mono font-bold text-rose-600">
-                        -{asm ? asm.totalDeductions.toFixed(2) : '0.00'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-[11px]">
-                      <span className="text-slate-400">Anotasi Mushaf:</span>
-                      <span className="font-semibold text-slate-700">
-                        {asm ? asm.annotations.length : 0} goresan
-                      </span>
-                    </div>
-                    <div className="pt-1 text-[11px] text-slate-400">
-                      Status: {asm?.status === 'finalized' ? '🔒 Final/Terkunci' : 'Sedang Berlangsung'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Mushaf Page preview indicator */}
-              <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/30">
-                <p className="font-bold text-emerald-900">Lembar Mushaf Yang Dinilai:</p>
-                <p className="text-slate-600 mt-1">
-                  Halaman {inspectedParticipant.pageNumber} — Rasm Utsmani Riwayat Hafs 'an 'Ashim.
-                  Coretan dan tanda penanda dewan hakim tersimpan aman dalam snapshot transaksional.
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
-              <button
-                onClick={() => setInspectedParticipant(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
-              >
-                Tutup Inspeksi
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Illustrative Scoring Explanation Box */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3 text-xs text-slate-600">
+        <AlertCircle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+        <p className="leading-relaxed">
+          <strong>Catatan Formulasi Prototype:</strong> Rekap di atas secara dinamis menyesuaikan penugasan dewan hakim untuk babak yang dipilih. Rata-rata akhir berstatus <em>Provisional</em> hingga seluruh dewan hakim yang ditugaskan mengunci penilaian secara final. Rumus penilaian prototype menggunakan dasar nilai 100 dikurangi total bobot kesalahan.
+        </p>
+      </div>
     </div>
   );
 };

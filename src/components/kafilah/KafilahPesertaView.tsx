@@ -342,8 +342,27 @@ export const KafilahPesertaView: React.FC = () => {
                           <td className="py-2.5 px-4 font-mono font-bold text-emerald-700">
                             {p.participantId}
                           </td>
-                          <td className="py-2.5 px-4 font-medium text-slate-900">{p.name}</td>
-                          <td className="py-2.5 px-4 text-slate-500">{p.branchName}</td>
+                          <td className="py-2.5 px-4 font-medium text-slate-900">
+                            <div>{p.name}</div>
+                            {p.stageHistory && p.stageHistory.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {p.stageHistory.map((sh, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600"
+                                  >
+                                    {sh.stageName}: {sh.status}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-4 text-slate-500">
+                            <div>{p.branchName}</div>
+                            <span className="text-[10px] text-emerald-800 font-semibold font-mono">
+                              Babak: {p.stageName}
+                            </span>
+                          </td>
                           <td className="py-2.5 px-4 text-center">
                             <span
                               className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${
