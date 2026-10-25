@@ -48,35 +48,44 @@ export interface StageParticipation {
   participantId: string;
   stageId: string;
   stageName: string;
+  branchName: string;
+  lotteryNumber: string;
+  questionId: string;
+  assignedMaqra: string;
+  pageNumber: number;
   status: ParticipantProgressStatus;
   finalScore?: number;
+  provisionalScore?: number;
   rank?: number;
   isQualified?: boolean;
   qualificationReason?: string;
+  finalizedAt?: string;
 }
 
 export interface Participant {
   id: string;
   tenantId: string;
-  lotteryNumber: string; // Undian, e.g. "04"
-  participantId: string; // ID Peserta, e.g. "TLW-004"
+  lotteryNumber: string; // Nomor Undian, misal "04"
+  participantId: string; // ID Peserta permanen, misal "TLW-004"
   name: string;
   gender: 'Putra' | 'Putri';
   kafilahId: string;
   kafilahName: string;
   branchName: string; // e.g. "Tilawah Dewasa Putra"
   levelName: string;  // e.g. "Ulya"
-  stageName: string;  // e.g. "Penyisihan"
+  stageName: string;  // Current stage for compatibility
   questionId: string;
   assignedMaqra: string;
   pageNumber: number;
   status: 'Menunggu' | 'Berlangsung' | 'Final';
   stageHistory?: {
+    stageId?: string;
     stageName: string;
     status: string;
     score?: number;
     rank?: number;
     qualified?: boolean;
+    reason?: string;
   }[];
 }
 
@@ -128,6 +137,7 @@ export interface JudgeAssignment {
   tenantId: string;
   judgeId: string;
   judgeName: string;
+  stageId?: string;
   stageName: string;
   branchName: string;
   judgeField: string;
@@ -143,13 +153,17 @@ export interface CompetitionStage {
   qualificationQuota: number;
   qualificationMethod: 'top_n' | 'manual';
   isFinalized?: boolean;
+  finalizedAt?: string;
+  finalizedBy?: string;
 }
 
 export interface JudgeAssessment {
   id: string;
   tenantId: string;
+  stageParticipationId: string;
+  stageId: string;
+  stageName: string;
   participantId: string;
-  stageName?: string;
   judgeId: string;
   judgeName: string;
   judgeField: string;
@@ -160,6 +174,7 @@ export interface JudgeAssessment {
   finalScore: number;
   annotations: CanvasStroke[];
   note?: string;
+  rubricVersion?: string;
   lastUpdated: string;
   finalizedAt?: string;
 }
@@ -182,5 +197,6 @@ export interface AuditLogItem {
   target: string;
   tenantName: string;
   summary: string;
+  reason?: string;
   outcome: 'Success' | 'Failed' | 'Warning';
 }

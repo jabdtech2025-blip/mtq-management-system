@@ -878,6 +878,18 @@ export const PenilaianDualPanelView: React.FC = () => {
               </div>
             </div>
 
+            {totalDeductions === 0 && strokes.length === 0 && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-4 text-xs text-amber-900 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Konfirmasi Nilai Sempurna (100.00)</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed">
+                    Belum ada pengurangan kesalahan atau anotasi mushaf yang dicatat. Apakah Anda yakin peserta tampil sempurna tanpa kesalahan sebelum mengunci nilai?
+                  </p>
+                </div>
+              </div>
+            )}
+
             <p className="text-xs text-slate-600 leading-relaxed mb-5">
               Setelah dikunci, formulir penilaian dan coretan mushaf Anda untuk peserta ini akan menjadi{' '}
               <strong>read-only (tidak dapat diubah)</strong>.

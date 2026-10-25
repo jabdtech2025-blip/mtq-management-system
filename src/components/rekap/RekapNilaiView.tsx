@@ -402,21 +402,30 @@ export const RekapNilaiView: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Derived Status Badge */}
+                      {/* Actions & Detail */}
                       <td className="px-4 py-3 text-center bg-emerald-50/30">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                            progress === 'Lengkap'
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : progress === 'Menunggu Hakim Lain'
-                              ? 'bg-amber-50 text-amber-800 border border-amber-300'
-                              : progress === 'Berlangsung'
-                              ? 'bg-blue-50 text-blue-800 border border-blue-200'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          {progress}
-                        </span>
+                        <div className="flex items-center justify-center gap-2">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                              progress === 'Lengkap'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : progress === 'Menunggu Hakim Lain'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-300'
+                                : progress === 'Berlangsung'
+                                ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {progress}
+                          </span>
+                          <button
+                            onClick={() => setInspectedParticipant(p)}
+                            className="p-1 rounded text-slate-400 hover:text-emerald-800 hover:bg-emerald-50 transition-colors"
+                            title="Lihat Rincian Pengurangan Nilai"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -426,6 +435,121 @@ export const RekapNilaiView: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Detail Breakdown Modal per Judge for Inspected Participant */}
+      {inspectedParticipant && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 p-6 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between border-b pb-4 mb-4">
+              <div>
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 uppercase">
+                  Rincian Penilaian Juri
+                </span>
+                <h3 className="font-extrabold text-lg text-slate-900 mt-1">
+                  #{inspectedParticipant.lotteryNumber} {inspectedParticipant.name}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {inspectedParticipant.participantId} · {inspectedParticipant.kafilahName} · Babak {inspectedParticipant.stageName}
+                </p>
+              </div>
+              <button
+                onClick={() => setInspectedParticipant(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {activeJudges.map((j) => {
+                const asm = getJudgeAssessment(inspectedParticipant.id, j.id);
+                const isFinal = asm?.status === 'finalized';
+
+                return (
+                  <div key={j.id} className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900">{j.name}</h4>
+                        <p className="text-xs text-slate-500">{j.field}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-extrabold text-base text-slate-900">
+                          {asm ? asm.finalScore.toFixed(2) : '—'}
+                        </span>
+                        <div className="flex items-center gap-1.5 justify-end mt-0.5">
+                          {isFinal ? (
+                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              Terkunci ({asm?.finalizedAt ? new Date(asm.finalizedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'Final'})
+                            </span>
+                          ) : asm ? (
+                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                              Sedang Dinilai
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">Belum Dinilai</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {asm ? (
+                      <div className="space-y-2 text-xs">
+                        <div className="bg-white rounded-lg p-3 border border-slate-200/80">
+                          <p className="font-semibold text-slate-700 mb-2">
+                            Rincian Pengurangan per Kategori Kesalahan:
+                          </p>
+                          {Object.keys(asm.errorCounts || {}).length === 0 || Object.values(asm.errorCounts || {}).every(c => c === 0) ? (
+                            <p className="text-slate-400 italic">Tidak ada catatan kesalahan (Tampil sempurna / Nilai 100.00)</p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {Object.entries(asm.errorCounts).map(([catId, count]) => {
+                                if (count === 0) return null;
+                                const deduction = (asm.deductions && asm.deductions[catId]) || 0;
+                                return (
+                                  <div key={catId} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
+                                    <span className="text-slate-700 font-medium capitalize">
+                                      {catId.replace('cat-', '').replace(/-/g, ' ')} ({count}x kejadian)
+                                    </span>
+                                    <span className="font-mono text-rose-600 font-bold">
+                                      -{deduction.toFixed(2)} poin
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div className="mt-2 pt-2 border-t flex justify-between font-bold text-slate-900">
+                            <span>Total Pengurangan:</span>
+                            <span className="font-mono text-rose-600">
+                              -{asm.totalDeductions.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                          <span>Anotasi Mushaf: {asm.annotations?.length || 0} goresan</span>
+                          <span>Versi Aturan: {asm.rubricVersion || 'v2.4-lptq-2024'}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">Hakim belum mulai menilai peserta ini.</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setInspectedParticipant(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Illustrative Scoring Explanation Box */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3 text-xs text-slate-600">

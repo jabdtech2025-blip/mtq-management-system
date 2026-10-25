@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   BookmarkCheck,
   Search,
@@ -12,7 +12,10 @@ export const PenilaianHakimListView: React.FC = () => {
   const {
     currentTenant,
     currentUser,
+    users,
     participants,
+    stageParticipations,
+    judgeAssignments,
     assessments,
     setSelectedParticipantId,
     setCurrentView
@@ -22,31 +25,67 @@ export const PenilaianHakimListView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('Semua Status');
   const [branchFilter, setBranchFilter] = useState('Semua Cabang');
 
-  // Active judge ID (if current user is admin, use first judge KH. Ahmad Dahlan)
-  const activeJudgeId = currentUser.role === 'judge' ? currentUser.id : 'judge-1';
-  const activeJudge =
-    currentUser.role === 'judge'
-      ? currentUser
-      : {
-          name: 'KH. Ahmad Dahlan, M.Ag',
-          judgeField: 'Bidang Tajwid & Makhraj',
-          mimbarLocation: 'Mimbar Utama Masjid Al-Jabbar'
-        };
+  // List of judges in current tenant for admin monitoring selection
+  const tenantJudges = useMemo(() => {
+    return users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id);
+  }, [users, currentTenant.id]);
+
+  const [adminSelectedJudgeId, setAdminSelectedJudgeId] = useState<string>(
+    currentUser.role === 'judge' ? currentUser.id : tenantJudges[0]?.id || ''
+  );
+
+  const activeJudgeId = currentUser.role === 'judge' ? currentUser.id : adminSelectedJudgeId;
+  const activeJudge = users.find((u) => u.id === activeJudgeId) || {
+    id: activeJudgeId,
+    name: 'Dewan Hakim',
+    judgeField: 'Dewan Hakim Penilai',
+    mimbarLocation: 'Mimbar Utama'
+  };
+
+  // Find assignments strictly for this judge in currentTenant
+  const myAssignments = useMemo(() => {
+    return judgeAssignments.filter(
+      (ja) => ja.tenantId === currentTenant.id && ja.judgeId === activeJudgeId
+    );
+  }, [judgeAssignments, currentTenant.id, activeJudgeId]);
+
+  // Assigned participants strictly matched by branch and stage in assignments
+  const assignedParticipants = useMemo(() => {
+    if (myAssignments.length === 0) {
+      // STRICT: No silent fallback to all participants!
+      return [];
+    }
+
+    return participants.filter((p) => {
+      if (p.tenantId !== currentTenant.id) return false;
+      return myAssignments.some((ja) => {
+        const matchesStage = !ja.stageName || ja.stageName === p.stageName;
+        const matchesBranch = !ja.branchName || p.branchName.includes(ja.branchName) || ja.branchName.includes(p.branchName);
+        return matchesStage && matchesBranch;
+      });
+    });
+  }, [participants, myAssignments, currentTenant.id]);
 
   // Get assessment for each participant by this judge
-  const participantsWithJudgeState = participants.map((p) => {
-    const asm = assessments.find(
-      (a) => a.participantId === p.id && a.judgeId === activeJudgeId
-    );
-    const score = asm ? asm.finalScore.toFixed(2) : '--';
-    const status = asm ? asm.status : 'not_started';
-    return {
-      ...p,
-      judgeAssessment: asm,
-      judgeScore: score,
-      judgeStatus: status
-    };
-  });
+  const participantsWithJudgeState = useMemo(() => {
+    return assignedParticipants.map((p) => {
+      const asm = assessments.find(
+        (a) =>
+          a.tenantId === currentTenant.id &&
+          a.participantId === p.id &&
+          a.judgeId === activeJudgeId &&
+          (a.stageName === p.stageName || !a.stageName)
+      );
+      const score = asm ? asm.finalScore.toFixed(2) : '--';
+      const status = asm ? asm.status : 'not_started';
+      return {
+        ...p,
+        judgeAssessment: asm,
+        judgeScore: score,
+        judgeStatus: status
+      };
+    });
+  }, [assignedParticipants, assessments, currentTenant.id, activeJudgeId]);
 
   const filteredParticipants = participantsWithJudgeState.filter((p) => {
     const matchesSearch =
@@ -67,7 +106,7 @@ export const PenilaianHakimListView: React.FC = () => {
     return matchesSearch && matchesStatus && matchesBranch;
   });
 
-  const totalAssigned = participants.length;
+  const totalAssigned = assignedParticipants.length;
   const totalFinal = participantsWithJudgeState.filter(
     (p) => p.judgeStatus === 'finalized'
   ).length;
@@ -84,28 +123,48 @@ export const PenilaianHakimListView: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
-      {/* Top Banner Tag matching screenshot */}
-      <div>
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
-            <Sparkles className="w-3 h-3 text-emerald-600" />
-            Portal Penjurian Mandiri
-          </span>
-          <span className="text-slate-300">·</span>
-          <span className="text-xs text-slate-500 font-medium">{currentTenant.name}</span>
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+      {/* Top Banner Tag matching persona */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
+              <Sparkles className="w-3 h-3 text-emerald-600" />
+              {currentUser.role === 'judge' ? 'Portal Penjurian Mandiri' : 'Mode Pemantauan Penilaian Dewan Hakim'}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="text-xs text-slate-500 font-medium">{currentTenant.name}</span>
+          </div>
+
+          <h1 className="text-2xl font-extrabold text-slate-900">
+            Daftar Penugasan Penilaian Peserta
+          </h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Dewan Hakim: <span className="font-semibold text-slate-800">{activeJudge.name}</span> ·{' '}
+            {activeJudge.judgeField || 'Bidang Penilaian'} · {activeJudge.mimbarLocation || 'Mimbar Utama'}
+          </p>
         </div>
 
-        <h1 className="text-2xl font-extrabold text-slate-900">
-          Daftar Penugasan Penilaian Peserta
-        </h1>
-        <p className="text-xs text-slate-500 mt-1">
-          Dewan Hakim: <span className="font-semibold text-slate-800">{activeJudge.name}</span> ·{' '}
-          {activeJudge.judgeField} · {activeJudge.mimbarLocation}
-        </p>
+        {/* If Admin / Superadmin: Allow picking which judge to monitor */}
+        {currentUser.role !== 'judge' && tenantJudges.length > 0 && (
+          <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-2">
+            <label className="text-xs font-bold text-slate-600">Pantau Hakim:</label>
+            <select
+              value={adminSelectedJudgeId}
+              onChange={(e) => setAdminSelectedJudgeId(e.target.value)}
+              className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 bg-white"
+            >
+              {tenantJudges.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.name} ({j.judgeField || 'Hakim'})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
-      {/* 4 Summary Boxes matching screenshot */}
+      {/* 4 Summary Boxes */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {/* Total Ditugaskan */}
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
@@ -205,8 +264,20 @@ export const PenilaianHakimListView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredParticipants.map((p) => {
-                const isFinal = p.judgeStatus === 'finalized';
+              {filteredParticipants.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                    <p className="font-semibold text-slate-600">
+                      Belum ada peserta yang ditugaskan kepada Anda untuk babak dan cabang ini.
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Silakan hubungi administrator MTQ untuk konfigurasi penugasan dewan hakim.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                filteredParticipants.map((p) => {
+                  const isFinal = p.judgeStatus === 'finalized';
                 const isInProgress = p.judgeStatus === 'in_progress';
 
                 return (
@@ -279,8 +350,9 @@ export const PenilaianHakimListView: React.FC = () => {
                     </td>
                   </tr>
                 );
-              })}
-            </tbody>
+              })
+            )}
+          </tbody>
           </table>
         </div>
       </div>

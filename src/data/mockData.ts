@@ -3,6 +3,7 @@ import {
   User,
   Kafilah,
   Participant,
+  StageParticipation,
   Question,
   ErrorCategory,
   JudgeAssessment,
@@ -427,11 +428,105 @@ export const INITIAL_PARTICIPANTS: Participant[] = [
   }
 ];
 
+export const INITIAL_STAGE_PARTICIPATIONS: StageParticipation[] = [
+  {
+    id: 'sp-part04-penyisihan',
+    tenantId: 'tenant-jabar',
+    participantId: 'part-04',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    lotteryNumber: '04',
+    questionId: 'mq-04',
+    assignedMaqra: 'Maqra 04: QS. Maryam [19]: 1 - 15 (Hal. 305)',
+    pageNumber: 305,
+    status: 'Berlangsung',
+    provisionalScore: 98.33
+  },
+  {
+    id: 'sp-part01-penyisihan',
+    tenantId: 'tenant-jabar',
+    participantId: 'part-01',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    lotteryNumber: '01',
+    questionId: 'mq-01',
+    assignedMaqra: "Maqra 01: QS. Al-An'am [6]: 95 - 99 (Hal. 140)",
+    pageNumber: 140,
+    status: 'Lengkap',
+    finalScore: 98.83,
+    rank: 3,
+    finalizedAt: '11:46:05 WIB'
+  },
+  {
+    id: 'sp-part02-penyisihan',
+    tenantId: 'tenant-jabar',
+    participantId: 'part-02',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putri',
+    lotteryNumber: '02',
+    questionId: 'mq-03',
+    assignedMaqra: 'Maqra 03: QS. Al-Kahf [18]: 102 - 110 (Hal. 304)',
+    pageNumber: 304,
+    status: 'Lengkap',
+    finalScore: 99.17,
+    rank: 2,
+    finalizedAt: '12:15:30 WIB'
+  },
+  {
+    id: 'sp-part03-penyisihan',
+    tenantId: 'tenant-jabar',
+    participantId: 'part-03',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    lotteryNumber: '03',
+    questionId: 'mq-02',
+    assignedMaqra: 'Maqra 02: QS. Ibrahim [14]: 35 - 41 (Hal. 260)',
+    pageNumber: 260,
+    status: 'Lengkap',
+    finalScore: 100.00,
+    rank: 1,
+    finalizedAt: '12:35:10 WIB'
+  },
+  {
+    id: 'sp-part05-penyisihan',
+    tenantId: 'tenant-jabar',
+    participantId: 'part-05',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putri',
+    lotteryNumber: '05',
+    questionId: 'mq-04',
+    assignedMaqra: 'Maqra 04: QS. Maryam [19]: 1 - 15 (Hal. 305)',
+    pageNumber: 305,
+    status: 'Belum Dimulai'
+  },
+  {
+    id: 'sp-part06-penyisihan',
+    tenantId: 'tenant-jabar',
+    participantId: 'part-06',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    lotteryNumber: '06',
+    questionId: 'mq-01',
+    assignedMaqra: "Maqra 01: QS. Al-An'am [6]: 95 - 99 (Hal. 140)",
+    pageNumber: 140,
+    status: 'Belum Dimulai'
+  }
+];
+
 export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
   // Participant TLW-004 (Sedang Berlangsung)
   {
     id: 'asm-04-j1',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part04-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-04',
     judgeId: 'judge-1',
     judgeName: 'KH. Ahmad Dahlan, M.Ag',
@@ -455,11 +550,15 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     finalScore: 98.00,
     annotations: [],
     note: 'Suara jernih, waspada ketukan ghunnah di ayat 4.',
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '13:14:18 WIB'
   },
   {
     id: 'asm-04-j2',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part04-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-04',
     judgeId: 'judge-2',
     judgeName: 'Dr. H. M. Quraish, MA',
@@ -478,11 +577,15 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 2.00,
     finalScore: 98.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '13:12:00 WIB'
   },
   {
     id: 'asm-04-j3',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part04-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-04',
     judgeId: 'judge-3',
     judgeName: 'Hj. Siti Maria, M.Ag',
@@ -497,13 +600,17 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 1.00,
     finalScore: 99.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '13:13:00 WIB'
   },
 
-  // Participant TLW-001 (Final 98.50)
+  // Participant TLW-001 (Final 98.83)
   {
     id: 'asm-01-j1',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part01-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-01',
     judgeId: 'judge-1',
     judgeName: 'KH. Ahmad Dahlan, M.Ag',
@@ -523,12 +630,16 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 1.50,
     finalScore: 98.50,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '11:45:00 WIB',
     finalizedAt: '11:45:10 WIB'
   },
   {
     id: 'asm-01-j2',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part01-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-01',
     judgeId: 'judge-2',
     judgeName: 'Dr. H. M. Quraish, MA',
@@ -543,12 +654,16 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 1.00,
     finalScore: 99.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '11:46:00 WIB',
     finalizedAt: '11:46:05 WIB'
   },
   {
     id: 'asm-01-j3',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part01-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-01',
     judgeId: 'judge-3',
     judgeName: 'Hj. Siti Maria, M.Ag',
@@ -563,14 +678,18 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 1.00,
     finalScore: 99.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '11:45:30 WIB',
     finalizedAt: '11:45:35 WIB'
   },
 
-  // Participant TLW-002 (Final 99.50)
+  // Participant TLW-002 (Final 99.17)
   {
     id: 'asm-02-j1',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part02-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-02',
     judgeId: 'judge-1',
     judgeName: 'KH. Ahmad Dahlan, M.Ag',
@@ -589,12 +708,16 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 0.50,
     finalScore: 99.50,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '12:15:00 WIB',
     finalizedAt: '12:15:15 WIB'
   },
   {
     id: 'asm-02-j2',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part02-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-02',
     judgeId: 'judge-2',
     judgeName: 'Dr. H. M. Quraish, MA',
@@ -609,26 +732,31 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 1.00,
     finalScore: 99.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '12:15:00 WIB',
     finalizedAt: '12:15:20 WIB'
   },
   {
     id: 'asm-02-j3',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part02-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-02',
     judgeId: 'judge-3',
     judgeName: 'Hj. Siti Maria, M.Ag',
     judgeField: 'Bidang Lagu & Suara',
     status: 'finalized',
     errorCounts: {
-      'cat-lag': 2
+      'cat-lag': 1
     },
     deductions: {
-      'cat-lag': 2.00
+      'cat-lag': 1.00
     },
-    totalDeductions: 2.00,
-    finalScore: 98.00,
+    totalDeductions: 1.00,
+    finalScore: 99.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '12:16:00 WIB',
     finalizedAt: '12:16:05 WIB'
   },
@@ -637,6 +765,9 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
   {
     id: 'asm-03-j1',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part03-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-03',
     judgeId: 'judge-1',
     judgeName: 'KH. Ahmad Dahlan, M.Ag',
@@ -653,12 +784,16 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 0.00,
     finalScore: 100.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '12:35:00 WIB',
     finalizedAt: '12:35:10 WIB'
   },
   {
     id: 'asm-03-j2',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part03-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-03',
     judgeId: 'judge-2',
     judgeName: 'Dr. H. M. Quraish, MA',
@@ -669,12 +804,16 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 0.00,
     finalScore: 100.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '12:35:00 WIB',
     finalizedAt: '12:35:10 WIB'
   },
   {
     id: 'asm-03-j3',
     tenantId: 'tenant-jabar',
+    stageParticipationId: 'sp-part03-penyisihan',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
     participantId: 'part-03',
     judgeId: 'judge-3',
     judgeName: 'Hj. Siti Maria, M.Ag',
@@ -685,6 +824,7 @@ export const INITIAL_ASSESSMENTS: JudgeAssessment[] = [
     totalDeductions: 0.00,
     finalScore: 100.00,
     annotations: [],
+    rubricVersion: 'v2.4-lptq-2024',
     lastUpdated: '12:35:00 WIB',
     finalizedAt: '12:35:10 WIB'
   }
@@ -759,6 +899,7 @@ export const INITIAL_JUDGE_ASSIGNMENTS: JudgeAssignment[] = [
     tenantId: 'tenant-jabar',
     judgeId: 'judge-1',
     judgeName: 'KH. Ahmad Dahlan, M.Ag',
+    stageId: 'stage-penyisihan',
     stageName: 'Penyisihan',
     branchName: 'Tilawah Dewasa Putra',
     judgeField: 'Bidang Tajwid & Makhraj'
@@ -768,6 +909,7 @@ export const INITIAL_JUDGE_ASSIGNMENTS: JudgeAssignment[] = [
     tenantId: 'tenant-jabar',
     judgeId: 'judge-2',
     judgeName: 'Dr. H. M. Quraish, MA',
+    stageId: 'stage-penyisihan',
     stageName: 'Penyisihan',
     branchName: 'Tilawah Dewasa Putra',
     judgeField: 'Bidang Fasahah & Waqf'
@@ -777,6 +919,7 @@ export const INITIAL_JUDGE_ASSIGNMENTS: JudgeAssignment[] = [
     tenantId: 'tenant-jabar',
     judgeId: 'judge-3',
     judgeName: 'Hj. Siti Maria, M.Ag',
+    stageId: 'stage-penyisihan',
     stageName: 'Penyisihan',
     branchName: 'Tilawah Dewasa Putra',
     judgeField: 'Bidang Lagu & Suara'

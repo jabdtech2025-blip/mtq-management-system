@@ -1,0 +1,934 @@
+# MASTER PROMPT — PERBAIKAN LOGIKA DAN KONSISTENSI MTQ MANAGEMENT SYSTEM
+
+## 1. PERAN DAN TUJUAN
+
+Bertindak sebagai Senior React Engineer, TypeScript Engineer, dan Software Architect yang berpengalaman membangun aplikasi kompetisi multi-tenant, sistem penilaian, dan manajemen hasil perlombaan.
+
+Anda sedang mengerjakan proyek yang sudah ada:
+
+**Manajemen MTQ — Musabaqah Digital**
+
+Repository:
+https://github.com/jabdtech2025-blip/mtq-management-system
+
+Stack yang sudah digunakan:
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Lucide React
+- React Context
+- localStorage untuk simulasi data prototype
+
+Proyek ini **masih merupakan prototype frontend**. Backend, autentikasi produksi, database bersama, kontrol akses server, dan real-time antarpengguna belum dibangun.
+
+### Tujuan utama
+
+Perbaiki masalah konsistensi logika dan state frontend berdasarkan implementasi yang sudah ada. Prioritasnya adalah:
+
+1. Mencegah peserta lolos sebelum seluruh penilaian wajib selesai.
+2. Memisahkan penilaian dan riwayat setiap babak.
+3. Mencegah perubahan data yang melintasi tenant secara tidak sengaja.
+4. Membatasi daftar peserta hakim sesuai penugasannya.
+5. Menyelaraskan nilai di halaman penilaian, rekap, dashboard, dan kelulusan.
+6. Memperbaiki pencatatan audit serta perilaku workspace Superadmin.
+7. Memastikan interaksi prototype konsisten dan dapat diuji dari awal sampai akhir.
+
+**Jangan hanya memberi rekomendasi atau laporan analisis. Lakukan perubahan langsung pada source code yang sudah ada.**
+
+---
+
+# 2. ATURAN KERJA YANG TIDAK BOLEH DILANGGAR
+
+1. Jangan membangun ulang aplikasi dari nol.
+2. Jangan menghapus halaman atau fitur yang sudah berfungsi.
+3. Jangan mengganti stack teknologi tanpa alasan teknis yang kuat.
+4. Pertahankan desain hijau minimalis, tipografi, komponen tabel, rounded corners, dan workspace hakim yang sudah ada.
+5. Jangan melakukan redesign besar-besaran.
+6. Jangan membangun backend pada tahap ini.
+7. Pertahankan simulasi menggunakan React Context dan localStorage.
+8. Jangan menyebut penyimpanan browser sebagai sinkronisasi real-time lintas perangkat.
+9. Jangan mengarang ketentuan resmi MTQ, bobot penilaian, rumus nilai, aturan seri, atau kriteria kelulusan.
+10. Jangan menghilangkan data lama secara diam-diam ketika mengubah struktur state.
+11. Gunakan ID yang stabil untuk relasi data. Hindari menggunakan nama peserta atau nama babak sebagai satu-satunya kunci.
+12. Hindari penggunaan `setTimeout` untuk menyimulasikan operasi penyimpanan atau finalisasi yang seharusnya merupakan perubahan state langsung.
+13. Jangan membuat status keberhasilan sebelum perubahan state yang relevan benar-benar terjadi.
+14. Jangan menandai fitur lulus pengujian sebelum pengujian tersebut dijalankan.
+15. Setiap penilaian yang sudah final harus tetap utuh meskipun ada perubahan konfigurasi atau babak berikutnya.
+
+Sebelum memodifikasi kode, baca implementasi terbaru pada branch aktif. Jangan mengandalkan versi kode lama dari konteks sebelumnya.
+
+Periksa minimal:
+- `src/types/mtq.ts`
+- `src/data/mockData.ts`
+- `src/context/MtqContext.tsx`
+- `src/App.tsx`
+- `src/components/penilaian/PenilaianHakimListView.tsx`
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/components/rekap/RekapNilaiView.tsx`
+- `src/components/stages/StageManagementView.tsx`
+- `src/components/stages/HasilKelulusanView.tsx`
+- `src/components/dashboard/DashboardView.tsx`
+- `src/components/users/UserManagementView.tsx`
+- `src/components/superadmin/`
+- `src/components/layout/`
+
+Setelah memahami dependensi dan struktur data, terapkan perubahan secara bertahap.
+
+---
+
+# 3. PRIORITAS P0 — PERBAIKI SYARAT KELULUSAN
+
+File utama:
+- `src/components/stages/HasilKelulusanView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+
+## 3.1 Pisahkan peringkat sementara dari hasil resmi
+
+Saat ini halaman hasil sudah dapat menampilkan calon peserta lolos meskipun sebagian penilaian belum final.
+
+Perbaiki perilaku tersebut.
+
+Sediakan status yang jelas:
+- Penilaian belum lengkap.
+- Peringkat sementara.
+- Siap diverifikasi.
+- Hasil babak difinalisasi.
+- Kelulusan dikonfirmasi.
+
+Peringkat sementara boleh dilihat oleh admin, tetapi tidak boleh dianggap sebagai hasil resmi.
+
+Jika nilai seorang peserta masih belum lengkap:
+- Jangan menampilkan peserta tersebut sebagai peserta lolos resmi.
+- Jangan menganggap penilaian hakim yang belum tersedia sebagai nilai nol.
+- Jangan menghitung nilai dari jumlah hakim yang berbeda lalu memperlakukannya seolah-olah setara untuk menentukan kelulusan resmi.
+- Tampilkan indikator jumlah penilaian yang selesai, misalnya `2/3 hakim`.
+- Tandai peringkat peserta sebagai sementara atau belum dapat ditetapkan.
+
+Jika diperlukan, tampilkan nilai sementara untuk pemantauan, tetapi pisahkan dengan jelas dari hasil final.
+
+## 3.2 Validasi sebelum finalisasi hasil babak
+
+Tombol “Finalisasi Hasil Babak” atau “Konfirmasi & Loloskan” hanya boleh aktif apabila:
+
+1. Babak yang dipilih benar-benar ada.
+2. Babak belum difinalisasi sebelumnya.
+3. Ada daftar peserta yang sah untuk babak tersebut.
+4. Setiap peserta yang wajib dinilai sudah mempunyai seluruh penilaian hakim yang diwajibkan.
+5. Penilaian wajib berstatus `finalized`.
+6. Semua hakim yang dihitung merupakan hakim yang benar-benar ditugaskan untuk babak dan cabang tersebut.
+7. Tidak terdapat konflik atau seri pada batas kuota yang belum diselesaikan sesuai aturan yang dikonfigurasi.
+8. Aturan kelulusan sudah dikonfigurasi secara eksplisit.
+
+Jika syarat belum terpenuhi, tampilkan alasan yang konkret, misalnya:
+
+“Finalisasi belum dapat dilakukan. Masih terdapat 3 peserta dengan penilaian hakim yang belum lengkap.”
+
+Sediakan tautan atau aksi menuju daftar peserta yang perlu ditindaklanjuti.
+
+Jangan hanya menonaktifkan tombol tanpa penjelasan.
+
+## 3.3 Perbaiki perhitungan peringkat
+
+Pada `HasilKelulusanView.tsx`, jangan menetapkan peringkat berdasarkan rata-rata nilai parsial sebagai dasar kelulusan resmi.
+
+Buat dua representasi yang terpisah:
+
+**Peringkat sementara**
+- Dapat digunakan untuk pemantauan.
+- Harus diberi label sementara.
+- Tidak memicu kelulusan otomatis.
+
+**Peringkat valid**
+- Hanya menggunakan penilaian wajib yang telah final.
+- Menggunakan kumpulan hakim yang sesuai dengan penugasan babak dan cabang.
+- Menjadi dasar proses kelulusan setelah semua validasi terpenuhi.
+
+Untuk peserta yang belum lengkap, tampilkan nilai final dan peringkat final sebagai `—` atau keterangan yang tepat.
+
+Jangan memasukkan nilai yang belum ada sebagai angka nol.
+
+## 3.4 Perbaiki penanganan nilai seri
+
+Pertahankan peringatan seri yang sudah ada.
+
+Namun, peringatan saja tidak cukup.
+
+Jika peserta pada batas kuota memiliki nilai yang sama:
+- Tandai semua peserta yang terdampak.
+- Jangan memilih pemenang secara diam-diam berdasarkan urutan array.
+- Jangan memberikan status kelulusan resmi kepada kandidat yang belum diputuskan.
+- Minta keputusan yang sesuai dengan metode seri yang dikonfigurasi atau keputusan manual resmi.
+- Jika dilakukan override manual, wajibkan alasan tertulis.
+- Simpan siapa yang melakukan override, siapa peserta yang terdampak, babak terkait, alasan, waktu, dan hasil keputusan.
+- Catat keputusan dalam audit log.
+
+Jangan mengarang aturan tie-break resmi. Jika aturan belum tersedia, minta keputusan manual yang terdokumentasi.
+
+## 3.5 Perbaiki fungsi `advanceQualifiers()`
+
+Fungsi ini merupakan titik kontrol penting, bukan sekadar utilitas pembaruan state.
+
+Sebelum melakukan pelolosan, validasi ulang seluruh syarat di dalam fungsi tersebut.
+
+Jangan hanya mengandalkan tombol frontend untuk memblokir tindakan yang tidak sah.
+
+Jika ada syarat yang gagal, fungsi harus menghentikan operasi tanpa mengubah data apa pun.
+
+Jangan mengubah status babak atau peserta sebelum semua validasi berhasil.
+
+Untuk prototype, hasil operasi boleh berupa status berhasil/gagal beserta pesan yang dapat ditampilkan UI.
+
+Simpan alasan override yang sebenarnya. Jangan hanya membuat variabel alasan yang tidak digunakan.
+
+Pastikan proses yang sama tidak dapat membuat peserta masuk ke babak berikutnya berulang kali ketika tombol ditekan dua kali.
+
+---
+
+# 4. PRIORITAS P0 — PISAHKAN PARTISIPASI SETIAP BABAK
+
+File utama:
+- `src/types/mtq.ts`
+- `src/context/MtqContext.tsx`
+- `src/data/mockData.ts`
+- `src/components/stages/`
+- `src/components/penilaian/`
+- `src/components/rekap/RekapNilaiView.tsx`
+
+Ini merupakan perbaikan struktur data yang penting. Jangan menanganinya hanya dengan mengganti label UI.
+
+## 4.1 Identitas peserta harus tetap
+
+Satu peserta mempunyai identitas permanen, misalnya:
+- ID peserta: `TLW-001`
+- Nama.
+- Kafilah.
+- Identitas dasar lainnya.
+
+Peserta tidak boleh dibuat sebagai orang berbeda hanya karena mengikuti babak baru.
+
+Namun, setiap keikutsertaan dalam babak harus mempunyai identitas partisipasi tersendiri.
+
+## 4.2 Gunakan `StageParticipation` sebagai entitas aktif
+
+Tipe `StageParticipation` sudah ada dalam `src/types/mtq.ts`, tetapi belum menjadi sumber kebenaran utama untuk alur babak.
+
+Evaluasi dan gunakan tipe tersebut sebagai fondasi untuk seluruh alur babak.
+
+Jika dibutuhkan, lengkapi fields-nya dengan:
+- `id`
+- `tenantId`
+- `participantId`
+- `stageId`
+- `branchName` atau identitas cabang yang sesuai
+- `status`
+- `questionId` atau penetapan maqra khusus babak
+- `finalScore`
+- `rank`
+- `isQualified`
+- `qualificationReason`
+- waktu relevan untuk penetapan hasil
+
+Jangan menambah banyak field tanpa kebutuhan yang jelas.
+
+Tambahkan state `stageParticipations` ke `MtqContext`, beserta fungsi untuk membuat dan memperbaruinya.
+
+Jangan menjadikan satu properti `participant.stageName` sebagai satu-satunya sumber kebenaran untuk seluruh histori babak.
+
+Properti lama boleh dipertahankan sementara untuk kompatibilitas, tetapi data operasional harus menggunakan relasi partisipasi babak yang jelas.
+
+## 4.3 Pisahkan `JudgeAssessment` per partisipasi babak
+
+Saat ini pencarian assessment sering menggunakan:
+`participantId + judgeId`
+
+Kombinasi itu tidak cukup karena seorang peserta dapat dinilai oleh hakim yang sama di beberapa babak.
+
+Perbaiki model agar setiap assessment memiliki referensi yang konsisten kepada:
+- `tenantId`
+- `stageParticipationId`
+- `stageId`
+- `participantId`
+- `judgeId`
+- status penilaian
+- counts kesalahan
+- deductions
+- nilai
+- anotasi Mushaf
+- waktu terakhir diperbarui
+- waktu finalisasi
+
+Gunakan `stageParticipationId` sebagai identitas utama untuk membedakan penilaian peserta yang sama antar-babak.
+
+Jika `stageId` dan `stageParticipationId` sudah cukup untuk menemukan babak, hindari menyimpan beberapa field redundan tanpa alasan.
+
+Jangan lagi menyimpan assessment baru tanpa relasi babak yang jelas.
+
+## 4.4 Penetapan maqra harus terpisah per babak
+
+Peserta yang lolos dari penyisihan ke semifinal akan mendapatkan penetapan maqra yang sesuai untuk semifinal.
+
+Jangan menimpa riwayat soal penyisihan.
+
+Simpan penetapan maqra sebagai bagian dari partisipasi babak. Jika peserta lolos:
+- Buat partisipasi babak selanjutnya.
+- Simpan peserta dan kafilah yang sama.
+- Gunakan ID partisipasi yang baru.
+- Status awal babak baru adalah belum dimulai.
+- Penugasan hakim babak baru ditentukan secara independen.
+- Maqra babak baru dapat ditetapkan secara independen.
+- Nilai dan anotasi sebelumnya tetap melekat pada partisipasi sebelumnya.
+
+Jangan membawa skor final penyisihan ke dalam penilaian semifinal.
+
+## 4.5 Perbaiki histori peserta
+
+Pada detail peserta, tampilkan perjalanan tiap babak secara terpisah, misalnya:
+
+- Penyisihan — Hasil ditetapkan — Nilai 98,75
+- Semifinal — Penilaian berlangsung
+- Final — Belum dimulai
+
+Nilai dan status setiap babak harus diambil dari data partisipasi babak masing-masing.
+
+Jangan menyusun histori hanya berdasarkan properti `stageName` peserta yang sedang aktif.
+
+## 4.6 Perhatikan kompatibilitas localStorage
+
+Perubahan tipe data tidak otomatis memperbarui data lama yang tersimpan di browser.
+
+Buat mekanisme versi skema data prototype, misalnya versi penyimpanan baru.
+
+Pada saat aplikasi dibuka:
+- Deteksi data penyimpanan lama.
+- Migrasikan data hanya jika relasinya dapat dipetakan secara jelas.
+- Untuk assessment lama tanpa `stageName`, gunakan babak peserta saat ini hanya jika relasinya tidak ambigu.
+- Jangan mengarang histori nilai lama yang tidak tersedia.
+- Jika migrasi tidak aman, tampilkan opsi reset data simulasi secara eksplisit, bukan menghapus data secara diam-diam.
+- Beri penjelasan jika beberapa histori lama tidak dapat dipulihkan karena struktur data sebelumnya.
+
+Jangan menyamarkan kegagalan migrasi sebagai keberhasilan.
+
+---
+
+# 5. PRIORITAS P0 — ISOLASI TENANT DI SETIAP MUTASI DATA
+
+File utama:
+- `src/context/MtqContext.tsx`
+- `src/components/superadmin/`
+- `src/components/dashboard/DashboardView.tsx`
+- `src/components/stages/`
+
+Seluruh data operasional suatu tenant harus tetap berada dalam lingkup MTQ yang benar.
+
+## 5.1 Batasi `advanceQualifiers()` berdasarkan tenant dan babak
+
+Pada implementasi saat ini, proses yang menandai peserta tidak lolos berisiko memengaruhi peserta dari tenant lain karena beberapa kondisi hanya memeriksa nama babak.
+
+Perbaiki semua pembaruan terkait agar menggunakan identitas tenant dan partisipasi babak yang tepat.
+
+Pastikan:
+- Peserta tenant A tidak berubah ketika hasil tenant B difinalisasi.
+- Stage tenant A tidak berubah ketika tenant B memproses kelulusan.
+- Assessment tenant A tidak terpilih dalam penghitungan tenant B.
+- Catatan audit menyertakan identitas tenant yang benar.
+
+Jangan hanya menyaring daftar pada saat render. Mutasi data juga harus benar-benar terikat pada tenant terkait.
+
+## 5.2 Audit fungsi mutasi lainnya
+
+Periksa seluruh fungsi di `MtqContext.tsx`, termasuk:
+- `updateKafilah`
+- `updateParticipant`
+- `updateQuestion`
+- `updateCategoryDeduction`
+- `updateErrorCategory`
+- `updateStage`
+- `updateUser`
+- `toggleUserStatus`
+- `assignMaqraToParticipant`
+- `addJudgeAssignment`
+- `removeJudgeAssignment`
+
+Pastikan setiap perubahan data memiliki cakupan tenant dan entitas yang sesuai.
+
+Pengecualian lintas tenant hanya diizinkan untuk fungsi Superadmin yang memang dirancang untuk mengelola platform.
+
+Hindari perubahan global yang dipicu oleh kecocokan nama saja.
+
+## 5.3 Perbaiki statistik dashboard
+
+Pada `DashboardView.tsx`, statistik hakim saat ini dihitung dari seluruh daftar pengguna tanpa menyaring tenant aktif.
+
+Perbaiki seluruh statistik agar menghitung:
+- Jumlah peserta dalam tenant aktif sesuai definisi yang digunakan.
+- Jumlah kafilah tenant aktif.
+- Jumlah hakim aktif tenant aktif.
+- Progres penilaian tenant aktif untuk babak/cabang yang sesuai.
+- Jumlah peserta yang penilaiannya lengkap.
+- Jumlah peserta yang masih menunggu penilaian.
+
+Bedakan jumlah peserta unik dengan jumlah partisipasi peserta di semua babak agar angka dashboard tidak menyesatkan.
+
+Jika dashboard menampilkan seluruh partisipasi babak, beri label yang sesuai. Jangan menyebut jumlah partisipasi sebagai jumlah orang unik.
+
+---
+
+# 6. PRIORITAS P0 — PENUGASAN HAKIM HARUS MENENTUKAN DAFTAR PESERTA
+
+File utama:
+- `src/components/penilaian/PenilaianHakimListView.tsx`
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+
+## 6.1 Hapus fallback yang memperluas penugasan secara diam-diam
+
+Pada daftar penilaian hakim, jangan menampilkan semua peserta tenant hanya karena data penugasan spesifik tidak ditemukan.
+
+Gunakan hubungan penugasan yang benar:
+- Tenant.
+- Babak.
+- Cabang/golongan.
+- Hakim.
+- Partisipasi peserta yang memenuhi cakupan penugasan.
+
+Jika belum ada penugasan yang sesuai, tampilkan empty state:
+
+“Belum ada peserta yang ditugaskan kepada Anda untuk babak dan cabang ini.”
+
+Jangan otomatis memilih semua hakim tenant sebagai pengganti konfigurasi yang hilang.
+
+## 6.2 Tambahkan ID babak dalam penugasan
+
+`JudgeAssignment` saat ini banyak mengandalkan `stageName`.
+
+Tambahkan referensi ID babak apabila diperlukan agar relasi lebih kuat.
+
+Tetap jaga agar konfigurasi dapat membedakan:
+- Hakim yang sama bertugas di dua babak berbeda.
+- Hakim yang sama bertugas pada dua cabang berbeda.
+- Hakim yang bertugas pada babak tertentu tetapi bukan babak lain.
+
+Gunakan relasi yang tersedia, bukan nama sebagai identitas utama.
+
+## 6.3 Atur akses workspace penilaian
+
+Workspace penilaian hanya boleh memodifikasi penilaian milik hakim yang sedang aktif dan penugasan yang sesuai.
+
+Jangan menggunakan ID hakim hard-coded seperti `judge-1` sebagai fallback penilaian produksi di dalam UI admin.
+
+Jika admin ingin memeriksa penilaian, sediakan mode lihat/monitoring yang tidak mengubah nilai.
+
+Untuk menguji tampilan beberapa persona dalam prototype, gunakan mekanisme akun demo yang secara jelas berlabel simulasi. Jangan membuat admin seolah-olah menjadi hakim hanya karena workspace dibuka.
+
+---
+
+# 7. PERBAIKI FINALISASI PENILAIAN INDIVIDU
+
+File utama:
+- `src/context/MtqContext.tsx`
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+
+Finalisasi seorang hakim dan kelengkapan seluruh penilaian peserta adalah dua hal yang berbeda.
+
+## 7.1 Status penilaian hakim
+
+Gunakan status assessment individu:
+- `not_started`
+- `in_progress`
+- `finalized`
+
+Saat hakim menyelesaikan penilaian:
+- Hanya assessment hakim tersebut yang difinalisasi.
+- Nilai, counts kesalahan, deductions, dan anotasi Mushaf tersimpan sebagai satu snapshot.
+- Assessment yang final menjadi read-only.
+- Penilaian hakim lain tidak boleh ikut berubah.
+- Status resmi hasil babak tidak boleh otomatis berubah menjadi selesai hanya karena seorang hakim selesai.
+
+Hindari menetapkan status peserta menjadi `Final` berdasarkan finalisasi hakim terakhir melalui `setTimeout` yang membaca state lama.
+
+Gunakan state turunan untuk mengetahui apakah seluruh penilaian wajib sudah selesai.
+
+## 7.2 Cegah finalisasi yang tidak disengaja
+
+Pada implementasi sekarang, assessment yang belum pernah dimulai dapat difinalisasi dengan nilai awal 100.
+
+Perbaiki interaksi ini agar hakim menyadari bahwa tidak ada kesalahan yang dicatat.
+
+Sediakan salah satu pola yang konsisten:
+- Wajib ada tindakan memulai penilaian dan konfirmasi selesai.
+- Atau tampilkan konfirmasi tambahan apabila semua kategori masih nol dan belum pernah ada perubahan.
+
+Jangan menganggap data kosong selalu berarti penilaian telah dilakukan tanpa kesalahan.
+
+Namun, tetap izinkan hakim memberikan nilai penuh jika memang sudah memeriksa peserta dan tidak menemukan kesalahan.
+
+## 7.3 Anotasi Mushaf
+
+Pertahankan mekanisme anotasi yang sudah ada.
+
+Pastikan:
+- Anotasi ditautkan ke partisipasi babak yang benar.
+- Anotasi dipisahkan berdasarkan hakim.
+- Anotasi dipisahkan berdasarkan halaman.
+- Mengganti peserta atau babak tidak membawa coretan lama ke layar.
+- Menghapus coretan hanya menghapus objek anotasi yang relevan.
+- Finalisasi menyimpan snapshot anotasi dan skor secara konsisten.
+- Assessment final tidak bisa diubah lewat tombol, handler, maupun fungsi state normal.
+
+Jangan mengganti isi teks atau gambar Mushaf selama perbaikan ini.
+
+---
+
+# 8. PRIORITAS P1 — SELARASKAN REKAP NILAI
+
+File utama:
+- `src/components/rekap/RekapNilaiView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/data/mockData.ts`
+
+## 8.1 Sumber data rekap
+
+Rekap harus menggunakan data assessment yang terhubung dengan partisipasi babak yang dipilih.
+
+Jangan mencampur:
+- Nilai penyisihan.
+- Nilai semifinal.
+- Nilai final.
+
+Daftar hakim yang ditampilkan harus berasal dari penugasan yang relevan untuk babak dan cabang yang sedang dilihat.
+
+Jangan membuat fallback otomatis ke tiga akun pertama apabila tidak ada hakim yang dikonfigurasi.
+
+Jika tidak ada penugasan, tampilkan informasi bahwa konfigurasi hakim belum tersedia.
+
+## 8.2 Nilai sementara dan final
+
+Pada tabel rekap:
+- Nilai assessment `in_progress` boleh ditampilkan sebagai nilai sementara.
+- Nilai assessment `finalized` ditandai sebagai final untuk hakim tersebut.
+- Nilai yang belum ada ditampilkan sebagai `—`.
+- Rata-rata sementara harus diberi label provisional.
+- Rata-rata final hanya tersedia jika semua penilaian wajib sudah final.
+- Rekap tidak boleh menganggap assessment yang hilang sebagai nilai nol.
+
+Kelengkapan peserta harus dihitung dari penugasan wajib, bukan dari sekadar jumlah nilai yang kebetulan tersedia.
+
+## 8.3 Rincian kategori kesalahan
+
+Pertahankan tabel rekap yang dinamis berdasarkan hakim.
+
+Jangan membuat tabel utama terlalu lebar dengan menambahkan seluruh kategori langsung sebagai kolom jika hal itu merusak usability.
+
+Sediakan akses ke rincian tiap penilaian, misalnya melalui panel detail yang dapat dibuka.
+
+Tampilkan:
+- Hakim.
+- Status penilaian.
+- Nilai hakim.
+- Total pengurangan.
+- Rincian kategori.
+- Jumlah kejadian per kategori.
+- Total pengurangan per kategori.
+- Anotasi Mushaf, jika tersedia dan relevan.
+- Waktu finalisasi.
+
+Rincian harus berasal dari assessment yang sesuai, bukan dihitung secara terpisah dengan formula lain.
+
+## 8.4 Ekspor
+
+Pastikan CSV ekspor menggunakan filter dan konteks yang sama dengan tabel.
+
+Jika mengekspor penilaian per hakim:
+- Sertakan identitas peserta.
+- Kafilah.
+- Babak/cabang.
+- Identitas hakim.
+- Status penilaian.
+- Skor.
+- Pengurangan.
+- Kategori yang relevan sesuai format ekspor.
+
+Pastikan nilai kosong tetap kosong, bukan angka nol palsu, dan escape konten CSV dengan benar.
+
+---
+
+# 9. PRIORITAS P1 — RUBRIK DAN PERHITUNGAN NILAI
+
+File utama:
+- `src/data/mockData.ts`
+- `src/components/masterData/MasterDataView.tsx`
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/components/rekap/RekapNilaiView.tsx`
+
+## 9.1 Gunakan satu fungsi perhitungan
+
+Pertahankan satu helper terpusat untuk perhitungan nilai dan gunakan hasil yang sama pada:
+- Workspace penilaian.
+- Rekap nilai.
+- Hasil babak.
+- Kelulusan.
+
+Jangan menduplikasi formula yang dapat menghasilkan skor berbeda di halaman yang berbeda.
+
+Cegah nilai kesalahan menjadi negatif. Gunakan presisi angka yang konsisten.
+
+## 9.2 Jangan menganggap semua metode rubrik sama
+
+UI sudah membedakan metode seperti:
+- Pengurangan tetap.
+- Pengurangan berbobot.
+
+Namun, helper saat ini pada dasarnya menghitung setiap kategori sebagai `jumlah × defaultDeduction`.
+
+Jangan menganggap dua metode tersebut pasti mempunyai formula resmi yang sama.
+
+Periksa konfigurasi yang tersedia dan implementasikan hanya formula yang memang dinyatakan secara eksplisit di konfigurasi prototype.
+
+Jika aturan untuk salah satu metode belum ditentukan:
+- Tandai formula belum dikonfigurasi.
+- Jangan diam-diam mengubahnya menjadi formula metode lain.
+- Jangan menampilkan nilai sebagai nilai resmi.
+- Sediakan validasi konfigurasi yang informatif.
+
+Jangan mengarang formula penilaian MTQ.
+
+## 9.3 Versioning rubrik
+
+Perubahan bobot tidak boleh mengubah hasil penilaian final yang telah dikunci.
+
+Pastikan assessment yang difinalisasi menyimpan versi aturan penilaian yang digunakannya, atau menyimpan snapshot konfigurasi yang cukup untuk menjelaskan kalkulasi tersebut.
+
+Perubahan rubrik diterapkan untuk penilaian baru atau versi yang diperbarui sesuai kebijakan konfigurasi.
+
+Jangan menghitung ulang nilai terkunci secara diam-diam.
+
+---
+
+# 10. PRIORITAS P1 — PERBAIKI WORKSPACE SUPERADMIN
+
+File utama:
+- `src/components/superadmin/SuperadminDashboardView.tsx`
+- `src/components/superadmin/SuperadminTenantsView.tsx`
+- `src/components/superadmin/SuperadminUsersView.tsx`
+- `src/components/superadmin/SuperadminAuditView.tsx`
+- `src/components/layout/Sidebar.tsx`
+- `src/context/MtqContext.tsx`
+
+## 10.1 Perilaku “Buka MTQ Ini”
+
+Saat Superadmin memilih “Buka MTQ Ini”, tenant aktif berubah dan halaman dashboard admin MTQ dibuka, tetapi akun aktif masih Superadmin.
+
+Akibatnya, menu dan konteks halaman dapat tidak konsisten.
+
+Perbaiki UX ini tanpa menyamarkan Superadmin sebagai Admin MTQ.
+
+Pilih pola yang paling sederhana:
+- Superadmin memasuki workspace tenant dalam mode pemantauan/administrasi platform, dengan banner yang jelas menunjukkan tenant yang sedang dibuka.
+- Menu yang tersedia mengikuti mode workspace tersebut.
+- Aksi kembali ke Dashboard Platform terlihat jelas.
+- Tenant context ditetapkan hanya melalui aksi Superadmin.
+- Akun Superadmin tetap tercatat sebagai Superadmin.
+- Jangan membuat pergantian role atau tenant yang tidak terlihat oleh pengguna.
+
+Jangan menambahkan dropdown tenant ke header standar Admin MTQ.
+
+## 10.2 Satu akun, satu tenant dalam operasi normal
+
+Pertahankan keputusan produk:
+- Akun Admin MTQ terikat pada satu MTQ.
+- Akun Hakim terikat pada satu MTQ.
+- Hanya Superadmin yang dapat memindahkan akun dari satu MTQ ke MTQ lain.
+- Perpindahan ini memerlukan konfirmasi eksplisit.
+- Perubahan tenant dicatat dalam audit log.
+
+Mekanisme pergantian akun untuk menguji persona harus tetap berlabel simulasi prototype dan tidak dianggap sebagai autentikasi produksi.
+
+## 10.3 Cakupan pengguna lokal
+
+Di halaman Manajemen Pengguna & Dewan Hakim:
+- Admin MTQ hanya melihat akun yang terikat dengan tenantnya.
+- Jangan menyertakan akun `platform` atau Superadmin dalam daftar pengguna lokal sebagai data yang bisa diubah.
+- Superadmin dapat melihat seluruh tenant dari portal global.
+- Peran, tenant, dan status akun harus ditampilkan secara konsisten.
+
+## 10.4 Audit log
+
+Catat semua aksi penting yang disimulasikan:
+- Pembuatan dan perubahan tenant.
+- Perubahan status tenant.
+- Pembuatan atau perubahan akun.
+- Perpindahan akun antartenant.
+- Pengubahan konfigurasi babak.
+- Pengubahan rubrik.
+- Finalisasi hasil babak.
+- Override kelulusan.
+- Pemrosesan pelolosan peserta.
+
+Setiap entri minimal berisi:
+- Waktu.
+- Aktor.
+- Aksi.
+- Tenant terkait.
+- Entitas target.
+- Ringkasan perubahan.
+- Alasan jika diwajibkan.
+- Hasil operasi.
+
+Bedakan audit log platform dengan aktivitas operasional MTQ jika memang keduanya memiliki cakupan berbeda.
+
+Jangan mencatat operasi yang gagal sebagai sukses.
+
+---
+
+# 11. PRIORITAS P1 — BANK SOAL DAN PENETAPAN MAQRA
+
+File utama:
+- `src/components/bankSoal/BankSoalView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+
+Pertahankan UI Bank Soal dan maqra yang sudah ada.
+
+Pastikan setiap penetapan maqra terhubung dengan:
+- Tenant.
+- Partisipasi peserta dalam babak tertentu.
+- Cabang/golongan.
+- Babak.
+- Soal yang dipilih.
+
+Validasi input:
+- Surah valid menurut data referensi yang digunakan.
+- Ayat awal tidak melebihi ayat akhir.
+- Nomor halaman Mushaf berada dalam rentang yang diizinkan oleh sumber.
+- Paket soal sesuai dengan cabang dan babak.
+- Tidak membuat hubungan penetapan soal yang ambigu.
+- Status soal dan penugasan jelas.
+
+Saat peserta maju ke semifinal:
+- Jangan menghapus penetapan maqra penyisihan dari histori.
+- Buat penetapan baru untuk partisipasi semifinal.
+- Tampilkan status “Belum ditetapkan” jika memang belum ada maqra.
+
+Jangan mengarang ayat atau konten Quran.
+
+---
+
+# 12. PRIORITAS P1 — KONSISTENSI STATUS DAN DASHBOARD
+
+Pastikan status berikut memiliki arti yang berbeda:
+
+**Status assessment hakim**
+- Belum dimulai.
+- Berlangsung.
+- Final/Terkunci.
+
+**Status kelengkapan peserta**
+- Belum dimulai.
+- Berlangsung.
+- Menunggu hakim lain.
+- Lengkap.
+- Penugasan belum tersedia, jika tidak ada konfigurasi wajib.
+
+**Status hasil babak**
+- Menunggu.
+- Aktif.
+- Siap difinalisasi.
+- Selesai/hasil ditetapkan.
+
+**Status kelulusan**
+- Belum ditentukan.
+- Kandidat lolos.
+- Menunggu keputusan seri.
+- Lolos.
+- Tidak lolos.
+
+Jangan memakai satu status `Final` untuk mewakili finalisasi hakim, kelengkapan seluruh hakim, dan penetapan hasil babak sekaligus.
+
+Dashboard harus menggunakan status turunan dari sumber data yang sama dengan halaman rekap.
+
+Hilangkan fallback yang menampilkan peserta pertama sebagai “Sesi Penilaian Aktif” ketika tidak ada peserta yang benar-benar sedang dinilai.
+
+Tampilkan empty state yang sesuai ketika tidak ada sesi aktif.
+
+---
+
+# 13. RESPONSIVITAS DAN KONSISTENSI DESAIN
+
+Pertahankan desain yang ada.
+
+Jangan menambahkan banyak kartu, ornamen, atau penjelasan yang tidak perlu.
+
+Fokus desain:
+- Tablet-first.
+- Workspace Mushaf tetap nyaman digunakan.
+- Kontrol penilaian tidak terpotong.
+- Tabel rekap tetap mendukung horizontal scroll.
+- Tombol aksi utama konsisten.
+- Status mudah dibedakan.
+- Modal konfirmasi ringkas dan jelas.
+
+Periksa viewport:
+- Desktop 1440 × 900.
+- Tablet landscape 1024 × 768.
+- Tablet portrait 768 × 1024.
+- Mobile 390 × 844.
+
+Jangan mengorbankan kenyamanan membaca Mushaf hanya untuk membuat layout terlihat kompak.
+
+---
+
+# 14. ACCEPTANCE TEST — SKENARIO WAJIB
+
+Setelah perubahan, pastikan skenario berikut bekerja melalui UI prototype.
+
+## Skenario A — Penilaian belum lengkap
+
+1. Buat peserta dengan tiga hakim yang wajib menilai.
+2. Hakim pertama memulai penilaian.
+3. Hakim pertama mengisi kategori kesalahan dan menyimpan anotasi.
+4. Hakim pertama memfinalisasi penilaiannya.
+5. Dua hakim lainnya belum menilai.
+
+Hasil yang diharapkan:
+- Penilaian hakim pertama berstatus Final.
+- Peserta belum berstatus Lengkap.
+- Rekap menampilkan status `1/3 hakim` atau indikator yang sesuai.
+- Peserta tidak lolos secara resmi.
+- Tombol finalisasi hasil babak tidak dapat mengeksekusi pelolosan.
+- UI menjelaskan bahwa penilaian wajib masih belum lengkap.
+
+## Skenario B — Semua hakim selesai
+
+1. Hakim kedua dan ketiga menyelesaikan penilaian masing-masing.
+2. Semua assessment wajib menjadi Final.
+3. Sistem menghitung nilai agregat sesuai konfigurasi yang tersedia.
+
+Hasil yang diharapkan:
+- Peserta dinyatakan Lengkap.
+- Nilai akhir dihitung dari nilai final yang valid.
+- Rekap dan halaman hasil menggunakan nilai yang sama.
+- Hasil dapat memasuki tahap verifikasi dan finalisasi babak sesuai konfigurasi.
+
+## Skenario C — Kelulusan dan babak baru
+
+1. Semua peserta pada babak aktif menyelesaikan penilaian.
+2. Admin meninjau peringkat.
+3. Jika ada seri pada batas kuota, sistem meminta penyelesaian yang terdokumentasi.
+4. Admin mengonfirmasi hasil dan peserta yang lolos.
+
+Hasil yang diharapkan:
+- Babak sebelumnya difinalisasi sesuai syarat.
+- Peserta yang lolos mendapat partisipasi baru di babak berikutnya.
+- Peserta yang tidak lolos tetap mempunyai histori babak sebelumnya.
+- Penilaian lama tidak ditimpa.
+- Maqra dan penugasan babak berikutnya dapat ditetapkan secara terpisah.
+- Proses yang sama tidak bisa diterapkan dua kali secara tidak sengaja.
+
+## Skenario D — Isolasi tenant
+
+1. Buat dua tenant.
+2. Tambahkan peserta dengan babak bernama sama di kedua tenant.
+3. Selesaikan dan finalisasi hasil di tenant A.
+
+Hasil yang diharapkan:
+- Hanya peserta dan babak di tenant A yang berubah.
+- Nilai, status, penugasan, dan histori tenant B tetap sama.
+- Dashboard dan rekap tenant B tidak berubah.
+
+## Skenario E — Penugasan hakim
+
+1. Buat dua hakim dengan cakupan babak atau cabang berbeda.
+2. Login sebagai hakim A melalui mekanisme simulasi.
+3. Buka daftar peserta.
+
+Hasil yang diharapkan:
+- Hakim A hanya melihat peserta sesuai penugasannya.
+- Peserta di luar cakupan tidak muncul sebagai tugas yang dapat dinilai.
+- Jika tidak ada tugas, tampilkan empty state yang benar.
+- Hakim A tidak dapat mengubah penilaian hakim B.
+
+## Skenario F — Perubahan tenant oleh Superadmin
+
+1. Buka portal Superadmin.
+2. Pilih tenant tertentu.
+3. Buka workspace tenant.
+4. Kembali ke Dashboard Platform.
+
+Hasil yang diharapkan:
+- Konteks tenant yang dibuka terlihat jelas.
+- Tidak ada pergantian role yang tersembunyi.
+- Sidebar dan hak aksi sesuai dengan mode workspace.
+- Admin MTQ biasa tidak memiliki dropdown untuk berpindah tenant.
+- Perpindahan akun antartenant hanya tersedia melalui aksi Superadmin yang terkontrol.
+
+## Skenario G — Konsistensi penyimpanan anotasi
+
+1. Buka peserta A dan buat beberapa anotasi.
+2. Pindah ke peserta B.
+3. Buat anotasi lain.
+4. Kembali ke peserta A.
+5. Lakukan finalisasi.
+
+Hasil yang diharapkan:
+- Tidak ada anotasi yang bocor antar-peserta.
+- Coretan tetap sejajar dengan halaman saat ukuran viewport berubah.
+- Menghapus coretan hanya menghapus anotasi yang ditargetkan.
+- Finalisasi menyimpan score dan anotasi yang sesuai.
+- Penilaian final menjadi read-only.
+
+---
+
+# 15. PENGUJIAN DAN PEMERIKSAAN KODE
+
+Sebelum menyatakan pekerjaan selesai:
+
+1. Jalankan `npm run lint`.
+2. Jalankan `npm run build`.
+3. Perbaiki semua error TypeScript/build yang disebabkan oleh perubahan.
+4. Periksa import yang tidak digunakan dan tipe yang tidak konsisten.
+5. Pastikan semua menu menuju halaman yang benar.
+6. Pastikan perubahan state tersimpan di localStorage.
+7. Uji pemuatan ulang halaman setelah data simulasi berubah.
+8. Periksa bahwa data lama tidak merusak struktur baru.
+9. Jalankan semua skenario acceptance test yang dapat dilakukan di lingkungan yang tersedia.
+10. Jika browser testing tersedia, uji skenario melalui UI secara langsung.
+
+Jangan hanya mengandalkan keberhasilan build untuk mengklaim seluruh alur sudah benar.
+
+Jika suatu pengujian tidak dapat dilakukan, nyatakan keterbatasannya secara eksplisit.
+
+---
+
+# 16. LAPORAN HASIL AKHIR
+
+Setelah implementasi selesai, berikan laporan ringkas dan faktual:
+
+1. File yang diubah.
+2. Masalah P0 yang telah diselesaikan.
+3. Perubahan model data dan migrasi localStorage.
+4. Perubahan UI/UX yang terlihat.
+5. Hasil acceptance test.
+6. Hasil `npm run lint`.
+7. Hasil `npm run build`.
+8. Bug yang masih tersisa.
+9. Batasan yang memang masih memerlukan backend.
+
+Jangan mengklaim real-time lintas perangkat, keamanan multi-tenant produksi, autentikasi, atau audit server sudah tersedia selama backend belum dibangun.
+
+## HASIL YANG DIHARAPKAN
+
+Prototype MTQ Management System yang tetap mempertahankan desain saat ini, tetapi memiliki logika frontend yang konsisten:
+
+- Nilai yang belum lengkap tidak dapat menghasilkan kelulusan resmi.
+- Setiap babak mempunyai partisipasi dan penilaian tersendiri.
+- Histori penyisihan, semifinal, dan final tetap utuh.
+- Mutasi data tidak bocor lintas tenant.
+- Hakim hanya mengakses penugasan yang sesuai.
+- Rekap dan hasil babak menggunakan data yang konsisten.
+- Superadmin memiliki alur kerja yang jelas.
+- Semua tindakan simulasi dapat diuji secara terukur.
+
+Lakukan perubahan langsung pada proyek, bukan hanya menghasilkan dokumen atau kode contoh.

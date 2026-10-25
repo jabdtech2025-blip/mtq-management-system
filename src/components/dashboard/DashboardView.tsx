@@ -18,6 +18,7 @@ export const DashboardView: React.FC = () => {
   const {
     currentTenant,
     participants,
+    stageParticipations,
     kafilahs,
     users,
     setCurrentView,
@@ -26,24 +27,28 @@ export const DashboardView: React.FC = () => {
     getParticipantProgress
   } = useMtq();
 
-  // Statistics dynamically derived
-  const totalParticipants = participants.length;
-  const totalKafilah = kafilahs.length;
-  const totalHakim = users.filter((u) => u.role === 'judge').length;
+  // Statistics dynamically derived and strictly scoped to currentTenant
+  const tenantParticipants = participants.filter((p) => p.tenantId === currentTenant.id);
+  const tenantStageParticipations = stageParticipations.filter((sp) => sp.tenantId === currentTenant.id);
+  const tenantKafilahs = kafilahs.filter((k) => k.tenantId === currentTenant.id);
+  const tenantJudges = users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id);
 
-  const lengkapCount = participants.filter((p) => getParticipantProgress(p.id) === 'Lengkap').length;
-  const ongoingCount = participants.filter((p) => getParticipantProgress(p.id) === 'Berlangsung').length;
-  const pendingCount = participants.filter((p) => getParticipantProgress(p.id) === 'Belum Dimulai').length;
-  const waitingOtherCount = participants.filter((p) => getParticipantProgress(p.id) === 'Menunggu Hakim Lain').length;
+  const totalUniqueParticipants = tenantParticipants.length;
+  const totalStageParticipations = tenantStageParticipations.length;
+  const totalKafilah = tenantKafilahs.length;
+  const totalHakim = tenantJudges.length;
+
+  const lengkapCount = tenantParticipants.filter((p) => getParticipantProgress(p.id) === 'Lengkap').length;
+  const ongoingCount = tenantParticipants.filter((p) => getParticipantProgress(p.id) === 'Berlangsung').length;
+  const pendingCount = tenantParticipants.filter((p) => getParticipantProgress(p.id) === 'Belum Dimulai').length;
+  const waitingOtherCount = tenantParticipants.filter((p) => getParticipantProgress(p.id) === 'Menunggu Hakim Lain').length;
 
   const completionPercentage =
-    totalParticipants > 0 ? Math.round((lengkapCount / totalParticipants) * 100) : 0;
+    totalUniqueParticipants > 0 ? Math.round((lengkapCount / totalUniqueParticipants) * 100) : 0;
 
-  // Active participant currently being scored
+  // Real ongoing participant actively being scored (strictly no fallback to first participant!)
   const ongoingParticipant =
-    participants.find((p) => getParticipantProgress(p.id) === 'Berlangsung') ||
-    participants.find((p) => p.status === 'Berlangsung') ||
-    participants[0] ||
+    tenantParticipants.find((p) => getParticipantProgress(p.id) === 'Berlangsung' || p.status === 'Berlangsung') ||
     null;
 
   const handleOpenActiveScoring = () => {
@@ -83,13 +88,17 @@ export const DashboardView: React.FC = () => {
         {/* Peserta */}
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Total Peserta</span>
+            <span className="text-xs font-medium text-slate-500">Peserta Terdaftar</span>
             <Users className="w-4 h-4" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 mt-3 tabular-nums font-mono">
-            {totalParticipants}
-          </p>
-          <p className="text-[11px] text-slate-400 mt-1">Terdaftar di seluruh babak</p>
+          <div className="mt-3">
+            <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
+              {totalUniqueParticipants}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {totalStageParticipations} partisipasi babak
+            </p>
+          </div>
         </div>
 
         {/* Grup */}
@@ -98,22 +107,26 @@ export const DashboardView: React.FC = () => {
             <span className="text-xs font-medium text-slate-500">Grup / Kafilah</span>
             <Building className="w-4 h-4" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 mt-3 tabular-nums font-mono">
-            {totalKafilah}
-          </p>
-          <p className="text-[11px] text-slate-400 mt-1">Kabupaten & Kota utusan</p>
+          <div className="mt-3">
+            <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
+              {totalKafilah}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Utusan daerah aktif</p>
+          </div>
         </div>
 
-        {/* Hakim (Derived from active judge users, NOT hardcoded 18) */}
+        {/* Hakim (Scoped strictly to currentTenant) */}
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-medium text-slate-500">Dewan Hakim</span>
             <Gavel className="w-4 h-4" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 mt-3 tabular-nums font-mono">
-            {totalHakim}
-          </p>
-          <p className="text-[11px] text-slate-400 mt-1">Akun hakim penilai aktif</p>
+          <div className="mt-3">
+            <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
+              {totalHakim}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Hakim penilai di event ini</p>
+          </div>
         </div>
 
         {/* Penilaian Selesai */}
@@ -143,7 +156,7 @@ export const DashboardView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <span className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-white/10 px-2.5 py-0.5 rounded-full text-emerald-200 border border-white/15">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className={`w-2 h-2 rounded-full ${ongoingParticipant ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`}></span>
                 Sesi Penilaian Aktif
               </span>
             </div>
@@ -161,23 +174,30 @@ export const DashboardView: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <p className="text-sm text-emerald-200">Belum ada peserta yang dinilai saat ini.</p>
+              <div className="py-2">
+                <p className="text-base font-bold text-emerald-100">
+                  Tidak ada peserta yang sedang dinilai saat ini
+                </p>
+                <p className="text-xs text-emerald-300/80 mt-1">
+                  Pilih peserta dari antrean penjurian dewan hakim untuk memulai penilaian mimbar musabaqah.
+                </p>
+              </div>
             )}
           </div>
 
           <div className="pt-6 flex flex-wrap items-center gap-3">
-            {ongoingParticipant && (
+            {ongoingParticipant ? (
               <button
                 onClick={handleOpenActiveScoring}
-                className="inline-flex items-center gap-2 bg-white text-emerald-950 font-bold text-xs px-4 py-2.5 rounded-xl hover:bg-emerald-50 active:scale-95 transition-all shadow-sm"
+                className="inline-flex items-center gap-2 bg-white text-emerald-950 font-bold text-xs px-4 py-2.5 rounded-xl hover:bg-emerald-50 active:scale-95 transition-all shadow-sm cursor-pointer"
               >
                 <span>Buka Lembar Mushaf & Penilaian</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
-            )}
+            ) : null}
             <button
               onClick={() => setCurrentView('penilaian_hakim')}
-              className="inline-flex items-center gap-2 bg-emerald-900/60 hover:bg-emerald-900 text-white font-medium text-xs px-4 py-2.5 rounded-xl border border-emerald-700/60 transition-all"
+              className="inline-flex items-center gap-2 bg-emerald-900/60 hover:bg-emerald-900 text-white font-medium text-xs px-4 py-2.5 rounded-xl border border-emerald-700/60 transition-all cursor-pointer"
             >
               Lihat Daftar Antrean Peserta
             </button>
@@ -202,7 +222,7 @@ export const DashboardView: React.FC = () => {
               </div>
               <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
                 <span className="font-medium text-slate-700">Peserta Lengkap:</span>
-                <span className="font-bold text-slate-900 font-mono">{lengkapCount} / {totalParticipants}</span>
+                <span className="font-bold text-slate-900 font-mono">{lengkapCount} / {totalUniqueParticipants}</span>
               </div>
             </div>
           </div>

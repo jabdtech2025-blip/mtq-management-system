@@ -19,7 +19,7 @@ import { SuperadminUsersView } from './components/superadmin/SuperadminUsersView
 import { SuperadminAuditView } from './components/superadmin/SuperadminAuditView';
 
 const MainLayout: React.FC = () => {
-  const { currentView } = useMtq();
+  const { currentView, isSuperadminWorkspaceMode, currentTenant, exitTenantWorkspace } = useMtq();
 
   const renderCurrentView = () => {
     switch (currentView) {
@@ -69,6 +69,22 @@ const MainLayout: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Superadmin Workspace Mode Banner */}
+        {isSuperadminWorkspaceMode && (
+          <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs sticky top-0 z-40">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-slate-950 animate-ping"></span>
+              <span>Mode Superadmin: Memantau & Mengelola Workspace [{currentTenant.name}]</span>
+            </div>
+            <button
+              onClick={exitTenantWorkspace}
+              className="bg-slate-950 hover:bg-slate-900 text-white px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all self-start sm:self-auto"
+            >
+              Kembali ke Dashboard Superadmin
+            </button>
+          </div>
+        )}
+
         {/* On standard views, show the TopHeader; on scoring view, PenilaianDualPanelView provides its own specialized header */}
         {!isScoringView && <TopHeader />}
 
