@@ -467,115 +467,122 @@ export const PenilaianDualPanelView: React.FC = () => {
             tabletActiveTab === 'scoring' ? 'hidden xl:flex' : 'flex'
           }`}
         >
-          {/* Mushaf Canvas Toolbar */}
-          <div className="h-12 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 z-20">
-            {/* Page Navigation */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage <= 1}
-                className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition-colors"
-                title="Halaman Sebelumnya"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="text-xs font-bold text-slate-200 tabular-nums">
-                Halaman {currentPage} / 604
-              </span>
-              <button
-                onClick={() => setCurrentPage((p) => Math.min(604, p + 1))}
-                disabled={currentPage >= 604}
-                className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition-colors"
-                title="Halaman Berikutnya"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+          {/* Mushaf Canvas Toolbar - 5 Logically Grouped Sections */}
+          <div className="min-h-13 py-2 bg-slate-950 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between gap-3 shrink-0 z-20 overflow-x-auto scrollbar-thin">
+            {/* Left Tools Group: Page Navigation & Zoom */}
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              {/* Group 1: Page Navigation */}
+              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800/80 rounded-lg p-1">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                  title="Halaman Sebelumnya"
+                  aria-label="Halaman Sebelumnya"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-semibold text-slate-200 tabular-nums px-2 select-none whitespace-nowrap">
+                  Hal. <strong className="text-white font-bold">{currentPage}</strong> / 604
+                </span>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(604, p + 1))}
+                  disabled={currentPage >= 604}
+                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                  title="Halaman Berikutnya"
+                  aria-label="Halaman Berikutnya"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
 
-              <span className="text-slate-700 mx-1">|</span>
-
-              {/* Zoom Controls */}
-              <button
-                onClick={() => setZoomLevel((z) => Math.max(70, z - 15))}
-                className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 transition-colors"
-                title="Zoom Out"
-              >
-                <ZoomOut className="w-4 h-4" />
-              </button>
-              <span className="text-[11px] font-mono text-slate-400 w-10 text-center">
-                {zoomLevel}%
-              </span>
-              <button
-                onClick={() => setZoomLevel((z) => Math.min(180, z + 15))}
-                className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 transition-colors"
-                title="Zoom In"
-              >
-                <ZoomIn className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setZoomLevel(100)}
-                className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-[10px] font-bold"
-                title="Reset Zoom"
-              >
-                100%
-              </button>
+              {/* Group 2: Zoom Controls */}
+              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800/80 rounded-lg p-1">
+                <button
+                  onClick={() => setZoomLevel((z) => Math.max(70, z - 15))}
+                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 transition-colors"
+                  title="Perkecil Tampilan"
+                  aria-label="Perkecil Tampilan"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-mono font-medium text-slate-300 w-11 text-center tabular-nums select-none">
+                  {zoomLevel}%
+                </span>
+                <button
+                  onClick={() => setZoomLevel((z) => Math.min(180, z + 15))}
+                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 transition-colors"
+                  title="Perbesar Tampilan"
+                  aria-label="Perbesar Tampilan"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setZoomLevel(100)}
+                  className="px-2 py-1 rounded-md hover:bg-slate-800 text-slate-400 hover:text-slate-100 text-[11px] font-semibold transition-colors"
+                  title="Kembalikan ke Ukuran Normal 100%"
+                >
+                  100%
+                </button>
+              </div>
             </div>
 
-            {/* Drawing Tools (Disabled if finalized) */}
-            <div className="flex items-center gap-1 sm:gap-2">
+            {/* Right Tools Group: Drawing Tools, Colors, and Canvas Actions */}
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               {isFinalized ? (
-                <div className="flex items-center gap-1.5 text-xs text-amber-400 bg-amber-950/70 border border-amber-900/60 px-3 py-1 rounded-lg">
-                  <Lock className="w-3.5 h-3.5" />
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-300 bg-amber-950/80 border border-amber-800/70 px-3.5 py-1.5 rounded-lg shadow-sm">
+                  <Lock className="w-4 h-4 text-amber-400" />
                   <span>Mode Baca Saja (Terkunci)</span>
                 </div>
               ) : (
                 <>
-                  {/* Tool selection */}
-                  <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+                  {/* Group 3: Tool selection */}
+                  <div className="flex items-center bg-slate-900 border border-slate-800/80 rounded-lg p-1 gap-1">
                     <button
                       onClick={() => setActiveTool('pen')}
-                      className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors ${
+                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
                         activeTool === 'pen'
-                          ? 'bg-emerald-700 text-white font-bold'
-                          : 'text-slate-400 hover:text-white'
+                          ? 'bg-emerald-700 text-white shadow-sm ring-1 ring-emerald-500 font-semibold'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
                       }`}
-                      title="Pena Koreksi"
+                      title="Pena Koreksi Anotasi"
                     >
                       <PenTool className="w-3.5 h-3.5" />
-                      <span className="hidden md:inline">Pena</span>
+                      <span>Pena</span>
                     </button>
                     <button
                       onClick={() => setActiveTool('marker')}
-                      className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors ${
+                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
                         activeTool === 'marker'
-                          ? 'bg-emerald-700 text-white font-bold'
-                          : 'text-slate-400 hover:text-white'
+                          ? 'bg-emerald-700 text-white shadow-sm ring-1 ring-emerald-500 font-semibold'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
                       }`}
-                      title="Stabilo Transparan"
+                      title="Stabilo Transparan untuk Menandai Kalimat"
                     >
                       <Highlighter className="w-3.5 h-3.5" />
-                      <span className="hidden md:inline">Stabilo</span>
+                      <span>Stabilo</span>
                     </button>
                     <button
                       onClick={() => setActiveTool('eraser')}
-                      className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors ${
+                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
                         activeTool === 'eraser'
-                          ? 'bg-emerald-700 text-white font-bold'
-                          : 'text-slate-400 hover:text-white'
+                          ? 'bg-emerald-700 text-white shadow-sm ring-1 ring-emerald-500 font-semibold'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
                       }`}
-                      title="Penghapus Coretan (Hapus goresan tanpa merusak teks mushaf)"
+                      title="Penghapus Goresan Anotasi"
                     >
                       <Eraser className="w-3.5 h-3.5" />
-                      <span className="hidden md:inline">Hapus Goresan</span>
+                      <span>Penghapus</span>
                     </button>
                   </div>
 
-                  {/* Color presets */}
-                  <div className="hidden sm:flex items-center gap-1 pl-2">
+                  {/* Group 4: Color Presets */}
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800/80 rounded-lg p-1.5">
                     {[
-                      { color: '#dc2626', label: 'Merah (Tajwid Jali)' },
-                      { color: '#f59e0b', label: 'Kuning (Khafi)' },
-                      { color: '#2563eb', label: 'Biru (Waqf/Lagu)' },
-                      { color: '#16a34a', label: 'Hijau (Catatan)' }
+                      { color: '#dc2626', label: 'Merah (Tajwid Jali / Kesalahan Berat)' },
+                      { color: '#f59e0b', label: 'Kuning (Tajwid Khafi / Kesalahan Sedang)' },
+                      { color: '#2563eb', label: 'Biru (Waqf & Ibtida / Nada)' },
+                      { color: '#16a34a', label: 'Hijau (Catatan Dewan Hakim)' }
                     ].map((c) => (
                       <button
                         key={c.color}
@@ -584,36 +591,39 @@ export const PenilaianDualPanelView: React.FC = () => {
                           if (activeTool === 'eraser') setActiveTool('pen');
                         }}
                         style={{ backgroundColor: c.color }}
-                        className={`w-5 h-5 rounded-full transition-transform ${
+                        className={`w-6 h-6 rounded-full transition-all flex items-center justify-center ${
                           activeColor === c.color && activeTool !== 'eraser'
-                            ? 'ring-2 ring-white scale-110'
-                            : 'opacity-70 hover:opacity-100'
+                            ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-105'
+                            : 'opacity-75 hover:opacity-100 hover:scale-105'
                         }`}
                         title={c.label}
+                        aria-label={c.label}
                       />
                     ))}
                   </div>
 
-                  <span className="text-slate-700 mx-1">|</span>
+                  {/* Group 5: History & Page Reset Actions */}
+                  <div className="flex items-center gap-1 bg-slate-900 border border-slate-800/80 rounded-lg p-1">
+                    <button
+                      onClick={handleUndo}
+                      disabled={strokes.filter((s) => s.page === currentPage).length === 0}
+                      className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                      title="Undo Goresan Terakhir (Ctrl+Z)"
+                      aria-label="Undo Goresan Terakhir"
+                    >
+                      <Undo2 className="w-4 h-4" />
+                    </button>
 
-                  {/* Undo & Clear */}
-                  <button
-                    onClick={handleUndo}
-                    disabled={strokes.filter((s) => s.page === currentPage).length === 0}
-                    className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 disabled:opacity-30 transition-colors"
-                    title="Undo Goresan Terakhir"
-                  >
-                    <Undo2 className="w-3.5 h-3.5" />
-                  </button>
-
-                  <button
-                    onClick={() => setIsClearPageModalOpen(true)}
-                    disabled={strokes.filter((s) => s.page === currentPage).length === 0}
-                    className="p-1.5 rounded bg-slate-900 hover:bg-rose-950 text-rose-300 hover:text-rose-200 disabled:opacity-30 transition-colors"
-                    title="Bersihkan Semua Anotasi Halaman Ini"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    <button
+                      onClick={() => setIsClearPageModalOpen(true)}
+                      disabled={strokes.filter((s) => s.page === currentPage).length === 0}
+                      className="p-1.5 rounded-md hover:bg-rose-950/80 text-rose-300 hover:text-rose-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                      title="Bersihkan Semua Anotasi Halaman Ini"
+                      aria-label="Bersihkan Semua Anotasi Halaman Ini"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -683,71 +693,74 @@ export const PenilaianDualPanelView: React.FC = () => {
 
         {/* Right Panel: Scoring & Deduction Controls */}
         <div
-          className={`w-full xl:w-96 bg-white text-slate-900 border-l border-slate-200 flex flex-col justify-between overflow-y-auto ${
+          className={`w-full xl:w-[440px] 2xl:w-[480px] shrink-0 bg-white text-slate-900 border-l border-slate-200 flex flex-col justify-between overflow-y-auto ${
             tabletActiveTab === 'mushaf' ? 'hidden xl:flex' : 'flex'
           }`}
         >
           <div className="p-5 space-y-5">
             {/* Participant Quick Info */}
-            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-500 uppercase tracking-wide">
+            <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-4">
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px]">
                   Peserta Sedang Dinilai
                 </span>
-                <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                <span className="font-mono font-bold text-emerald-800 bg-emerald-100/70 px-2.5 py-0.5 rounded border border-emerald-300/60 tabular-nums">
                   {currentParticipant.participantId}
                 </span>
               </div>
-              <p className="font-extrabold text-sm text-slate-900 mt-1">
+              <p className="font-bold text-base text-slate-900 leading-snug">
                 {currentParticipant.name}
               </p>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-600 mt-1 font-medium">
                 {currentParticipant.kafilahName} · Undian #{currentParticipant.lotteryNumber}
               </p>
-              <p className="text-[11px] text-emerald-700 font-medium mt-1">
-                {currentParticipant.assignedMaqra}
-              </p>
+              <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
+                <span className="text-slate-500 font-medium">Paket Maqra:</span>
+                <span className="text-emerald-800 font-semibold">{currentParticipant.assignedMaqra}</span>
+              </div>
             </div>
 
             {/* Live Score Display */}
-            <div className="bg-gradient-to-br from-emerald-800 to-emerald-950 text-white p-5 rounded-2xl shadow-md flex items-center justify-between">
+            <div className="bg-gradient-to-br from-emerald-800 to-emerald-950 text-white p-5 rounded-2xl shadow-sm border border-emerald-700/30 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold text-emerald-200 uppercase tracking-wider">
+                <p className="text-[11px] font-semibold text-emerald-200 uppercase tracking-wider">
                   Nilai Akhir Hakim
                 </p>
                 <div className="flex items-baseline gap-1 mt-1">
                   <span className="text-4xl font-extrabold font-mono tracking-tight tabular-nums">
                     {currentScore.toFixed(2)}
                   </span>
-                  <span className="text-xs text-emerald-300">/ 100</span>
+                  <span className="text-sm text-emerald-300 font-medium">/ 100</span>
                 </div>
-                <p className="text-[11px] text-emerald-300/80 mt-1">
+                <p className="text-xs text-emerald-200/90 font-mono mt-1 tabular-nums">
                   Total Pengurangan: -{totalDeductions.toFixed(2)} poin
                 </p>
               </div>
 
-              <div className="text-right">
-                <span className="inline-block text-[11px] font-bold px-2.5 py-1 rounded-md bg-white/10 border border-white/20">
+              <div className="text-right flex flex-col items-end">
+                <span className="inline-block text-xs font-semibold px-2.5 py-1 rounded-md bg-white/15 border border-white/20 text-white">
                   {activeJudgeName.split(',')[0]}
                 </span>
-                <p className="text-[10px] text-emerald-200/70 mt-1">
+                <span className={`inline-flex items-center gap-1 text-[11px] font-medium mt-2 px-2 py-0.5 rounded ${
+                  isFinalized ? 'bg-amber-400/20 text-amber-200' : 'bg-emerald-700/50 text-emerald-200'
+                }`}>
                   {isFinalized ? 'Terkunci (Final)' : 'Sedang Berlangsung'}
-                </p>
+                </span>
               </div>
             </div>
 
             {/* Error Categories Counters */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between pb-1 border-b border-slate-100">
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                   Rubrik Pengurangan Kesalahan
                 </h3>
-                <span className="text-[10px] text-slate-400 font-medium">
-                  {isFinalized ? 'Read-only' : 'Klik + / -'}
+                <span className="text-[11px] text-slate-500 font-medium">
+                  {isFinalized ? 'Mode Baca Saja' : 'Klik + / - untuk koreksi'}
                 </span>
               </div>
 
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 {errorCategories.map((cat) => {
                   const count = errorCounts[cat.id] || 0;
                   const pts = (count * cat.defaultDeduction).toFixed(2);
@@ -755,43 +768,44 @@ export const PenilaianDualPanelView: React.FC = () => {
                   return (
                     <div
                       key={cat.id}
-                      className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between hover:border-slate-300 transition-colors"
+                      className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-xl flex items-center justify-between gap-3 hover:border-slate-300 transition-colors"
                     >
-                      <div className="pr-2 min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-800 truncate">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5">
+                          <span className="text-xs font-bold text-slate-900 break-words leading-snug">
                             {cat.name}
                           </span>
-                          <span className="text-[10px] font-mono text-slate-400">
+                          <span className="text-[11px] font-mono font-medium text-slate-500 tabular-nums">
                             (-{cat.defaultDeduction.toFixed(2)}/err)
                           </span>
                         </div>
-                        <p className="text-[10px] text-slate-500 truncate mt-0.5" title={cat.scope}>
+                        <p className="text-[11px] text-slate-500 leading-normal line-clamp-2 mt-1" title={cat.scope}>
                           {cat.scope}
                         </p>
                       </div>
 
                       <div className="flex items-center gap-3 shrink-0">
-                        <div className="text-right">
-                          <span className="font-mono font-bold text-sm text-slate-900 block tabular-nums">
+                        <div className="text-right w-12">
+                          <span className="font-mono font-bold text-base text-slate-900 block tabular-nums">
                             {count}
                           </span>
-                          <span className="text-[10px] font-mono text-rose-600 block">
+                          <span className="text-[11px] font-mono font-semibold text-rose-600 block tabular-nums">
                             -{pts}
                           </span>
                         </div>
 
-                        {/* Plus / Minus Buttons (Strictly disabled if finalized) */}
-                        <div className="flex items-center gap-1">
+                        {/* Plus / Minus Buttons (Enlarged touch targets w-8 h-8, disabled if finalized) */}
+                        <div className="flex items-center gap-1.5">
                           <button
                             onClick={() =>
                               updateErrorCount(currentParticipant.id, activeJudgeId, cat.id, -1)
                             }
                             disabled={count <= 0 || isFinalized}
-                            className="w-7 h-7 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white text-slate-700 flex items-center justify-center font-bold text-xs transition-colors"
+                            className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-sm transition-all shadow-xs"
                             title="Kurangi 1 Kesalahan"
+                            aria-label={`Kurangi kesalahan ${cat.name}`}
                           >
-                            <Minus className="w-3.5 h-3.5" />
+                            <Minus className="w-4 h-4" />
                           </button>
 
                           <button
@@ -799,10 +813,11 @@ export const PenilaianDualPanelView: React.FC = () => {
                               updateErrorCount(currentParticipant.id, activeJudgeId, cat.id, 1)
                             }
                             disabled={isFinalized}
-                            className="w-7 h-7 rounded-lg bg-emerald-800 hover:bg-emerald-700 disabled:opacity-30 disabled:hover:bg-emerald-800 text-white flex items-center justify-center font-bold text-xs transition-colors"
+                            className="w-8 h-8 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-sm transition-all shadow-xs"
                             title="Tambah 1 Kesalahan"
+                            aria-label={`Tambah kesalahan ${cat.name}`}
                           >
-                            <Plus className="w-3.5 h-3.5" />
+                            <Plus className="w-4 h-4" />
                           </button>
                         </div>
                       </div>

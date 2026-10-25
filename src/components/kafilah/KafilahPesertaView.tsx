@@ -171,7 +171,7 @@ export const KafilahPesertaView: React.FC = () => {
           className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          <span>+ Tambah Grup</span>
+          <span>Tambah Grup</span>
         </button>
       </div>
 
@@ -316,7 +316,7 @@ export const KafilahPesertaView: React.FC = () => {
                   className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
-                  + Daftarkan Peserta Baru
+                  <span>Daftarkan Peserta Baru</span>
                 </button>
               </div>
 
