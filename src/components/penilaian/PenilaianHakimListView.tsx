@@ -18,6 +18,7 @@ export const PenilaianHakimListView: React.FC = () => {
     judgeAssignments,
     assessments,
     setSelectedParticipantId,
+    setMonitoringJudgeId,
     setCurrentView
   } = useMtq();
 
@@ -119,6 +120,9 @@ export const PenilaianHakimListView: React.FC = () => {
 
   const handleOpenScoring = (participantId: string) => {
     setSelectedParticipantId(participantId);
+    if (currentUser.role !== 'judge') {
+      setMonitoringJudgeId(activeJudgeId);
+    }
     setCurrentView('penilaian_dual_panel');
   };
 
@@ -147,11 +151,14 @@ export const PenilaianHakimListView: React.FC = () => {
 
         {/* If Admin / Superadmin: Allow picking which judge to monitor */}
         {currentUser.role !== 'judge' && tenantJudges.length > 0 && (
-          <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-2">
+          <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs flex items-center gap-2">
             <label className="text-xs font-bold text-slate-600">Pantau Hakim:</label>
             <select
               value={adminSelectedJudgeId}
-              onChange={(e) => setAdminSelectedJudgeId(e.target.value)}
+              onChange={(e) => {
+                setAdminSelectedJudgeId(e.target.value);
+                setMonitoringJudgeId(e.target.value);
+              }}
               className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 bg-white"
             >
               {tenantJudges.map((j) => (
@@ -308,7 +315,7 @@ export const PenilaianHakimListView: React.FC = () => {
                         </span>
                       ) : isInProgress ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
                           Berlangsung
                         </span>
                       ) : (

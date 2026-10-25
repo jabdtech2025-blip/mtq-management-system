@@ -1,0 +1,622 @@
+# MASTER PROMPT — REFINEMENT UI/UX DAN FUNGSI FRONTEND MTQ MANAGEMENT SYSTEM
+
+## ROLE
+
+Bertindak sebagai Senior Product Designer, UX Engineer, dan Senior Frontend Engineer yang berpengalaman membangun aplikasi SaaS enterprise dengan standar UI/UX profesional internasional.
+
+Lakukan audit dan perbaikan langsung terhadap proyek MTQ Management System yang sedang terbuka. Gunakan source code, komponen, struktur data, dan fitur yang sudah ada sebagai fondasi.
+
+Tujuan akhirnya adalah menghasilkan aplikasi manajemen MTQ yang clean, minimal, konsisten, profesional, mudah dipahami, responsif, dan efisien digunakan oleh admin maupun hakim.
+
+Perbaikan harus mencakup:
+1. Penyempurnaan desain visual seluruh aplikasi.
+2. Penyempurnaan pengalaman pengguna pada Bank Soal dan Maqra.
+3. Penambahan fitur penghapusan Jenjang dan Cabang/Golongan.
+4. Penghapusan versi rubrik hardcoded.
+5. Perbaikan workspace penilaian hakim.
+6. Penyatuan tampilan penilaian hakim dan monitoring admin, dengan akses edit hanya untuk hakim.
+7. Penyederhanaan Rekap Nilai dan modal Rincian Penilaian Juri.
+
+**Jangan hanya membuat laporan atau rekomendasi. Periksa kode yang relevan, implementasikan perbaikan, kemudian validasi hasilnya.**
+
+---
+
+# A. BATASAN DAN PRINSIP PENGERJAAN
+
+## 1. Backend ditunda
+
+Pada tahap ini, jangan membangun:
+- Backend atau server.
+- Database eksternal.
+- API backend baru.
+- Sistem autentikasi produksi.
+- Layanan real-time lintasperangkat.
+- Integrasi eksternal yang tidak diperlukan.
+
+Fokus pada frontend dan alur kerja berbasis arsitektur yang sudah tersedia. Pertahankan penggunaan state, mock data, serta localStorage yang ada apabila masih dibutuhkan untuk prototipe.
+
+Fitur baru harus dapat dicoba menggunakan data demo dan state frontend, termasuk setelah refresh apabila pola penyimpanan lokal saat ini mendukungnya.
+
+Jangan menampilkan klaim bahwa data sudah tersinkronisasi dengan server jika backend belum tersedia.
+
+## 2. Lindungi fungsi yang sudah berjalan
+
+Sebelum mengubah kode:
+- Periksa implementasi komponen terkait.
+- Telusuri fungsi, tipe data, state, serta hubungan antarhalaman.
+- Pahami alur yang sudah berfungsi.
+- Lakukan perubahan secara terarah dan proporsional.
+
+Pertahankan navigasi, mock data, formula skor, fungsi filter, ekspor, anotasi mushaf, zoom, undo, penghapus, tombol plus/minus kesalahan, modal konfirmasi, dan logika lain yang sudah berjalan.
+
+Jangan mengganti implementasi dengan halaman demo baru. Jangan menghapus fitur hanya karena membutuhkan penyesuaian kode.
+
+Gunakan komponen bersama ketika hal itu membantu konsistensi, tetapi hindari refactor besar yang tidak diperlukan.
+
+## 3. Prinsip desain
+
+Pertahankan identitas aplikasi yang sudah ada:
+- Warna utama hijau gelap.
+- Background abu-abu sangat muda.
+- Surface putih.
+- Teks slate gelap.
+- Border tipis.
+- Navy gelap khusus workspace penilaian mushaf.
+
+Kurangi penggunaan warna yang tidak memiliki fungsi. Hilangkan gradient dekoratif, shadow berlebihan, border berlapis, badge yang terlalu mencolok, banner penjelasan panjang, dan kartu yang hanya mengulang informasi di bagian lain.
+
+Gunakan whitespace secara terukur. Tampilan harus terasa lega tanpa membuang ruang yang diperlukan untuk data.
+
+Gunakan tipografi sans-serif yang konsisten, hierarki judul yang jelas, ukuran teks yang nyaman, dan alignment yang presisi.
+
+Semua halaman harus terlihat sebagai satu produk yang dirancang bersama, bukan kumpulan halaman dengan gaya masing-masing.
+
+---
+
+# B. BANK SOAL DAN MAQRA
+
+File utama yang perlu diperiksa:
+- `src/components/bankSoal/BankSoalView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+- Komponen terkait pengelolaan peserta dan penetapan maqra.
+
+## 1. Satu peserta dapat memiliki beberapa soal
+
+Saat ini, alur penetapan soal perlu ditingkatkan agar satu peserta dapat memiliki lebih dari satu soal atau maqra.
+
+Implementasikan:
+- Admin dapat menambahkan beberapa soal ke satu peserta.
+- Admin dapat melihat seluruh soal yang sudah ditetapkan kepada peserta.
+- Admin dapat menambahkan soal tanpa menghapus penetapan soal sebelumnya.
+- Admin dapat mengganti atau menghapus satu penetapan soal secara terpisah.
+- Form peserta dan halaman detail peserta menampilkan daftar soal yang ditetapkan dengan rapi.
+- Data soal menampilkan informasi penting: judul/referensi maqra, surah, rentang ayat, nomor atau rentang halaman mushaf, cabang, jenjang, dan babak jika relevan.
+- Sediakan validasi agar penetapan ganda yang tidak disengaja tidak terjadi.
+- Semua data dan relasi yang baru harus kompatibel dengan data lama yang hanya memiliki satu soal.
+
+Gunakan struktur relasi yang tepat untuk mendukung satu peserta memiliki banyak penetapan soal. Periksa apakah struktur `Participant`, `Question`, dan `StageParticipation` yang ada dapat dikembangkan secara minimal tanpa memutus fitur lama.
+
+Jangan menetapkan batas satu soal secara hardcoded. Desain harus mendukung beberapa soal sesuai konfigurasi dan kebutuhan kompetisi.
+
+## 2. Fitur undian penentuan soal
+
+Buat alur undian soal yang profesional, mudah dipahami, dan konsisten dengan desain aplikasi.
+
+Admin harus dapat:
+1. Memilih ruang lingkup undian, seperti babak, cabang, jenjang, atau kelompok peserta sesuai struktur data yang tersedia.
+2. Memilih peserta yang akan mengikuti undian atau menjalankan undian pada sekumpulan peserta yang memenuhi kriteria.
+3. Menentukan jumlah soal yang akan diundi untuk tiap peserta jika dibutuhkan.
+4. Melihat soal yang tersedia sebelum pengundian.
+5. Menjalankan proses undian melalui tombol aksi yang jelas.
+6. Melihat hasil undian per peserta.
+7. Mengonfirmasi dan menyimpan hasil undian pada state frontend.
+8. Melihat kembali soal yang sudah terundi dari halaman detail peserta.
+
+Jangan mengundi soal yang tidak sesuai dengan cakupan kompetisi yang dipilih. Jika tidak ada soal yang memenuhi syarat, tampilkan pesan yang jelas dan jangan menghasilkan data palsu.
+
+Hasil undian yang sudah dikonfirmasi harus tercatat di state data peserta. Jangan hanya menampilkan hasil sementara pada modal yang hilang setelah ditutup.
+
+Jangan langsung melakukan pengundian otomatis ketika halaman dibuka. Pengundian harus merupakan tindakan yang disengaja oleh admin.
+
+Gunakan mekanisme acak yang sesuai untuk prototipe frontend, tetapi jangan mengklaimnya sebagai sistem undian yang sudah terverifikasi atau aman untuk perlombaan resmi.
+
+## 3. Preview soal harus menampilkan semua halaman yang relevan
+
+Saat ini, preview soal masih terlalu sederhana dan terbatas pada satu halaman. Perbaiki secara menyeluruh.
+
+Buat modal preview yang profesional dengan:
+- Header ringkas berisi judul soal dan identitas maqra.
+- Informasi surah, ayat, cabang, babak, dan jenjang yang relevan.
+- Mushaf ditampilkan dengan proporsi yang benar dan keterbacaan baik.
+- Navigasi halaman yang jelas.
+- Indikator nomor halaman.
+- Area preview yang dapat di-scroll secara vertikal.
+- Tombol tutup yang jelas.
+- Tampilan loading dan error yang informatif.
+
+Preview harus mendukung soal yang mencakup lebih dari satu halaman. Jangan membatasi preview hanya pada `pageNumber` tunggal.
+
+Periksa data soal yang ada. Jika data hanya menyediakan `pageNumber`, kembangkan secara backward-compatible agar soal dapat menyimpan `pageStart` dan `pageEnd`, atau daftar `pageNumbers`, sesuai model yang paling tepat bagi proyek ini.
+
+Form tambah/edit soal harus mendukung penetapan rentang halaman atau daftar halaman yang relevan.
+
+Aturan:
+- Jika soal memiliki satu halaman, tampilkan satu halaman.
+- Jika soal mencakup beberapa halaman, tampilkan seluruh halaman dalam urutan yang benar.
+- Jika halaman mulai dan akhir tersedia, tampilkan semua halaman di antara keduanya.
+- Jika daftar halaman tersedia, gunakan daftar tersebut.
+- Jika referensi halaman tidak tersedia, jangan mengarang rentang halaman. Tampilkan informasi referensi yang memang tersedia serta pesan yang jelas tentang keterbatasan preview.
+- Pastikan proporsi gambar tidak berubah dan navigasi tidak merusak layout.
+- Gunakan layanan atau sumber mushaf yang sudah ada jika sesuai. Hindari menambah dependency eksternal tanpa kebutuhan yang jelas.
+
+Desain preview harus memiliki kualitas yang sama dengan dialog profesional pada produk SaaS: spacing konsisten, teks tidak berdesakan, tombol rapi, dan area konten fokus pada soal.
+
+---
+
+# C. MASTER DATA: JENJANG DAN CABANG/GOLONGAN
+
+File utama:
+- `src/components/masterData/MasterDataView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+
+## 1. Tambahkan fitur hapus
+
+Jenjang dan Cabang/Golongan harus memiliki tindakan hapus yang jelas pada daftar data atau formulir edit yang relevan.
+
+Implementasikan:
+- Tombol aksi hapus yang konsisten dengan pola halaman administrasi.
+- Dialog konfirmasi sebelum penghapusan.
+- Informasi nama data yang akan dihapus agar pengguna tidak salah memilih.
+- State loading atau disabled selama tindakan berlangsung jika diperlukan.
+- Tampilan kosong setelah data berhasil dihapus.
+- Pembaruan daftar tanpa perlu memuat ulang halaman secara manual.
+
+## 2. Lindungi data yang masih digunakan
+
+Periksa apakah data Jenjang atau Cabang/Golongan masih digunakan oleh peserta, soal, babak, maupun konfigurasi lain.
+
+Jangan meninggalkan referensi yang rusak.
+
+Jika data belum digunakan, izinkan penghapusan setelah konfirmasi.
+
+Jika masih digunakan:
+- Jelaskan bahwa data memiliki referensi aktif.
+- Tampilkan informasi singkat tentang data yang terdampak.
+- Berikan alur aman untuk memperbarui referensi atau menonaktifkan data jika sesuai dengan pola aplikasi.
+- Jangan menghapus data terkait secara diam-diam.
+- Jangan melakukan cascade delete terhadap peserta atau penilaian.
+
+Gunakan satu pola konfirmasi dan umpan balik yang konsisten untuk seluruh tindakan penghapusan.
+
+---
+
+# D. MASTER DATA DAN KONFIGURASI RUBRIK
+
+## Hilangkan versi rubrik hardcoded
+
+Periksa semua komponen dan model data yang menampilkan atau mengisi versi rubrik tetap, termasuk nilai seperti `v2.4-LPTQ-2024` jika masih digunakan.
+
+Versi rubrik hardcoded tidak diperlukan pada UI tahap ini.
+
+Lakukan:
+- Hapus badge atau label versi rubrik yang ditanam permanen di halaman.
+- Hapus teks versi rubrik dari komponen penilaian apabila tidak memiliki kebutuhan fungsional.
+- Jangan menampilkan angka versi tetap pada data penilaian baru.
+- Hapus ketergantungan yang tidak diperlukan terhadap versi rubrik hardcoded.
+- Pertahankan pengaturan kategori kesalahan, deskripsi, bobot, dan perhitungan nilai yang sudah ada.
+- Pastikan seluruh perhitungan skor tetap berjalan sama seperti sebelumnya.
+
+Jangan mengganti versi hardcoded dengan versi hardcoded lain.
+
+Periksa penggunaan field versi di seluruh proyek sebelum menghapusnya. Jika ada fungsi yang benar-benar bergantung pada field tersebut, lakukan penyesuaian minimal agar fitur lain tetap berfungsi. Jangan merusak data lama.
+
+Halaman Master Data harus menonjolkan hal yang memang penting bagi administrator: kategori, kode, deskripsi/cakupan, bobot atau metode pengurangan, status aktif, dan tindakan edit/hapus.
+
+Kurangi banner informatif berukuran besar dan teks penjelasan yang tidak dibutuhkan untuk menyelesaikan tugas.
+
+---
+
+# E. WORKSPACE PENILAIAN HAKIM
+
+File utama:
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/components/penilaian/PenilaianHakimListView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+
+Ini adalah salah satu area paling penting. Perbaiki tampilan tanpa mengorbankan fungsi anotasi dan penilaian.
+
+## 1. Sederhanakan header
+
+Hilangkan informasi yang berulang.
+
+Header penilaian sebaiknya berisi informasi yang benar-benar dibutuhkan untuk bekerja:
+- Navigasi kembali.
+- Identitas peserta yang sedang dinilai, secara ringkas.
+- Informasi babak atau maqra jika belum tersedia di area lain.
+
+Jangan menampilkan nama hakim berulang kali di header. Nama hakim tidak perlu menjadi elemen visual yang dominan atau duplikatif.
+
+Hindari menampilkan nama dan nomor peserta yang sama pada banyak bagian tanpa tujuan yang jelas.
+
+Jangan menempatkan tombol finalisasi atau penguncian nilai sebagai tombol besar di header. Tindakan finalisasi harus berada di footer panel penilaian agar terhubung secara visual dengan nilai yang akan difinalisasi.
+
+Gunakan nama tindakan utama yang konsisten, yaitu **Simpan Penilaian**, lalu tampilkan dialog konfirmasi sebelum mengunci penilaian. Pertahankan logika finalisasi yang sudah ada.
+
+## 2. Mushaf harus memenuhi frame dengan benar
+
+Pada frame mushaf:
+- Gunakan seluruh ruang panel yang tersedia secara proporsional.
+- Mushaf harus tampil utuh dengan rasio aspek yang tepat.
+- Jangan membiarkan mushaf tampak terlalu kecil karena padding yang berlebihan.
+- Jangan menyebabkan area putih kosong yang besar di sekitar halaman tanpa alasan.
+- Jangan memotong bagian mushaf.
+- Pertahankan ketepatan posisi canvas anotasi terhadap gambar mushaf.
+- Pertahankan zoom, navigasi halaman, dan fungsi coretan.
+- Hindari overflow horizontal yang tidak perlu pada tingkat zoom normal.
+
+Gunakan layout flex/grid yang stabil untuk memisahkan toolbar, viewport mushaf, dan informasi halaman. Viewport mushaf harus mengambil sisa ruang yang tersedia.
+
+Pastikan halaman mushaf tetap terlihat jelas di berbagai ukuran viewport.
+
+## 3. Ringkas toolbar anotasi
+
+Toolbar sekarang memakan ruang dan membuat informasi halaman serta beberapa label alat tampak sempit atau terpotong.
+
+Susun ulang toolbar menjadi kelompok yang jelas:
+1. Navigasi halaman.
+2. Kontrol zoom.
+3. Pilihan pena atau stabilo.
+4. Pilihan warna.
+5. Penghapus dan undo.
+6. Hapus anotasi halaman, sebagai tindakan sekunder yang lebih aman.
+
+Gunakan icon button yang seragam dengan ukuran interaksi nyaman.
+
+Label teks boleh ditampilkan pada alat utama jika ruang cukup. Pada layar sempit, gunakan ikon dan tooltip yang jelas. Jangan biarkan label terpecah menjadi banyak baris yang tidak rapi.
+
+Gunakan pemisah atau jarak yang konsisten antargrup. Pertahankan semua fungsi toolbar yang sudah ada.
+
+Tindakan destruktif seperti hapus seluruh anotasi halaman harus memiliki konfirmasi.
+
+## 4. Perbaiki pembagian panel
+
+Pada desktop, gunakan layout dua panel:
+- Panel kiri: mushaf dan anotasi.
+- Panel kanan: identitas peserta secara ringkas, nilai, kategori kesalahan, dan tindakan finalisasi.
+
+Gunakan proporsi fleksibel. Mulai dari rasio sekitar 60:40 atau konfigurasi yang memberikan ruang memadai bagi kedua panel; sesuaikan berdasarkan lebar viewport.
+
+Panel kanan tidak boleh terlalu sempit sehingga nama kategori dan kontrol tombol menjadi berdesakan.
+
+## 5. Split view pada tablet
+
+Perbaiki layout tablet agar mushaf dan panel penilaian dapat digunakan secara efektif.
+
+Pada tablet landscape atau viewport yang cukup lebar:
+- Tampilkan mushaf dan panel penilaian berdampingan.
+- Pastikan kedua panel memiliki lebar yang dapat digunakan.
+- Jangan memaksakan ukuran panel desktop pada layar yang lebih sempit.
+- Pastikan toolbar tidak keluar dari viewport.
+
+Pada tablet portrait atau viewport yang tidak cukup lebar:
+- Sediakan dua tab atau kontrol yang jelas: **Mushaf** dan **Penilaian**.
+- Pastikan tab benar-benar berfungsi untuk berpindah panel.
+- Pertahankan konteks peserta saat berpindah panel.
+- Jangan membuat pengguna kehilangan posisi halaman mushaf atau nilai yang sedang dilihat.
+- Apabila split view masih layak digunakan berdasarkan lebar layar, sediakan opsi layout berdampingan yang terkontrol, tanpa membuat teks dan tombol terlalu kecil.
+
+Gunakan breakpoint yang konsisten dan uji layout pada ukuran tablet yang berbeda.
+
+## 6. Panel nilai
+
+Sederhanakan kartu nilai. Nilai akhir sementara dan jumlah pengurangan tetap harus mudah ditemukan, tetapi tidak perlu gradient dekoratif berlebihan.
+
+Untuk tiap kategori kesalahan:
+- Nama kategori harus terlihat lengkap.
+- Deskripsi boleh membungkus menjadi dua baris secara rapi.
+- Bobot atau nilai pengurangan harus terlihat.
+- Jumlah kesalahan dan tombol plus/minus harus sejajar.
+- Tombol minus tidak aktif ketika jumlah nol.
+- State terkunci harus jelas.
+- Hindari card styling berulang yang membuat daftar terlalu ramai.
+
+Gunakan tombol dan kontrol yang cukup besar agar nyaman digunakan selama penilaian panjang.
+
+## 7. Dialog konfirmasi finalisasi
+
+Dialog harus ringkas, terstruktur, dan tidak penuh penjelasan.
+
+Tampilkan:
+- Identitas peserta.
+- Nilai akhir.
+- Total pengurangan.
+- Jumlah anotasi jika relevan.
+- Peringatan khusus jika nilai masih sempurna atau belum ada kesalahan yang dicatat.
+- Tombol Batal dan Simpan Penilaian.
+
+Gunakan warna peringatan hanya untuk kondisi yang membutuhkan perhatian. Pertahankan perilaku konfirmasi serta penguncian yang sudah ada.
+
+---
+
+# F. MONITORING PENILAIAN: TAMPILAN SAMA, HAK AKSES BERBEDA
+
+File utama:
+- `src/components/penilaian/PenilaianHakimListView.tsx`
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/context/MtqContext.tsx`
+
+## 1. Samakan pengalaman visual admin dan hakim
+
+Halaman penilaian yang dilihat hakim dan halaman monitoring yang dibuka admin harus menggunakan visualisasi penilaian yang konsisten.
+
+Hindari dua halaman berbeda yang menampilkan data dan informasi penilaian yang seharusnya sama dengan susunan berbeda.
+
+Gunakan komponen penilaian bersama atau pendekatan serupa agar:
+- Identitas peserta konsisten.
+- Informasi soal/maqra konsisten.
+- Tampilan mushaf dan anotasi konsisten.
+- Nilai dan jumlah kesalahan konsisten.
+- Urutan kategori kesalahan konsisten.
+- Status penilaian konsisten.
+- Detail yang ditampilkan berasal dari assessment hakim yang benar.
+
+Jangan menduplikasi UI yang sama dalam dua implementasi terpisah jika dapat dihindari.
+
+## 2. Hakim boleh mengedit, admin hanya memantau
+
+Perilaku yang diinginkan:
+
+**Mode Hakim**
+- Melihat peserta yang ditugaskan.
+- Mengedit jumlah kesalahan melalui tombol plus/minus.
+- Menggambar, menghapus, dan melakukan undo anotasi selama belum final.
+- Menyimpan dan memfinalisasi penilaiannya sendiri.
+- Tidak dapat mengedit penilaian setelah terkunci menggunakan alur normal yang tersedia.
+
+**Mode Admin**
+- Dapat membuka detail penilaian untuk monitoring.
+- Dapat melihat mushaf beserta anotasi.
+- Dapat melihat nilai sementara, jumlah kesalahan, pengurangan, dan status.
+- Tidak dapat mengubah jumlah kesalahan.
+- Tidak dapat menambah/menghapus coretan.
+- Tidak dapat melakukan undo.
+- Tidak dapat mengunci atau memfinalisasi penilaian atas nama hakim.
+- Tidak dapat mengubah nilai melalui tombol, kontrol, atau handler yang disamarkan.
+
+Jika admin perlu memilih hakim untuk diperiksa, pastikan detail yang dibuka benar-benar milik hakim yang dipilih. Jangan menggunakan ID hakim default yang dapat membuat data salah ditampilkan.
+
+Penting: mode monitoring harus benar-benar memiliki perilaku baca-saja dalam frontend. Sembunyikan tindakan edit dan nonaktifkan handler mutasi untuk pengguna nonhakim; jangan hanya mengubah warna tombol.
+
+Tetap pertahankan fitur admin yang memang diperuntukkan bagi monitoring dan pengelolaan administrasi.
+
+Pembatasan frontend ini adalah perilaku prototipe. Jangan mengklaimnya sebagai pengamanan server atau otorisasi produksi.
+
+## 3. Konsistensi daftar monitoring
+
+Perbaiki filter di halaman Monitoring Penilaian agar sama dengan pola halaman administratif lain.
+
+- Jangan menambahkan judul "Filter" atau label terpisah di atas setiap kontrol.
+- Gunakan langsung dropdown yang memiliki placeholder atau pilihan yang jelas.
+- Search dan filter sejajar dalam satu toolbar.
+- Samakan tinggi search input, dropdown, dan tombol.
+- Status menggunakan badge yang seragam.
+- Pertahankan pencarian, filter, pemilihan hakim, serta navigasi menuju detail penilaian.
+
+---
+
+# G. REKAP NILAI REAL-TIME DAN MODAL RINCIAN PENILAIAN JURI
+
+File utama:
+- `src/components/rekap/RekapNilaiView.tsx`
+
+## 1. Sederhanakan halaman rekap
+
+Rekap nilai saat ini terlalu ramai dari sisi warna dan styling. Buat ulang hierarki visualnya tanpa menghapus fitur yang sudah ada.
+
+Pertahankan:
+- Judul dan informasi babak.
+- Search dan filter.
+- Tabel peserta.
+- Pengelompokan kolom berdasarkan hakim.
+- Nilai komponen dan nilai akhir.
+- Status penilaian.
+- Detail peserta.
+- Ekspor CSV.
+- Scroll horizontal jika kolom memang terlalu banyak.
+
+Perbaiki:
+- Kurangi jumlah warna latar pada sel tabel.
+- Hilangkan gradient dan border dekoratif yang tidak diperlukan.
+- Gunakan latar netral dan border yang halus.
+- Gunakan satu warna aksen yang lembut untuk menandai nilai akhir.
+- Samakan alignment angka, format desimal, ukuran teks, dan padding sel.
+- Buat header kelompok hakim mudah dibaca.
+- Hindari pemenggalan nama peserta dan nama hakim secara tidak wajar.
+- Jangan memperkecil teks secara berlebihan untuk memaksakan semua kolom masuk ke viewport.
+- Jika struktur memungkinkan, pertahankan kolom identitas peserta ketika tabel digeser horizontal.
+- Pertahankan fungsi filter dan ekspor.
+
+Pastikan warna digunakan untuk menyampaikan makna, bukan sekadar dekorasi.
+
+## 2. Perbaiki modal "Rincian Penilaian Juri"
+
+Audit dan desain ulang modal ini secara menyeluruh. Pertahankan semua informasi dan fungsi yang memang dibutuhkan, tetapi susun ulang agar tampil profesional dan mudah dipindai.
+
+Struktur yang disarankan:
+
+### Header
+- Judul: Rincian Penilaian Juri.
+- Nama dan ID peserta secara ringkas.
+- Babak atau cabang yang relevan.
+- Tombol tutup yang mudah ditemukan.
+
+Jangan mengulang informasi yang sudah terlihat di judul atau tabel utama.
+
+### Ringkasan
+Jika relevan, tampilkan ringkasan singkat:
+- Jumlah hakim yang telah menilai.
+- Jumlah penilaian final.
+- Nilai agregat jika memang tersedia dan valid.
+
+Jangan menambahkan nilai yang belum dihitung atau belum tersedia.
+
+### Isi utama
+Gunakan struktur yang konsisten, misalnya tabel dengan kolom:
+- Hakim.
+- Kategori kesalahan.
+- Jumlah kejadian.
+- Poin pengurangan.
+- Nilai akhir.
+- Status penilaian.
+
+Jika tiap hakim mempunyai banyak kategori, kelompokkan komponen per hakim secara jelas. Gunakan accordion atau bagian yang dapat dibuka jika hal itu membuat modal lebih ringkas, tetapi jangan menyembunyikan informasi penting tanpa petunjuk.
+
+Bedakan jumlah kejadian, total pengurangan, dan nilai akhir. Jangan mencampurkan istilah atau format angkanya.
+
+### Footer
+- Tampilkan tindakan tambahan hanya jika tersedia dan relevan.
+- Tombol tutup berada pada posisi yang konsisten.
+- Jika konten panjang, body modal dapat di-scroll sementara header tetap terlihat.
+- Footer tidak boleh menutupi isi.
+
+Modal harus memiliki ukuran yang sesuai dengan jumlah data, dengan maksimum lebar yang masuk akal dan tetap responsif. Pada layar kecil, gunakan hampir seluruh lebar yang tersedia tanpa menghilangkan margin yang nyaman.
+
+Hindari penggunaan banyak kotak warna, badge pada setiap teks, shadow berlebihan, dan deskripsi panjang.
+
+---
+
+# H. PENYEDERHANAAN VISUAL GLOBAL
+
+Audit semua halaman, bukan hanya halaman yang disebutkan sebelumnya.
+
+## 1. Kurangi teks penjelasan yang berlebihan
+
+Hapus atau ringkas teks yang:
+- Mengulangi judul halaman.
+- Mengulang informasi yang terlihat pada badge atau kartu.
+- Menjelaskan hal yang sudah jelas dari label kontrol.
+- Merupakan banner dekoratif dan tidak membantu pengambilan keputusan.
+
+Gunakan teks penjelasan hanya jika dibutuhkan untuk memahami alur kerja, konsekuensi tindakan, atau status yang tidak dapat dijelaskan dengan label singkat.
+
+Jangan menghapus peringatan penting, validasi, pesan error, atau informasi yang diperlukan agar pengguna tidak melakukan kesalahan.
+
+## 2. Batasi warna dan efek
+
+- Maksimal satu warna utama pada tombol aksi utama.
+- Gunakan warna status hanya pada status yang sesuai.
+- Gunakan warna latar kartu dengan hemat.
+- Kurangi penggunaan gradient, shadow, border kuat, dan badge berlebihan.
+- Hindari memberikan warna berbeda kepada setiap bagian yang sama pentingnya.
+- Hindari mengubah semuanya menjadi kartu apabila daftar sederhana atau tabel lebih efisien.
+
+## 3. Konsistensi komponen
+
+Samakan:
+- Judul dan subtitle halaman.
+- Search dan filter toolbar.
+- Tinggi input dan tombol.
+- Style tombol utama dan sekunder.
+- Modal dan formulir.
+- Tabel dan header kelompok.
+- Badge status.
+- Spacing, radius, border, dan shadow.
+- Icon button, tooltip, dan focus state.
+
+Gunakan komponen reusable apabila membantu mengurangi perbedaan antarhalaman.
+
+## 4. Responsivitas
+
+Periksa paling tidak pada:
+- Desktop: 1440 × 900.
+- Laptop: 1280 × 800.
+- Tablet landscape: 1024 × 768.
+- Tablet portrait: 768 × 1024.
+- Mobile: 390 × 844.
+
+Tidak boleh ada pemotongan teks yang mengganggu, kontrol yang saling bertumpuk, modal keluar dari viewport, atau bagian penting yang tidak dapat dijangkau.
+
+Khusus halaman penilaian, pastikan pengalaman split view dan perpindahan panel benar-benar berfungsi.
+
+---
+
+# I. VALIDASI SEBELUM MENYELESAIKAN TUGAS
+
+Setelah implementasi, periksa kembali seluruh alur berikut menggunakan data demo yang ada.
+
+### Bank Soal
+- Satu peserta dapat memiliki beberapa soal.
+- Menambah soal tidak menghapus soal yang sudah ditetapkan.
+- Penetapan dapat diperbarui atau dihapus per soal.
+- Undian mempertimbangkan ruang lingkup yang dipilih.
+- Hasil undian dapat dikonfirmasi, disimpan ke state, dan dibuka kembali.
+- Preview satu halaman dan multi-halaman berfungsi sesuai data halaman.
+- Preview memiliki loading, empty, dan error state.
+
+### Master Data
+- Jenjang dapat ditambah, diedit, dan dihapus dengan aman.
+- Cabang/Golongan dapat ditambah, diedit, dan dihapus dengan aman.
+- Referensi yang masih dipakai tidak dibiarkan rusak.
+- Tidak ada dialog konfirmasi yang terpotong atau tidak dapat di-scroll.
+
+### Rubrik
+- Tidak ada versi rubrik hardcoded yang masih ditampilkan atau ditanamkan pada penilaian baru.
+- Bobot dan jumlah kesalahan tetap menghitung nilai seperti sebelumnya.
+
+### Workspace dan monitoring
+- Mushaf tampil proporsional dalam frame.
+- Canvas anotasi tetap tepat berada di atas mushaf.
+- Toolbar efisien dan tidak bertumpuk.
+- Split view bekerja pada ukuran layar yang sesuai.
+- Tab Mushaf dan Penilaian berfungsi ketika digunakan pada tablet portrait.
+- Hakim dapat melakukan input sesuai aturan yang sudah ada.
+- Admin hanya dapat memantau, tidak dapat mengubah anotasi, angka kesalahan, ataupun memfinalisasi nilai.
+- Admin dapat melihat assessment hakim yang benar.
+- Tidak ada label nama hakim yang berulang dan tidak diperlukan.
+
+### Rekap
+- Tabel tetap terbaca dan dapat digeser.
+- Angka tersusun rapi.
+- Modal Rincian Penilaian Juri terstruktur dan responsif.
+- Filter, pencarian, detail, dan ekspor tetap berfungsi.
+
+### Pemeriksaan teknis
+- Jalankan TypeScript/lint dan build menggunakan skrip proyek yang tersedia.
+- Perbaiki error yang timbul akibat perubahan.
+- Periksa ulang fungsi yang terdampak.
+- Jangan menyatakan pengujian visual berhasil jika belum benar-benar dijalankan.
+- Jangan mengubah backend atau menambahkan database sebagai bagian tugas ini.
+
+---
+
+# URUTAN PRIORITAS IMPLEMENTASI
+
+Kerjakan secara berurutan untuk menjaga perubahan tetap terkendali:
+
+1. Buat design system dan konsistensi komponen global.
+2. Perbaiki workspace penilaian hakim serta perilaku baca-saja untuk admin.
+3. Perbaiki pembagian panel tablet, toolbar, dan tampilan mushaf.
+4. Benahi Bank Soal: multi-soal per peserta, undian, dan preview multi-halaman.
+5. Tambahkan penghapusan Jenjang dan Cabang/Golongan.
+6. Hilangkan versi rubrik hardcoded.
+7. Sempurnakan Monitoring Penilaian.
+8. Sederhanakan Rekap Nilai dan desain ulang modal Rincian Penilaian Juri.
+9. Rapikan halaman lain dan lakukan pemeriksaan responsivitas menyeluruh.
+
+Jika ada bagian yang saling bergantung, sesuaikan urutan berdasarkan struktur source code yang sebenarnya. Hindari perubahan besar yang tidak terkait.
+
+## OUTPUT AKHIR
+
+Implementasikan perubahan langsung pada proyek.
+
+Setelah selesai, berikan laporan singkat dalam bahasa Indonesia berisi:
+1. Fitur dan tampilan yang telah diperbaiki.
+2. File atau komponen utama yang diubah.
+3. Hasil pemeriksaan TypeScript/lint dan build.
+4. Bagian yang sudah diuji secara langsung.
+5. Bagian yang masih belum selesai atau memerlukan keputusan lanjutan.
+
+Jangan berhenti pada desain konseptual. Hasil akhir harus berupa implementasi frontend yang berfungsi, konsisten, clean, dan profesional, dengan semua fungsi lama yang relevan tetap terjaga.

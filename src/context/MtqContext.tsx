@@ -13,7 +13,9 @@ import {
   CompetitionStage,
   JudgeAssignment,
   AuditLogItem,
-  ParticipantProgressStatus
+  ParticipantProgressStatus,
+  GenericMasterItem,
+  AssignedMaqraItem
 } from '../types/mtq';
 import {
   INITIAL_TENANTS,
@@ -28,6 +30,8 @@ import {
   INITIAL_STAGES,
   INITIAL_JUDGE_ASSIGNMENTS,
   INITIAL_AUDIT_LOGS,
+  INITIAL_JENJANG,
+  INITIAL_CABANG,
   calculateScore
 } from '../data/mockData';
 
@@ -74,6 +78,16 @@ interface MtqContextType {
   stages: CompetitionStage[];
   judgeAssignments: JudgeAssignment[];
 
+  // Master Data: Jenjang & Cabang (Persisted)
+  jenjangList: GenericMasterItem[];
+  cabangList: GenericMasterItem[];
+  addJenjang: (item: Omit<GenericMasterItem, 'id' | 'tenantId'>) => void;
+  updateJenjang: (id: string, updated: Partial<GenericMasterItem>) => void;
+  deleteJenjang: (id: string) => { success: boolean; message: string; activeCount?: number };
+  addCabang: (item: Omit<GenericMasterItem, 'id' | 'tenantId'>) => void;
+  updateCabang: (id: string, updated: Partial<GenericMasterItem>) => void;
+  deleteCabang: (id: string) => { success: boolean; message: string; activeCount?: number };
+
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
   isSidebarOpen: boolean;
@@ -83,6 +97,10 @@ interface MtqContextType {
   setSelectedParticipantId: (id: string) => void;
   selectedStageName: string;
   setSelectedStageName: (name: string) => void;
+
+  // Active Monitoring Judge ID (when admin inspects a judge's assessment)
+  monitoringJudgeId: string;
+  setMonitoringJudgeId: (judgeId: string) => void;
 
   syncStatus: string;
   lastSyncTime: string;
@@ -127,6 +145,31 @@ interface MtqContextType {
     questionId: string,
     stageName?: string
   ) => void;
+  addQuestionToParticipant: (
+    participantId: string,
+    questionId: string,
+    stageName?: string
+  ) => void;
+  removeQuestionFromParticipant: (
+    participantId: string,
+    questionId: string,
+    stageName?: string
+  ) => void;
+  conductLotteryDraw: (options: {
+    stageName: string;
+    branchName?: string;
+    participantIds: string[];
+    questionsPerParticipant: number;
+  }) => {
+    success: boolean;
+    message: string;
+    results?: {
+      participantId: string;
+      participantName: string;
+      questionIds: string[];
+      questionTitles: string[];
+    }[];
+  };
   updateCategoryDeduction: (categoryId: string, deduction: number) => void;
   addErrorCategory: (cat: Omit<ErrorCategory, 'id' | 'tenantId'>) => void;
   updateErrorCategory: (id: string, updated: Partial<ErrorCategory>) => void;
@@ -208,7 +251,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [participants, setParticipants] = useState<Participant[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'participants');
-      return saved ? JSON.parse(saved) : INITIAL_PARTICIPANTS;
+      const loaded: Participant[] = saved ? JSON.parse(saved) : INITIAL_PARTICIPANTS;
+      return loaded.map((p) => {
+        if (!p.assignedQuestions || p.assignedQuestions.length === 0) {
+          return {
+            ...p,
+            assignedQuestions: p.questionId ? [{
+              questionId: p.questionId,
+              title: p.assignedMaqra || 'Maqra Perlombaan',
+              pageNumber: p.pageNumber || 305,
+              stageName: p.stageName
+            }] : [],
+            questionIds: p.questionId ? [p.questionId] : []
+          };
+        }
+        return p;
+      });
     } catch {
       return INITIAL_PARTICIPANTS;
     }
@@ -286,11 +344,31 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  // Master Data: Jenjang & Cabang (Persisted)
+  const [jenjangList, setJenjangList] = useState<GenericMasterItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'jenjang_list');
+      return saved ? JSON.parse(saved) : INITIAL_JENJANG;
+    } catch {
+      return INITIAL_JENJANG;
+    }
+  });
+
+  const [cabangList, setCabangList] = useState<GenericMasterItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'cabang_list');
+      return saved ? JSON.parse(saved) : INITIAL_CABANG;
+    } catch {
+      return INITIAL_CABANG;
+    }
+  });
+
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const toggleSidebar = () => setIsSidebarOpen((prev) => !prev);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string>('part-04');
   const [selectedStageName, setSelectedStageName] = useState<string>('Penyisihan');
+  const [monitoringJudgeId, setMonitoringJudgeId] = useState<string>('judge-1');
   const [syncStatus, setSyncStatus] = useState<string>('Tersimpan di browser');
   const [lastSyncTime, setLastSyncTime] = useState<string>('13:14:18 WIB');
   const [isDemoAccountModalOpen, setIsDemoAccountModalOpen] = useState<boolean>(false);
@@ -381,6 +459,18 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(STORAGE_PREFIX + 'judge_assignments', JSON.stringify(judgeAssignments));
     } catch {}
   }, [judgeAssignments]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + 'jenjang_list', JSON.stringify(jenjangList));
+    } catch {}
+  }, [jenjangList]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + 'cabang_list', JSON.stringify(cabangList));
+    } catch {}
+  }, [cabangList]);
 
   const currentTenant = tenants.find((t) => t.id === currentTenantId) || tenants[0];
   const currentUser = users.find((u) => u.id === currentUserId) || users[0];
@@ -809,7 +899,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         totalDeductions: 0,
         finalScore: 100.0,
         annotations: [],
-        rubricVersion: 'v2.4-lptq-2024',
         lastUpdated: nowTime,
         finalizedAt: nowTime
       };
@@ -1017,22 +1106,65 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     questionId: string,
     stageName?: string
   ) => {
+    addQuestionToParticipant(participantId, questionId, stageName);
+  };
+
+  const addQuestionToParticipant = (
+    participantId: string,
+    questionId: string,
+    stageName?: string
+  ) => {
     const q = questions.find((item) => item.id === questionId && item.tenantId === currentTenantId);
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!q || !part) return;
 
     const targetStage = stageName || part.stageName || selectedStageName;
-    const assignedLabel = `${q.title} (Hal. ${q.pageNumber})`;
+    const pageLabel = q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd
+      ? `Hal. ${q.pageStart} - ${q.pageEnd}`
+      : `Hal. ${q.pageNumber}`;
+    const assignedLabel = `${q.title} (${pageLabel})`;
+
+    const newMaqraItem: AssignedMaqraItem = {
+      questionId: q.id,
+      code: q.code,
+      title: q.title,
+      surahName: q.surahName,
+      surahNumber: q.surahNumber,
+      startAyah: q.startAyah,
+      endAyah: q.endAyah,
+      pageNumber: q.pageNumber,
+      pageStart: q.pageStart || q.pageNumber,
+      pageEnd: q.pageEnd || q.pageNumber,
+      pageNumbers: q.pageNumbers || [q.pageNumber],
+      assignedAt: getWibTime(),
+      stageName: targetStage
+    };
 
     // Update participant
     setParticipants((prev) =>
       prev.map((p) => {
         if (p.id === participantId && p.tenantId === currentTenantId) {
+          const currentList = p.assignedQuestions || (p.questionId ? [{
+            questionId: p.questionId,
+            title: p.assignedMaqra || 'Maqra Perlombaan',
+            pageNumber: p.pageNumber || 305,
+            stageName: p.stageName
+          }] : []);
+
+          if (currentList.some((item) => item.questionId === q.id)) {
+            return p;
+          }
+
+          const updatedList = [...currentList, newMaqraItem];
+          const updatedQIds = Array.from(new Set([...(p.questionIds || []), q.id]));
+
           return {
             ...p,
             questionId: q.id,
             assignedMaqra: assignedLabel,
-            pageNumber: q.pageNumber
+            pageNumber: q.pageNumber,
+            assignedQuestions: updatedList,
+            questionIds: updatedQIds
           };
         }
         return p;
@@ -1055,11 +1187,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             sp.participantId === participantId &&
             sp.stageName === targetStage
           ) {
+            const currentList = sp.assignedQuestions || [{
+              questionId: sp.questionId,
+              title: sp.assignedMaqra || 'Maqra Perlombaan',
+              pageNumber: sp.pageNumber || 305,
+              stageName: sp.stageName
+            }];
+            if (currentList.some((item) => item.questionId === q.id)) return sp;
             return {
               ...sp,
               questionId: q.id,
               assignedMaqra: assignedLabel,
-              pageNumber: q.pageNumber
+              pageNumber: q.pageNumber,
+              assignedQuestions: [...currentList, newMaqraItem]
             };
           }
           return sp;
@@ -1079,6 +1219,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           questionId: q.id,
           assignedMaqra: assignedLabel,
           pageNumber: q.pageNumber,
+          assignedQuestions: [newMaqraItem],
           status: 'Belum Dimulai'
         };
         return [...prev, newSp];
@@ -1090,10 +1231,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((item) => {
         if (item.tenantId !== currentTenantId) return item;
         if (item.id === questionId) {
-          return { ...item, assignedToParticipantId: participantId };
-        }
-        if (item.assignedToParticipantId === participantId) {
-          return { ...item, assignedToParticipantId: undefined };
+          const existingIds = item.assignedToParticipantIds || (item.assignedToParticipantId ? [item.assignedToParticipantId] : []);
+          return {
+            ...item,
+            assignedToParticipantId: participantId,
+            assignedToParticipantIds: Array.from(new Set([...existingIds, participantId]))
+          };
         }
         return item;
       })
@@ -1109,6 +1252,221 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       actorName: currentUser.name
     };
     setActivityLogs((prev) => [newLog, ...prev.slice(0, 20)]);
+  };
+
+  const removeQuestionFromParticipant = (
+    participantId: string,
+    questionId: string,
+    stageName?: string
+  ) => {
+    const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
+    if (!part) return;
+    const targetStage = stageName || part.stageName || selectedStageName;
+
+    setParticipants((prev) =>
+      prev.map((p) => {
+        if (p.id === participantId && p.tenantId === currentTenantId) {
+          const remaining = (p.assignedQuestions || []).filter((item) => item.questionId !== questionId);
+          const remainingIds = (p.questionIds || []).filter((id) => id !== questionId);
+          const fallback = remaining[0];
+          return {
+            ...p,
+            questionId: fallback ? fallback.questionId : '',
+            assignedMaqra: fallback ? fallback.title : 'Belum Ditetapkan',
+            pageNumber: fallback ? fallback.pageNumber : 305,
+            assignedQuestions: remaining,
+            questionIds: remainingIds
+          };
+        }
+        return p;
+      })
+    );
+
+    setStageParticipations((prev) =>
+      prev.map((sp) => {
+        if (sp.tenantId === currentTenantId && sp.participantId === participantId && sp.stageName === targetStage) {
+          const remaining = (sp.assignedQuestions || []).filter((item) => item.questionId !== questionId);
+          const fallback = remaining[0];
+          return {
+            ...sp,
+            questionId: fallback ? fallback.questionId : '',
+            assignedMaqra: fallback ? fallback.title : 'Belum Ditetapkan',
+            pageNumber: fallback ? fallback.pageNumber : 305,
+            assignedQuestions: remaining
+          };
+        }
+        return sp;
+      })
+    );
+
+    setQuestions((prev) =>
+      prev.map((item) => {
+        if (item.tenantId !== currentTenantId) return item;
+        if (item.id === questionId) {
+          const updatedIds = (item.assignedToParticipantIds || []).filter((pid) => pid !== participantId);
+          return {
+            ...item,
+            assignedToParticipantId: updatedIds[0] || undefined,
+            assignedToParticipantIds: updatedIds
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  const conductLotteryDraw = (options: {
+    stageName: string;
+    branchName?: string;
+    participantIds: string[];
+    questionsPerParticipant: number;
+  }) => {
+    const { stageName, branchName, participantIds, questionsPerParticipant } = options;
+
+    const eligibleQuestions = questions.filter((q) => {
+      if (q.tenantId !== currentTenantId || q.status !== 'Aktif') return false;
+      const matchesStage = !q.stageName || q.stageName === stageName || stageName === 'Semua Babak';
+      const matchesBranch = !branchName || branchName === 'Semua Cabang' || q.branchAndLevel.includes(branchName);
+      return matchesStage && matchesBranch;
+    });
+
+    if (eligibleQuestions.length === 0) {
+      return {
+        success: false,
+        message: `Tidak ada soal/maqra aktif yang memenuhi kriteria Babak "${stageName}" dan Cabang "${branchName || 'Semua'}". Silakan tambahkan soal terlebih dahulu.`
+      };
+    }
+
+    const targetParticipants = participants.filter((p) =>
+      participantIds.includes(p.id) && p.tenantId === currentTenantId
+    );
+
+    if (targetParticipants.length === 0) {
+      return {
+        success: false,
+        message: 'Tidak ada peserta yang dipilih untuk diundi.'
+      };
+    }
+
+    const results: {
+      participantId: string;
+      participantName: string;
+      questionIds: string[];
+      questionTitles: string[];
+    }[] = [];
+
+    targetParticipants.forEach((part) => {
+      const shuffled = [...eligibleQuestions].sort(() => Math.random() - 0.5);
+      const count = Math.min(questionsPerParticipant, shuffled.length);
+      const picked = shuffled.slice(0, count);
+
+      const pickedIds = picked.map((q) => q.id);
+      const pickedTitles = picked.map((q) => q.title);
+
+      results.push({
+        participantId: part.id,
+        participantName: part.name,
+        questionIds: pickedIds,
+        questionTitles: pickedTitles
+      });
+
+      picked.forEach((q) => {
+        addQuestionToParticipant(part.id, q.id, stageName);
+      });
+    });
+
+    return {
+      success: true,
+      message: `Berhasil mengundi maqra untuk ${results.length} peserta secara acak.`,
+      results
+    };
+  };
+
+  // Jenjang & Cabang Actions (Tenant Scoped)
+  const addJenjang = (item: Omit<GenericMasterItem, 'id' | 'tenantId'>) => {
+    const newItem: GenericMasterItem = {
+      ...item,
+      id: 'j-' + Date.now(),
+      tenantId: currentTenantId
+    };
+    setJenjangList((prev) => [...prev, newItem]);
+  };
+
+  const updateJenjang = (id: string, updated: Partial<GenericMasterItem>) => {
+    setJenjangList((prev) =>
+      prev.map((j) => (j.id === id ? { ...j, ...updated } : j))
+    );
+  };
+
+  const deleteJenjang = (id: string): { success: boolean; message: string; activeCount?: number } => {
+    const item = jenjangList.find((j) => j.id === id);
+    if (!item) return { success: false, message: 'Jenjang tidak ditemukan.' };
+
+    const usedByParticipants = participants.filter((p) =>
+      p.tenantId === currentTenantId && (p.levelName === item.name || item.name.includes(p.levelName) || p.levelName.includes(item.code))
+    ).length;
+
+    const usedByQuestions = questions.filter((q) =>
+      q.tenantId === currentTenantId && (q.branchAndLevel.includes(item.name) || q.branchAndLevel.includes(item.code))
+    ).length;
+
+    const totalActiveRefs = usedByParticipants + usedByQuestions;
+
+    if (totalActiveRefs > 0) {
+      return {
+        success: false,
+        activeCount: totalActiveRefs,
+        message: `Jenjang "${item.name}" masih digunakan oleh ${usedByParticipants} peserta dan ${usedByQuestions} soal. Penghapusan langsung dicegah untuk melindungi integritas referensi data.`
+      };
+    }
+
+    setJenjangList((prev) => prev.filter((j) => j.id !== id));
+    return { success: true, message: `Jenjang "${item.name}" berhasil dihapus.` };
+  };
+
+  const addCabang = (item: Omit<GenericMasterItem, 'id' | 'tenantId'>) => {
+    const newItem: GenericMasterItem = {
+      ...item,
+      id: 'cb-' + Date.now(),
+      tenantId: currentTenantId
+    };
+    setCabangList((prev) => [...prev, newItem]);
+  };
+
+  const updateCabang = (id: string, updated: Partial<GenericMasterItem>) => {
+    setCabangList((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ...updated } : c))
+    );
+  };
+
+  const deleteCabang = (id: string): { success: boolean; message: string; activeCount?: number } => {
+    const item = cabangList.find((c) => c.id === id);
+    if (!item) return { success: false, message: 'Cabang tidak ditemukan.' };
+
+    const usedByParticipants = participants.filter((p) =>
+      p.tenantId === currentTenantId && (p.branchName === item.name || item.name.includes(p.branchName))
+    ).length;
+
+    const usedByStages = stages.filter((s) =>
+      s.tenantId === currentTenantId && (s.branchName === item.name || item.name.includes(s.branchName))
+    ).length;
+
+    const usedByQuestions = questions.filter((q) =>
+      q.tenantId === currentTenantId && (q.branchAndLevel.includes(item.name) || q.branchAndLevel.includes(item.code))
+    ).length;
+
+    const totalActiveRefs = usedByParticipants + usedByStages + usedByQuestions;
+
+    if (totalActiveRefs > 0) {
+      return {
+        success: false,
+        activeCount: totalActiveRefs,
+        message: `Cabang "${item.name}" masih digunakan oleh ${usedByParticipants} peserta, ${usedByStages} babak, dan ${usedByQuestions} soal. Penghapusan langsung dicegah untuk melindungi integritas referensi data.`
+      };
+    }
+
+    setCabangList((prev) => prev.filter((c) => c.id !== id));
+    return { success: true, message: `Cabang "${item.name}" berhasil dihapus.` };
   };
 
   // Error Category Actions
@@ -1442,6 +1800,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         auditLogs,
         stages: stages.filter((s) => s.tenantId === currentTenantId),
         judgeAssignments: judgeAssignments.filter((ja) => ja.tenantId === currentTenantId),
+        jenjangList: jenjangList.filter((j) => j.tenantId === currentTenantId || !j.tenantId),
+        cabangList: cabangList.filter((c) => c.tenantId === currentTenantId || !c.tenantId),
+        addJenjang,
+        updateJenjang,
+        deleteJenjang,
+        addCabang,
+        updateCabang,
+        deleteCabang,
         currentView,
         setCurrentView,
         isSidebarOpen,
@@ -1451,6 +1817,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setSelectedParticipantId,
         selectedStageName,
         setSelectedStageName,
+        monitoringJudgeId,
+        setMonitoringJudgeId,
         syncStatus,
         lastSyncTime,
         updateErrorCount,
@@ -1465,6 +1833,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addQuestion,
         updateQuestion,
         assignMaqraToParticipant,
+        addQuestionToParticipant,
+        removeQuestionFromParticipant,
+        conductLotteryDraw,
         updateCategoryDeduction,
         addErrorCategory,
         updateErrorCategory,

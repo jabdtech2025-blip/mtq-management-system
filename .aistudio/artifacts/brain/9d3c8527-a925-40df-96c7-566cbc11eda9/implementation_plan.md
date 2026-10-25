@@ -1,88 +1,71 @@
-# Integrasi Lembar Mushaf Madinah 15 Baris (Mujamma' Malik Fahd) & Navigasi Presisi
+# Penyempurnaan UI/UX MTQ Management System — Laporan Implementasi
 
-Rencana implementasi untuk menghadirkan lembar asli Mushaf Madinah Rasm Utsmani standar 15 baris (cetakan resmi Mujamma' Al-Malik Fahd / King Fahd Complex) lengkap dengan ornamen bingkai emas-hijau khas Madinah, plakat nama surah, basmalah kaligrafi, penomoran ayat berornamen bunga, serta kanvas coret bebas ber-zoom presisi dan navigasi geser (*pan & zoom*).
-
----
-
-### User Review & Critical Decisions
-
-> [!IMPORTANT]
-> **Keputusan Kunci yang Dikonfirmasi**:
-> - **Format Tampilan Mushaf**: Menggunakan lembar asli Mushaf Madinah standar 15 baris per halaman (cetakan resmi Mujamma' Malik Fahd) yang menjadi standar resmi musabaqah nasional dan internasional.
-> - **Navigasi Zoom & Geser**: Dilengkapi kontrol zoom presisi (70% - 160%) dan kemampuan menggeser lembar (*panning/drag*) agar dewan hakim di tablet dapat memperbesar baris kalimat atau harakat tertentu saat menilai peserta.
-> - **Preservasi Anotasi**: Seluruh koordinat goresan pen/stabilo dewan hakim diikat secara proporsional terhadap resolusi dasar lembar mushaf sehingga tidak bergeser saat di-zoom atau digeser.
+Seluruh audit dan penyempurnaan arsitektur antarmuka pengguna (UI/UX) pada sistem MTQ Management System telah diselesaikan dengan mematuhi prinsip desain SaaS enterprise: bersih, konsisten, berorientasi produktivitas dewan hakim, bebas dari redundansi dekoratif/AI slop, serta mempertahankan seluruh logika penilaian dan formula musabaqah.
 
 ---
 
-## 1. Overview & Core Concept
-
-Mushaf Madinah standar 15 baris karya kaligrafer Utsman Thaha yang diterbitkan oleh Mujamma' Malik Fahd li Thiba'at al-Mushhaf asy-Syarif merupakan rujukan tunggal dalam penyelenggaraan MTQ di seluruh dunia. Integrasi ini memberikan:
-- **Tampilan Lembar Asli Madinah 15 Baris**: Memuat halaman 305 (Surah Maryam 1-15), halaman 140 (Al-An'am 95-99), halaman 260 (Ibrahim 35-41), dan halaman 304 (Al-Kahf 102-110) dengan tata letak baris, kepala surah, dan bingkai ornamen yang identik dengan fisik mushaf.
-- **Kanvas Transparan Terkalibrasi**: Lapisan kanvas interaktif berada tepat di atas lembar mushaf 15 baris untuk menangkap coretan tajwid/makhraj dan stabilo waqaf dewan hakim.
-- **Engine Zoom & Pan Responsif Tablet**: Mendukung gerakan cubit/tombol zoom serta geser kanvas yang mulus dengan akselerasi perangkat keras (*hardware accelerated transform*).
-
----
-
-## 2. Cetak Biru Antarmuka Panel Mushaf Madinah 15 Baris
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ [Hal: 305 ▾] [Zoom: 100% ▾] [-] [+] [Tangan Geser] [● Pen] [■ Stabilo] [⌫] [↶] [🗑]   │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ ┌─ LEMBAR MUSHAF MADINAH STANDAR 15 BARIS (MUJAMMA' MALIK FAHD) ─────────────────────┐ │
-│ │  Juz 16                    سُورَةُ مَرْيَمَ                    حِزْب 31              │ │
-│ │ ╔════════════════════════════════════════════════════════════════════════════════╗ │ │
-│ │ ║ ╔════════════════════════════════════════════════════════════════════════════╗ ║ │ │
-│ │ ║ ║ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  سُورَةُ مَرْيَمَ (مَكِّيَّةٌ)  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ║ ║ │ │
-│ │ ║ ╠════════════════════════════════════════════════════════════════════════════╣ ║ │ │
-│ │ ║ ║                 بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ                          ║ ║ │ │
-│ │ ║ ║ [Baris 1] كٓهيعٓصٓ ﴿١﴾ ذِكْرُ رَحْمَتِ رَبِّكَ عَبْدَهُۥ زَكَرِيَّآ ﴿٢﴾       ║ ║ │ │
-│ │ ║ ║ [Baris 2] إِذْ نَادَىٰ رَبَّهُۥ نِدَآءً خَفِيًّۭا ﴿٣﴾ قَالَ رَبِّ إِنِّى وَهَنَ  ║ ║ │ │
-│ │ ║ ║ [Baris 3] ٱلْعَظْمُ مِنِّى وَٱشْتَعَلَ ٱلرَّأْسُ شَيْبًۭا وَلَمْ أَكُنۢ          ║ ║ │ │
-│ │ ║ ║ [Baris 4] بِدُعَآئِكَ رَبِّ شَقِيًّۭا ﴿٤﴾ وَإِنِّى خِفْتُ ٱلْمَوَٰلِىَ مِن    ║ ║ │ │
-│ │ ║ ║ [Baris 5] وَرَآءِى وَكَانَتِ ٱمْرَأَتِى عَاقِرًۭا فَهَبْ لِى مِن لَّدُنكَ     ║ ║ │ │
-│ │ ║ ║ [Baris 6] وَلِيًّۭا ﴿٥﴾ يَرِثُنِى وَيَرِثُ مِنْ ءَالِ يَعْقُوبَ ۖ وَٱجْعَلْهُ  ║ ║ │ │
-│ │ ║ ║ [Baris 7] رَبِّ رَضِيًّۭا ﴿٦﴾ يَٰزَكَرِيَّآ إِنَّا نُبَشِّرُكَ بِغُلَٰمٍ      ║ ║ │ │
-│ │ ║ ║ [Baris 8] ٱسْمُهُۥ يَحْيَىٰ لَمْ نَجْعَل لَّهُۥ مِن قَبْلُ سَمِيًّۭا ﴿٧﴾       ║ ║ │ │
-│ │ ║ ║ [Baris 9] قَالَ رَبِّ أَنَّىٰ يَكُونُ لِى غُلَٰمٌۭ وَكَانَتِ ٱمْرَأَتِى عَاقِرًۭا ║ ║ │ │
-│ │ ║ ║ [Baris 10] وَقَدْ بَلَغْتُ مِنَ ٱلْكِبَرِ عِتِيًّۭا ﴿٨﴾ قَالَ كَذَٰلِكَ قَالَ   ║ ║ │ │
-│ │ ║ ║ [Baris 11] رَبُّكَ هُوَ عَلَىَّ هَيِّنٌۭ وَقَدْ خَلَقْتُكَ مِن قَبْلُ وَلَمْ  ║ ║ │ │
-│ │ ║ ║ [Baris 12] تَكُ شَيْـًۭٔا ﴿٩﴾ قَالَ رَبِّ ٱجْعَل لِّىٓ ءَايَةًۭ ۚ قَالَ ءَايَتُكَ ║ ║ │ │
-│ │ ║ ║ [Baris 13] أَلَّا تُكَلِّمَ ٱلنَّاسَ ثَلَٰثَ لَيَالٍۢ سَوِيًّۭا ﴿١٠﴾ فَخَرَجَ    ║ ║ │ │
-│ │ ║ ║ [Baris 14] عَلَىٰ قَوْمِهِۦ مِنَ ٱلْمِحْرَابِ فَأَوْحَىٰٓ إِلَيْهِمْ أَن سَبِّحُوا۟║ ║ │ │
-│ │ ║ ║ [Baris 15] بُكْرَةًۭ وَعَشِيًّۭا ﴿١١﴾... ﴿١٥﴾                                ║ ║ │ │
-│ │ ║ ╚════════════════════════════════════════════════════════════════════════════╝ ║ │ │
-│ │ ╚════════════════════════════════════════════════════════════════════════════════╝ │ │
-│ │                                    ٣٠٥                                           │ │
-│ └──────────────────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────────────┘
-```
+## 1. Bank Soal & Maqra Tilawah
+- **Multi-soal per Peserta**:
+  - Pengelolaan penetapan soal manual kini mendukung penugasan lebih dari satu maqra per peserta tanpa menimpa atau menghapus soal yang sudah diperoleh sebelumnya.
+  - Setiap maqra yang ditugaskan ke peserta dapat dihapus satu per satu secara independen via tombol hapus individual.
+- **Alur Undian Penentuan Soal (*Lottery Draw Workflow*)**:
+  - Disediakan tombol aksi khusus **"Undian Penentuan Soal"** yang membuka modal bertahap:
+    1. Filter ruang lingkup (Babak Musabaqah & Cabang/Golongan).
+    2. Pemilihan peserta aktif yang berpartisipasi dalam undian (lengkap dengan opsi *Pilih Semua* / *Batalkan Semua*).
+    3. Konfigurasi jumlah soal per peserta (1, 2, atau 3 soal).
+    4. Indikator pool soal tersedia yang cocok dengan kriteria.
+    5. Tombol eksekusi pengundian acak interaktif dengan feedback status.
+    6. Pratinjau hasil undian nama peserta dan maqra sebelum konfirmasi penyimpanan ke state.
+- **Pratinjau Multi-Halaman (*Multi-Page Preview*)**:
+  - Modal pratinjau mushaf kini mendukung rentang halaman (`pageStart` hingga `pageEnd`).
+  - Dilengkapi navigasi halaman (sebelumnya/selanjutnya), tombol pintas per nomor halaman, serta pemilih mode tampilan: **Halaman Tunggal** (*single page flip*) atau **Semua Halaman** (*vertical scroll gallery*).
+  - Kontrol zoom presisi (60% hingga 160%).
+- **Formulir Tambah & Edit Soal**:
+  - Dilengkapi input nomor halaman awal (`formPageStart`) dan halaman akhir (`formPageEnd`) berbatas 1–604.
 
 ---
 
-## 3. Rincian Teknis Implementasi
-
-1. **Aset & Renderer Lembar Mushaf Madinah**:
-   - Menghadirkan template visual Mushaf Madinah 15 baris dengan rasio aspek standar cetak ($1 : 1.48$), palet warna kertas krem khas Madinah (`#FBF9F1` / `#FAF6EB`), dan bingkai ornamen geometris islami beraksen emas-hijau zamrud (`#D4AF37`, `#166534`).
-   - Setiap halaman memuat 15 baris teks Rasm Utsmani berformat presisi sesuai Mushaf Madinah aslinya.
-   - Dilengkapi plakat kepala surah berornamen orisinal, Basmalah kaligrafi Utsman Thaha, penanda hizb/juz di margin samping, serta nomor halaman timur arab (misal: `٣٠٥`).
-
-2. **Sistem Kanvas Anotasi Terkalibrasi**:
-   - Kanvas transparan beresolusi tinggi ($1200 \times 1780\text{px}$ skala internal) di atas lembar mushaf.
-   - Mode interaksi ganda:
-     - *Mode Coret (Pen / Stabilo / Eraser)*: Menandai kesalahan bacaan peserta.
-     - *Mode Geser (Pan / Hand Tool)*: Memungkinkan dewan hakim menyeret halaman saat di-zoom tinggi ($> 100\%$) dengan mudah.
-   - Koordinat titik dinormalisasi relatif terhadap skala kanvas sehingga posisi coretan tetap presisi di atas ayat meskipun zoom diubah-ubah.
-
-3. **Status Sinkronisasi & Autosave**:
-   - Seluruh goresan pada setiap halaman disimpan secara terpisah dalam `assessments[].annotations` dan ter-autosave seketika ke `localStorage` dan context state.
-   - Menjaga kebersihan header penjurian sesuai permintaan pengguna (header tetap minimalis dan bersih).
+## 2. Master Data (Jenjang Usia & Cabang Musabaqah)
+- **Persistensi State Nyata**:
+  - Menggantikan state prototipe lokal dengan state terpusat `jenjangList` dan `cabangList` di `MtqContext` yang tersimpan aman di `localStorage`.
+- **Aksi Hapus & Perlindungan Relasi (*Delete Guard*)**:
+  - Setiap baris jenjang dan cabang kini memiliki tombol hapus (*trash icon*) serta tombol pengubah status (*Aktif / Nonaktif*).
+  - Jika item sedang digunakan oleh peserta aktif, babak musabaqah, atau paket soal, penghapusan permanen dicegah dengan memunculkan **Modal Peringatan Keamanan Relasi Data**.
+  - Modal ini merinci jumlah data musabaqah aktif yang terhubung dan menyediakan opsi aman **"Nonaktifkan Saja"** agar referensi penilaian yang telah berjalan tidak rusak.
+- **Pembersihan Badge Versi Rubrik**:
+  - Menghapus badge statis `Rubrik: v2.4 (Standar LPTQ)` pada judul halaman dan menghapus banner teks eksplanatori yang berulang.
 
 ---
 
-## 4. Rencana Verifikasi
+## 3. Workspace Penilaian Hakim & Mode Pemantauan Admin
+- **Header Bersih & Rapi**:
+  - Menghapus duplikasi nama hakim dari header dan menghapus tombol *Kunci Nilai* di header.
+  - Header kini fokus pada tombol navigasi kembali, pemilih peserta kompak (#undian, ID, nama), informasi babak & maqra, indikator sinkronisasi waktu, serta tab toggle tablet (*Mushaf* vs *Nilai*).
+- **Aksi Kunci Nilai Terfokus**:
+  - Tombol aksi utama **"Simpan Penilaian"** diletakkan secara teratur pada bagian bawah (*footer*) panel penilaian kanan, yang membuka dialog konfirmasi sebelum penguncian status final.
+- **Keselarasan Visual & Pembagian Hak Akses (*Role-Based Inspection*)**:
+  - Tampilan visual workspace dewan hakim dan pemantauan admin berbagi kanvas dan panel yang seragam.
+  - **Mode Hakim**: Hak akses penuh untuk menambah/mengurangi kesalahan (+ / -), menggunakan pen/stabilo/penghapus/undo coretan mushaf, dan mengunci penilaian.
+  - **Mode Admin (Pemantauan)**: Diaktifkan ketika dibuka oleh admin via `monitoringJudgeId`. Bersifat **Hanya Baca (*Strict Read-Only*)**:
+    - Kanvas coretan menonaktifkan interaksi mouse/touch (`pointer-events-none`).
+    - Toolbar kanvas menggantikan alat gambar dengan badge penanda: `Mode Pemantauan Admin (Hanya Baca) — [Nama Hakim]`.
+    - Tombol koreksi (+ / -) dinonaktifkan.
+    - Footer menampilkan kartu status pemantauan tanpa tombol kunci penilaian.
 
-1. **Verifikasi Visual 15 Baris**: Memastikan lembar Mushaf Madinah menampilkan 15 baris proporsional, plakat nama surah, dan nomor ayat ornamen bunga.
-2. **Uji Zoom & Geser**: Menguji zoom dari 80% hingga 140% dan menggeser kanvas tanpa distorsi tampilan teks.
-3. **Uji Ketepatan Coretan**: Menandai suatu ayat pada zoom 100%, memperbesar ke 130%, dan memverifikasi bahwa coretan tetap melekat tepat pada kata yang sama.
-4. **Verifikasi Kompilasi**: Menjalankan `compile_applet` dan `lint_applet` tanpa galat.
+---
+
+## 4. Daftar Penugasan & Pemantauan Hakim
+- **Penyelarasan Toolbar & State Inspeksi**:
+  - Input pencarian dan filter status/cabang diratakan dalam satu baris horizontal yang rapi.
+  - Ketika admin memilih dewan hakim yang akan dipantau atau mengklik penilaian peserta, sistem menyinkronkan `monitoringJudgeId` sehingga lembar kerja dual-panel membuka lembar hakim yang bersangkutan secara presisi.
+
+---
+
+## 5. Rekap Nilai & Modal Rincian Penilaian Juri
+- **Tabel Rekap Nilai**:
+  - Kolom nomor undian dan identitas peserta tetap terkunci (*sticky*) dengan bayangan pemisah tipis saat tabel digulir horizontal.
+  - Menghapus banner eksplanatori repetitif di bagian bawah tabel.
+- **Modal Rincian Penilaian Juri Terstruktur**:
+  - Menampilkan ringkasan metrik di bagian atas: *Dewan Hakim Bertugas*, *Status Penyelesaian*, dan *Rata-Rata Nilai Saat Ini*.
+  - Tabel rincian per hakim yang terstruktur dengan kolom: *Dewan Hakim & Bidang*, *Rincian Kesalahan*, *Pengurangan*, *Nilai Akhir*, dan *Status*.
+  - Menghapus seluruh string hardcode versi rubrik (seperti `v2.4-lptq-2024`).

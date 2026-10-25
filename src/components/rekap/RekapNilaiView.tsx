@@ -271,8 +271,8 @@ export const RekapNilaiView: React.FC = () => {
 
               {/* Secondary Subheaders */}
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[10px] font-semibold uppercase">
-                <th className="px-4 py-2 w-16">Undian</th>
-                <th className="px-4 py-2 min-w-[160px]">Nama & Grup</th>
+                <th className="sticky left-0 z-20 bg-slate-50 px-4 py-2 w-16">Undian</th>
+                <th className="sticky left-16 z-20 bg-slate-50 px-4 py-2 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">Nama & Grup</th>
                 <th className="px-3 py-2 w-24 border-r border-slate-200">Babak</th>
 
                 {activeJudges.map((j) => (
@@ -324,14 +324,14 @@ export const RekapNilaiView: React.FC = () => {
                       : null;
 
                   return (
-                    <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                      {/* Undian */}
-                      <td className="px-4 py-3 font-mono font-bold text-slate-900">
+                    <tr key={p.id} className="hover:bg-slate-50/80 transition-colors group">
+                      {/* Undian (Sticky left) */}
+                      <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 font-mono font-bold text-slate-900 transition-colors">
                         #{p.lotteryNumber}
                       </td>
 
-                      {/* Participant identity */}
-                      <td className="px-4 py-3 min-w-[160px]">
+                      {/* Participant identity (Sticky left-16 with shadow delimiter) */}
+                      <td className="sticky left-16 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)] transition-colors">
                         <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
                         <p className="text-[11px] text-slate-500 mt-0.5">
                           {p.participantId} · {p.kafilahName}
@@ -351,12 +351,12 @@ export const RekapNilaiView: React.FC = () => {
 
                         return (
                           <React.Fragment key={j.id}>
-                            <td className="px-2 py-3 text-right font-mono text-[11px] text-slate-500">
+                            <td className="px-2 py-3 text-right font-mono text-[11px] text-slate-500 tabular-nums">
                               {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
                             </td>
-                            <td className="px-3 py-3 text-right font-mono font-bold border-r border-slate-200">
+                            <td className="px-3 py-3 text-right font-mono font-bold border-r border-slate-200 tabular-nums">
                               {asm ? (
-                                <div className="flex items-center justify-end gap-1">
+                                <div className="flex items-center justify-end gap-1.5">
                                   <span
                                     className={
                                       isFinal
@@ -369,11 +369,11 @@ export const RekapNilaiView: React.FC = () => {
                                   {isFinal ? (
                                     <span
                                       className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0"
-                                      title="Finalized"
+                                      title="Final"
                                     />
                                   ) : inProgress ? (
                                     <span
-                                      className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse"
+                                      className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"
                                       title="Sedang Dinilai"
                                     />
                                   ) : null}
@@ -437,127 +437,183 @@ export const RekapNilaiView: React.FC = () => {
       </div>
 
       {/* Detail Breakdown Modal per Judge for Inspected Participant */}
-      {inspectedParticipant && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 p-6 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-start justify-between border-b pb-4 mb-4">
-              <div>
-                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 uppercase">
-                  Rincian Penilaian Juri
-                </span>
-                <h3 className="font-extrabold text-lg text-slate-900 mt-1">
-                  #{inspectedParticipant.lotteryNumber} {inspectedParticipant.name}
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {inspectedParticipant.participantId} · {inspectedParticipant.kafilahName} · Babak {inspectedParticipant.stageName}
-                </p>
-              </div>
-              <button
-                onClick={() => setInspectedParticipant(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {inspectedParticipant && (() => {
+        const participantAssessments = activeJudges.map((j) =>
+          getJudgeAssessment(inspectedParticipant.id, j.id)
+        );
+        const finalizedJudges = participantAssessments.filter((a) => a?.status === 'finalized').length;
+        const validJudgeScores = participantAssessments
+          .map((a) => (a ? a.finalScore : null))
+          .filter((s): s is number => s !== null);
+        const avgScore =
+          validJudgeScores.length > 0
+            ? (validJudgeScores.reduce((a, b) => a + b, 0) / validJudgeScores.length).toFixed(2)
+            : '—';
 
-            <div className="space-y-4">
-              {activeJudges.map((j) => {
-                const asm = getJudgeAssessment(inspectedParticipant.id, j.id);
-                const isFinal = asm?.status === 'finalized';
-
-                return (
-                  <div key={j.id} className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-900">{j.name}</h4>
-                        <p className="text-xs text-slate-500">{j.field}</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-mono font-extrabold text-base text-slate-900">
-                          {asm ? asm.finalScore.toFixed(2) : '—'}
-                        </span>
-                        <div className="flex items-center gap-1.5 justify-end mt-0.5">
-                          {isFinal ? (
-                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                              Terkunci ({asm?.finalizedAt ? new Date(asm.finalizedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'Final'})
-                            </span>
-                          ) : asm ? (
-                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                              Sedang Dinilai
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-slate-400">Belum Dinilai</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {asm ? (
-                      <div className="space-y-2 text-xs">
-                        <div className="bg-white rounded-lg p-3 border border-slate-200/80">
-                          <p className="font-semibold text-slate-700 mb-2">
-                            Rincian Pengurangan per Kategori Kesalahan:
-                          </p>
-                          {Object.keys(asm.errorCounts || {}).length === 0 || Object.values(asm.errorCounts || {}).every(c => c === 0) ? (
-                            <p className="text-slate-400 italic">Tidak ada catatan kesalahan (Tampil sempurna / Nilai 100.00)</p>
-                          ) : (
-                            <div className="space-y-1.5">
-                              {Object.entries(asm.errorCounts).map(([catId, count]) => {
-                                if (count === 0) return null;
-                                const deduction = (asm.deductions && asm.deductions[catId]) || 0;
-                                return (
-                                  <div key={catId} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
-                                    <span className="text-slate-700 font-medium capitalize">
-                                      {catId.replace('cat-', '').replace(/-/g, ' ')} ({count}x kejadian)
-                                    </span>
-                                    <span className="font-mono text-rose-600 font-bold">
-                                      -{deduction.toFixed(2)} poin
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          <div className="mt-2 pt-2 border-t flex justify-between font-bold text-slate-900">
-                            <span>Total Pengurangan:</span>
-                            <span className="font-mono text-rose-600">
-                              -{asm.totalDeductions.toFixed(2)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
-                          <span>Anotasi Mushaf: {asm.annotations?.length || 0} goresan</span>
-                          <span>Versi Aturan: {asm.rubricVersion || 'v2.4-lptq-2024'}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400 italic">Hakim belum mulai menilai peserta ini.</p>
-                    )}
+        return (
+          <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 z-50">
+            <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
+              {/* Header */}
+              <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between bg-slate-50">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/70 px-2.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
+                      Rincian Penilaian Juri
+                    </span>
+                    <span className="text-slate-300">·</span>
+                    <span className="text-xs font-semibold text-slate-600">
+                      Babak {inspectedParticipant.stageName}
+                    </span>
                   </div>
-                );
-              })}
-            </div>
+                  <h3 className="font-extrabold text-lg text-slate-900 leading-tight">
+                    #{inspectedParticipant.lotteryNumber} {inspectedParticipant.name}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {inspectedParticipant.participantId} · {inspectedParticipant.kafilahName} · {inspectedParticipant.branchName}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setInspectedParticipant(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-            <div className="mt-6 flex justify-end">
-              <button
-                onClick={() => setInspectedParticipant(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
-              >
-                Tutup
-              </button>
+              {/* Summary Metrics Cards */}
+              <div className="grid grid-cols-3 gap-3 p-4 sm:p-5 bg-white border-b border-slate-100">
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                  <span className="text-[11px] text-slate-500 block font-medium">Hakim Bertugas</span>
+                  <span className="font-mono font-bold text-base text-slate-900 mt-0.5 block tabular-nums">
+                    {activeJudges.length} Dewan Hakim
+                  </span>
+                </div>
+                <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200/80">
+                  <span className="text-[11px] text-emerald-800 block font-medium">Status Penilaian</span>
+                  <span className="font-mono font-bold text-base text-emerald-900 mt-0.5 block tabular-nums">
+                    {finalizedJudges} dari {activeJudges.length} Selesai
+                  </span>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                  <span className="text-[11px] text-slate-500 block font-medium">Rata-Rata Saat Ini</span>
+                  <span className="font-mono font-bold text-base text-emerald-900 mt-0.5 block tabular-nums">
+                    {avgScore} {validJudgeScores.length < activeJudges.length && validJudgeScores.length > 0 ? '(Sementara)' : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* Structured Judges Breakdown Table */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+                        <th className="px-4 py-2.5">Dewan Hakim & Bidang</th>
+                        <th className="px-4 py-2.5">Rincian Kesalahan</th>
+                        <th className="px-3 py-2.5 text-right">Pengurangan</th>
+                        <th className="px-3 py-2.5 text-right">Nilai Akhir</th>
+                        <th className="px-4 py-2.5 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {activeJudges.map((j) => {
+                        const asm = getJudgeAssessment(inspectedParticipant.id, j.id);
+                        const isFinal = asm?.status === 'finalized';
+                        const inProgress = asm?.status === 'in_progress';
+                        const activeErrors = Object.entries(asm?.errorCounts || {}).filter(
+                          ([_, count]) => count > 0
+                        );
+
+                        return (
+                          <tr key={j.id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="px-4 py-3 align-top">
+                              <p className="font-bold text-slate-900">{j.name}</p>
+                              <p className="text-[11px] text-slate-500 mt-0.5">{j.field}</p>
+                              {asm?.annotations && asm.annotations.length > 0 && (
+                                <span className="inline-block text-[10px] text-slate-400 mt-1 font-mono">
+                                  {asm.annotations.length} anotasi mushaf
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3 align-top">
+                              {!asm ? (
+                                <span className="text-slate-400 italic">Belum mulai menilai</span>
+                              ) : activeErrors.length === 0 ? (
+                                <span className="text-emerald-700 font-medium">
+                                  Sempurna (0 kesalahan tercatat)
+                                </span>
+                              ) : (
+                                <div className="space-y-1">
+                                  {activeErrors.map(([catId, count]) => {
+                                    const deduction = asm.deductions?.[catId] || 0;
+                                    return (
+                                      <div
+                                        key={catId}
+                                        className="flex items-center justify-between text-[11px] gap-2"
+                                      >
+                                        <span className="text-slate-700 capitalize">
+                                          {catId.replace('cat-', '').replace(/-/g, ' ')}:
+                                        </span>
+                                        <span className="font-mono text-slate-500">
+                                          {count}x (-{deduction.toFixed(2)})
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="px-3 py-3 align-top text-right font-mono font-bold text-rose-600 tabular-nums">
+                              {asm ? `-${asm.totalDeductions.toFixed(2)}` : '—'}
+                            </td>
+
+                            <td className="px-3 py-3 align-top text-right font-mono font-bold text-slate-900 text-sm tabular-nums">
+                              {asm ? asm.finalScore.toFixed(2) : '—'}
+                            </td>
+
+                            <td className="px-4 py-3 align-top text-center">
+                              {isFinal ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>Terkunci</span>
+                                </span>
+                              ) : inProgress ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                  <Clock className="w-3 h-3 text-amber-600" />
+                                  <span>Menilai</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                                  Menunggu
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">
+                  Data penilaian tersinkronisasi antar dewan juri
+                </span>
+                <button
+                  onClick={() => setInspectedParticipant(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  Tutup Rincian
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Illustrative Scoring Explanation Box */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3 text-xs text-slate-600">
-        <AlertCircle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-        <p className="leading-relaxed">
-          <strong>Catatan Formulasi Prototype:</strong> Rekap di atas secara dinamis menyesuaikan penugasan dewan hakim untuk babak yang dipilih. Rata-rata akhir berstatus <em>Provisional</em> hingga seluruh dewan hakim yang ditugaskan mengunci penilaian secara final. Rumus penilaian prototype menggunakan dasar nilai 100 dikurangi total bobot kesalahan.
-        </p>
-      </div>
+        );
+      })()}
     </div>
   );
 };

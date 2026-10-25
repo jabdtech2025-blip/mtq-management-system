@@ -33,6 +33,8 @@ export const PenilaianDualPanelView: React.FC = () => {
     setSelectedParticipantId,
     setCurrentView,
     currentUser,
+    users,
+    monitoringJudgeId,
     errorCategories,
     assessments,
     updateErrorCount,
@@ -47,10 +49,14 @@ export const PenilaianDualPanelView: React.FC = () => {
   const currentParticipant =
     participants.find((p) => p.id === selectedParticipantId) || participants[0] || null;
 
-  // Active judge ID & Name
-  const activeJudgeId = currentUser.role === 'judge' ? currentUser.id : 'judge-1';
+  // Active judge ID & Name with Admin Monitoring support
+  const isAdminMode = currentUser.role !== 'judge';
+  const activeJudgeId = isAdminMode
+    ? (monitoringJudgeId || 'judge-1')
+    : currentUser.id;
+  const inspectedJudge = users.find((u) => u.id === activeJudgeId);
   const activeJudgeName =
-    currentUser.role === 'judge' ? currentUser.name : 'KH. Ahmad Dahlan, M.Ag';
+    inspectedJudge?.name || (currentUser.role === 'judge' ? currentUser.name : 'KH. Ahmad Dahlan, M.Ag');
 
   // Find active assessment for this participant & judge
   const currentAssessment = currentParticipant
@@ -196,7 +202,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Erase stroke near point without white paint!
   const eraseStrokesNear = (point: NormalizedPoint) => {
-    if (!currentParticipant || isFinalized) return;
+    if (!currentParticipant || isFinalized || isAdminMode) return;
     const ERASE_RADIUS = 0.035; // Normalized radius
 
     const remainingStrokes = strokes.filter((s) => {
@@ -217,7 +223,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Pointer event handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!currentParticipant || isFinalized) return;
+    if (!currentParticipant || isFinalized || isAdminMode) return;
     const pt = getNormalizedPoint(e);
     if (!pt) return;
 
@@ -232,7 +238,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !currentParticipant || isFinalized) return;
+    if (!isDrawing || !currentParticipant || isFinalized || isAdminMode) return;
     const pt = getNormalizedPoint(e);
     if (!pt) return;
 
@@ -245,7 +251,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   };
 
   const handlePointerUp = () => {
-    if (!isDrawing || !currentParticipant || isFinalized) {
+    if (!isDrawing || !currentParticipant || isFinalized || isAdminMode) {
       setIsDrawing(false);
       setCurrentStroke([]);
       return;
@@ -271,7 +277,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Undo stroke on current page
   const handleUndo = () => {
-    if (!currentParticipant || isFinalized) return;
+    if (!currentParticipant || isFinalized || isAdminMode) return;
     const pageStrokes = strokes.filter((s) => s.page === currentPage);
     if (pageStrokes.length === 0) return;
 
@@ -283,7 +289,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Clear current page strokes only
   const handleConfirmClearPage = () => {
-    if (!currentParticipant || isFinalized) return;
+    if (!currentParticipant || isFinalized || isAdminMode) return;
     const updated = strokes.filter((s) => s.page !== currentPage);
     setStrokes(updated);
     saveAnnotations(currentParticipant.id, activeJudgeId, updated);
@@ -410,32 +416,12 @@ export const PenilaianDualPanelView: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Status & Save/Finalize */}
+        {/* Right Status */}
         <div className="flex items-center gap-2.5 sm:gap-4">
-          <div className="hidden sm:flex items-center gap-2 text-right">
-            <div>
-              <p className="text-[11px] font-semibold text-slate-200">{activeJudgeName}</p>
-              <div className="flex items-center justify-end gap-1.5 text-[10px] text-slate-400">
-                <Clock className="w-3 h-3 text-slate-500" />
-                <span>{syncStatus} ({lastSyncTime})</span>
-              </div>
-            </div>
+          <div className="hidden sm:flex items-center gap-1.5 text-right text-[11px] text-slate-400">
+            <Clock className="w-3.5 h-3.5 text-slate-500" />
+            <span>{syncStatus} ({lastSyncTime})</span>
           </div>
-
-          {isFinalized ? (
-            <div className="inline-flex items-center gap-1.5 bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs font-bold px-3 py-1.5 rounded-lg">
-              <Lock className="w-3.5 h-3.5" />
-              <span>Nilai Dikunci</span>
-            </div>
-          ) : (
-            <button
-              onClick={() => setIsConfirmModalOpen(true)}
-              className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition-all cursor-pointer"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Kunci Nilai</span>
-            </button>
-          )}
 
           {/* Toggle Tab for narrow tablets */}
           <div className="flex xl:hidden bg-slate-900 border border-slate-800 rounded-lg p-0.5">
@@ -529,7 +515,12 @@ export const PenilaianDualPanelView: React.FC = () => {
 
             {/* Right Tools Group: Drawing Tools, Colors, and Canvas Actions */}
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              {isFinalized ? (
+              {isAdminMode ? (
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg shadow-2xs">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Mode Pemantauan Admin (Hanya Baca) — {activeJudgeName}</span>
+                </div>
+              ) : isFinalized ? (
                 <div className="flex items-center gap-2 text-xs font-semibold text-amber-300 bg-amber-950/80 border border-amber-800/70 px-3.5 py-1.5 rounded-lg shadow-sm">
                   <Lock className="w-4 h-4 text-amber-400" />
                   <span>Mode Baca Saja (Terkunci)</span>
@@ -672,7 +663,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 onPointerCancel={handlePointerUp}
                 style={{ touchAction: 'none' }}
                 className={`absolute inset-0 w-full h-full ${
-                  isFinalized
+                  isAdminMode || isFinalized
                     ? 'cursor-default pointer-events-none'
                     : activeTool === 'eraser'
                     ? 'cursor-crosshair'
@@ -756,7 +747,11 @@ export const PenilaianDualPanelView: React.FC = () => {
                   Rubrik Pengurangan Kesalahan
                 </h3>
                 <span className="text-[11px] text-slate-500 font-medium">
-                  {isFinalized ? 'Mode Baca Saja' : 'Klik + / - untuk koreksi'}
+                  {isAdminMode
+                    ? 'Mode Pemantauan (Hanya Baca)'
+                    : isFinalized
+                    ? 'Mode Baca Saja (Terkunci)'
+                    : 'Klik + / - untuk koreksi'}
                 </span>
               </div>
 
@@ -794,13 +789,13 @@ export const PenilaianDualPanelView: React.FC = () => {
                           </span>
                         </div>
 
-                        {/* Plus / Minus Buttons (Enlarged touch targets w-8 h-8, disabled if finalized) */}
+                        {/* Plus / Minus Buttons (Disabled if admin mode or finalized) */}
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() =>
                               updateErrorCount(currentParticipant.id, activeJudgeId, cat.id, -1)
                             }
-                            disabled={count <= 0 || isFinalized}
+                            disabled={count <= 0 || isFinalized || isAdminMode}
                             className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-sm transition-all shadow-xs"
                             title="Kurangi 1 Kesalahan"
                             aria-label={`Kurangi kesalahan ${cat.name}`}
@@ -812,7 +807,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                             onClick={() =>
                               updateErrorCount(currentParticipant.id, activeJudgeId, cat.id, 1)
                             }
-                            disabled={isFinalized}
+                            disabled={isFinalized || isAdminMode}
                             className="w-8 h-8 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-sm transition-all shadow-xs"
                             title="Tambah 1 Kesalahan"
                             aria-label={`Tambah kesalahan ${cat.name}`}
@@ -830,7 +825,17 @@ export const PenilaianDualPanelView: React.FC = () => {
 
           {/* Bottom Panel Actions */}
           <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-2">
-            {isFinalized ? (
+            {isAdminMode ? (
+              <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl text-center">
+                <ShieldCheck className="w-5 h-5 text-emerald-800 mx-auto mb-1" />
+                <p className="text-xs font-bold text-slate-900">
+                  Mode Pemantauan Admin (Hanya Baca)
+                </p>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Lembar penilaian diampu oleh dewan hakim: {activeJudgeName}
+                </p>
+              </div>
+            ) : isFinalized ? (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
                 <CheckCircle className="w-5 h-5 text-emerald-700 mx-auto mb-1" />
                 <p className="text-xs font-bold text-emerald-900">
@@ -846,7 +851,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 className="w-full py-2.5 bg-emerald-800 hover:bg-emerald-900 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Lock className="w-4 h-4" />
-                <span>Kunci Penilaian Peserta Ini</span>
+                <span>Simpan Penilaian</span>
               </button>
             )}
 

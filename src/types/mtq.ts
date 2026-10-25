@@ -42,6 +42,22 @@ export interface Kafilah {
 
 export type ParticipantProgressStatus = 'Belum Dimulai' | 'Berlangsung' | 'Menunggu Hakim Lain' | 'Lengkap';
 
+export interface AssignedMaqraItem {
+  questionId: string;
+  code?: string;
+  title: string;
+  surahName?: string;
+  surahNumber?: number;
+  startAyah?: number;
+  endAyah?: number;
+  pageNumber: number;
+  pageStart?: number;
+  pageEnd?: number;
+  pageNumbers?: number[];
+  assignedAt?: string;
+  stageName?: string;
+}
+
 export interface StageParticipation {
   id: string;
   tenantId: string;
@@ -50,9 +66,10 @@ export interface StageParticipation {
   stageName: string;
   branchName: string;
   lotteryNumber: string;
-  questionId: string;
+  questionId: string; // Primary question for backward compatibility
   assignedMaqra: string;
   pageNumber: number;
+  assignedQuestions?: AssignedMaqraItem[];
   status: ParticipantProgressStatus;
   finalScore?: number;
   provisionalScore?: number;
@@ -74,9 +91,11 @@ export interface Participant {
   branchName: string; // e.g. "Tilawah Dewasa Putra"
   levelName: string;  // e.g. "Ulya"
   stageName: string;  // Current stage for compatibility
-  questionId: string;
+  questionId: string; // Primary question for backward compatibility
   assignedMaqra: string;
   pageNumber: number;
+  assignedQuestions?: AssignedMaqraItem[]; // Multiple questions support
+  questionIds?: string[]; // Array of assigned question IDs
   status: 'Menunggu' | 'Berlangsung' | 'Final';
   stageHistory?: {
     stageId?: string;
@@ -98,12 +117,25 @@ export interface Question {
   surahNumber: number;
   startAyah: number;
   endAyah: number;
-  pageNumber: number;
+  pageNumber: number; // Primary page / first page
+  pageStart?: number; // e.g. 305
+  pageEnd?: number;   // e.g. 307
+  pageNumbers?: number[]; // [305, 306, 307]
   branchAndLevel: string; // "Tilawah Dewasa Putra Ulya"
   stageName: string;      // "Penyisihan"
   status: 'Aktif' | 'Nonaktif';
   description?: string;
   assignedToParticipantId?: string;
+  assignedToParticipantIds?: string[];
+}
+
+export interface GenericMasterItem {
+  id: string;
+  tenantId: string;
+  name: string;
+  code: string;
+  description?: string;
+  status: 'Aktif' | 'Nonaktif';
 }
 
 export interface ErrorCategory {

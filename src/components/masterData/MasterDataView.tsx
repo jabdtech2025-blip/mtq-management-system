@@ -38,7 +38,15 @@ export const MasterDataView: React.FC = () => {
     judgeAssignments,
     addJudgeAssignment,
     removeJudgeAssignment,
-    users
+    users,
+    jenjangList,
+    cabangList,
+    addJenjang,
+    updateJenjang,
+    deleteJenjang,
+    addCabang,
+    updateCabang,
+    deleteCabang
   } = useMtq();
 
   const [activeTab, setActiveTab] = useState<MasterTab>('kategori');
@@ -58,24 +66,19 @@ export const MasterDataView: React.FC = () => {
   const [stageQuota, setStageQuota] = useState<number>(3);
   const [stageBranch, setStageBranch] = useState('Tilawah Dewasa Putra');
 
-  // Jenjang & Cabang local prototypes
-  const [jenjangList, setJenjangList] = useState<GenericItem[]>([
-    { id: 'j-1', name: 'Mutawassit (Tingkat Dasar)', code: 'MTW', status: 'Aktif' },
-    { id: 'j-2', name: 'Ulya (Tingkat Lanjutan/Dewasa)', code: 'ULY', status: 'Aktif' },
-    { id: 'j-3', name: 'Jami’ah (Tingkat Perguruan Tinggi)', code: 'JAM', status: 'Aktif' }
-  ]);
-
-  const [cabangList, setCabangList] = useState<GenericItem[]>([
-    { id: 'cb-1', name: 'Tilawah Dewasa Putra', code: 'TLW-PA', status: 'Aktif' },
-    { id: 'cb-2', name: 'Tilawah Dewasa Putri', code: 'TLW-PI', status: 'Aktif' },
-    { id: 'cb-3', name: 'Hifzhil Qur’an 10 Juz', code: 'HQ-10', status: 'Aktif' },
-    { id: 'cb-4', name: 'Hifzhil Qur’an 30 Juz', code: 'HQ-30', status: 'Aktif' }
-  ]);
-
   // Generic add state
   const [isAddGenericOpen, setIsAddGenericOpen] = useState(false);
   const [genericName, setGenericName] = useState('');
   const [genericCode, setGenericCode] = useState('');
+
+  // Delete Guard Warning State
+  const [deleteWarningItem, setDeleteWarningItem] = useState<{
+    type: 'jenjang' | 'cabang';
+    id: string;
+    name: string;
+    activeCount: number;
+    message: string;
+  } | null>(null);
 
   // Penugasan Hakim Modal
   const [isAssignJudgeOpen, setIsAssignJudgeOpen] = useState(false);
@@ -161,20 +164,60 @@ export const MasterDataView: React.FC = () => {
   const handleSaveGeneric = (e: React.FormEvent) => {
     e.preventDefault();
     if (!genericName || !genericCode) return;
-    const newItem: GenericItem = {
-      id: 'item-' + Date.now(),
-      name: genericName,
-      code: genericCode.toUpperCase(),
-      status: 'Aktif'
-    };
     if (activeTab === 'jenjang') {
-      setJenjangList((prev) => [...prev, newItem]);
+      addJenjang({
+        name: genericName,
+        code: genericCode.toUpperCase(),
+        status: 'Aktif'
+      });
     } else {
-      setCabangList((prev) => [...prev, newItem]);
+      addCabang({
+        name: genericName,
+        code: genericCode.toUpperCase(),
+        status: 'Aktif'
+      });
     }
     setGenericName('');
     setGenericCode('');
     setIsAddGenericOpen(false);
+  };
+
+  // Delete Guard handler
+  const handleDeleteMasterItem = (type: 'jenjang' | 'cabang', item: { id: string; name: string }) => {
+    if (type === 'jenjang') {
+      const res = deleteJenjang(item.id);
+      if (!res.success && res.activeCount && res.activeCount > 0) {
+        setDeleteWarningItem({
+          type,
+          id: item.id,
+          name: item.name,
+          activeCount: res.activeCount,
+          message: res.message
+        });
+      }
+    } else {
+      const res = deleteCabang(item.id);
+      if (!res.success && res.activeCount && res.activeCount > 0) {
+        setDeleteWarningItem({
+          type,
+          id: item.id,
+          name: item.name,
+          activeCount: res.activeCount,
+          message: res.message
+        });
+      }
+    }
+  };
+
+  // Deactivate instead of delete
+  const handleDeactivateWarningItem = () => {
+    if (!deleteWarningItem) return;
+    if (deleteWarningItem.type === 'jenjang') {
+      updateJenjang(deleteWarningItem.id, { status: 'Nonaktif' });
+    } else {
+      updateCabang(deleteWarningItem.id, { status: 'Nonaktif' });
+    }
+    setDeleteWarningItem(null);
   };
 
   // Save Judge Assignment
@@ -201,9 +244,6 @@ export const MasterDataView: React.FC = () => {
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
             Master Data & Konfigurasi Rubrik
           </h1>
-          <span className="text-[11px] font-mono font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
-            Rubrik: v2.4 (Standar LPTQ)
-          </span>
         </div>
         <p className="text-xs text-slate-500 mt-1">
           Konfigurasi bobot pengurangan kesalahan, struktur babak perlombaan, jenjang, cabang, serta dewan juri penilai
@@ -220,7 +260,7 @@ export const MasterDataView: React.FC = () => {
               onClick={() => setActiveTab(tab.id)}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
                 isActive
-                  ? 'bg-emerald-800 text-white shadow-xs'
+                  ? 'bg-emerald-800 text-white shadow-2xs'
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
               }`}
             >
@@ -229,14 +269,6 @@ export const MasterDataView: React.FC = () => {
             </button>
           );
         })}
-      </div>
-
-      {/* Explanatory Alert Box */}
-      <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-4 flex items-start gap-3 text-xs">
-        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-        <p className="text-slate-700 leading-relaxed">
-          <span className="font-bold text-slate-900">Ketentuan Versi Rubrik:</span> Penyesuaian bobot pengurangan atau formula penilaian pada tabel di bawah ini akan diterapkan pada penilaian baru atau versi rubrik yang diperbarui. Penilaian yang telah difinalisasi tetap terlindungi dan tersimpan sesuai bobot saat difinalisasi.
-        </p>
       </div>
 
       {/* Tab 1: Kategori Kesalahan & Bobot */}
@@ -377,14 +409,19 @@ export const MasterDataView: React.FC = () => {
 
       {/* Tab 3: Jenjang Usia */}
       {activeTab === 'jenjang' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Tingkat & Jenjang Usia Musabaqah
-            </h3>
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Tingkat & Jenjang Usia Musabaqah
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Pengelompokan usia peserta musabaqah
+              </p>
+            </div>
             <button
               onClick={() => setIsAddGenericOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Jenjang</span>
@@ -393,16 +430,39 @@ export const MasterDataView: React.FC = () => {
 
           <div className="divide-y divide-slate-100 text-xs">
             {jenjangList.map((item) => (
-              <div key={item.id} className="p-4 flex items-center justify-between hover:bg-slate-50">
-                <div>
-                  <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded mr-2">
+              <div key={item.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                     {item.code}
                   </span>
                   <span className="font-bold text-slate-900">{item.name}</span>
                 </div>
-                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full">
-                  {item.status}
-                </span>
+
+                <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={() =>
+                      updateJenjang(item.id, {
+                        status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
+                      })
+                    }
+                    className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
+                      item.status === 'Aktif'
+                        ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                        : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
+                    }`}
+                    title="Klik untuk ubah status"
+                  >
+                    {item.status}
+                  </button>
+
+                  <button
+                    onClick={() => handleDeleteMasterItem('jenjang', item)}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                    title="Hapus Jenjang"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -411,14 +471,19 @@ export const MasterDataView: React.FC = () => {
 
       {/* Tab 4: Cabang / Golongan */}
       {activeTab === 'cabang' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Daftar Cabang & Golongan Musabaqah
-            </h3>
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Daftar Cabang & Golongan Musabaqah
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Kategori cabang tilawah, hifzhil quran, dan golongan perlombaan
+              </p>
+            </div>
             <button
               onClick={() => setIsAddGenericOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Cabang</span>
@@ -427,16 +492,39 @@ export const MasterDataView: React.FC = () => {
 
           <div className="divide-y divide-slate-100 text-xs">
             {cabangList.map((item) => (
-              <div key={item.id} className="p-4 flex items-center justify-between hover:bg-slate-50">
-                <div>
-                  <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded mr-2">
+              <div key={item.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                     {item.code}
                   </span>
                   <span className="font-bold text-slate-900">{item.name}</span>
                 </div>
-                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full">
-                  {item.status}
-                </span>
+
+                <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={() =>
+                      updateCabang(item.id, {
+                        status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
+                      })
+                    }
+                    className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
+                      item.status === 'Aktif'
+                        ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                        : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
+                    }`}
+                    title="Klik untuk ubah status"
+                  >
+                    {item.status}
+                  </button>
+
+                  <button
+                    onClick={() => handleDeleteMasterItem('cabang', item)}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                    title="Hapus Cabang"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -740,6 +828,53 @@ export const MasterDataView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Guard Warning Modal with Deactivate Option */}
+      {deleteWarningItem && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-amber-600 mb-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5 text-amber-700" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Data Tidak Dapat Dihapus Permanen
+                </h3>
+                <p className="text-xs text-slate-500 font-mono">
+                  {deleteWarningItem.type === 'jenjang' ? 'Jenjang Usia' : 'Cabang'}: {deleteWarningItem.name}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 mb-5 text-xs text-slate-700 leading-relaxed">
+              <p>
+                Item ini terhubung aktif dengan <strong className="text-amber-900 font-bold">{deleteWarningItem.activeCount} data musabaqah</strong> (peserta, babak kompetisi, atau paket soal).
+              </p>
+              <p className="mt-1.5 text-slate-600">
+                Menghapusnya secara permanen akan merusak referensi data nilai yang sudah berjalan. Anda disarankan untuk <strong>menonaktifkannya</strong> agar tidak muncul di pilihan baru tanpa menghapus data terkait.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setDeleteWarningItem(null)}
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleDeactivateWarningItem}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+              >
+                Nonaktifkan Saja
+              </button>
+            </div>
           </div>
         </div>
       )}

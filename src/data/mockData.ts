@@ -213,6 +213,9 @@ export const INITIAL_QUESTIONS: Question[] = [
     startAyah: 1,
     endAyah: 15,
     pageNumber: 305,
+    pageStart: 305,
+    pageEnd: 306,
+    pageNumbers: [305, 306],
     branchAndLevel: 'Tilawah Dewasa Putra Ulya',
     stageName: 'Penyisihan',
     status: 'Aktif',
@@ -228,6 +231,9 @@ export const INITIAL_QUESTIONS: Question[] = [
     startAyah: 95,
     endAyah: 99,
     pageNumber: 140,
+    pageStart: 140,
+    pageEnd: 141,
+    pageNumbers: [140, 141],
     branchAndLevel: 'Tilawah Dewasa Putra Ulya',
     stageName: 'Penyisihan',
     status: 'Aktif',
@@ -243,6 +249,9 @@ export const INITIAL_QUESTIONS: Question[] = [
     startAyah: 35,
     endAyah: 41,
     pageNumber: 260,
+    pageStart: 260,
+    pageEnd: 261,
+    pageNumbers: [260, 261],
     branchAndLevel: 'Tilawah Dewasa Putra Ulya',
     stageName: 'Penyisihan',
     status: 'Aktif',
@@ -258,11 +267,63 @@ export const INITIAL_QUESTIONS: Question[] = [
     startAyah: 102,
     endAyah: 110,
     pageNumber: 304,
+    pageStart: 303,
+    pageEnd: 304,
+    pageNumbers: [303, 304],
     branchAndLevel: 'Tilawah Dewasa Putri Ulya',
     stageName: 'Penyisihan',
     status: 'Aktif',
     description: 'Khatam surat Al-Kahf dengan nada penutup Bayyati/Sika.'
+  },
+  {
+    id: 'mq-05',
+    tenantId: 'tenant-jabar',
+    code: 'MQ-TLW-05',
+    title: 'Maqra 05: QS. An-Nisa [4]: 58 - 63',
+    surahName: 'An-Nisa',
+    surahNumber: 4,
+    startAyah: 58,
+    endAyah: 63,
+    pageNumber: 87,
+    pageStart: 87,
+    pageEnd: 88,
+    pageNumbers: [87, 88],
+    branchAndLevel: 'Tilawah Dewasa Putra Ulya',
+    stageName: 'Penyisihan',
+    status: 'Aktif',
+    description: 'Ayat tentang amanah dan ketaatan kepada ulil amri.'
+  },
+  {
+    id: 'mq-06',
+    tenantId: 'tenant-jabar',
+    code: 'MQ-TLW-06',
+    title: 'Maqra 06: QS. Yusuf [12]: 1 - 10',
+    surahName: 'Yusuf',
+    surahNumber: 12,
+    startAyah: 1,
+    endAyah: 10,
+    pageNumber: 235,
+    pageStart: 235,
+    pageEnd: 236,
+    pageNumbers: [235, 236],
+    branchAndLevel: 'Tilawah Dewasa Putra Ulya',
+    stageName: 'Semifinal',
+    status: 'Aktif',
+    description: 'Kisah Nabi Yusuf as dengan penekanan pada fashahah.'
   }
+];
+
+export const INITIAL_JENJANG = [
+  { id: 'j-1', tenantId: 'tenant-jabar', name: 'Mutawassit (Tingkat Dasar)', code: 'MTW', status: 'Aktif' as const },
+  { id: 'j-2', tenantId: 'tenant-jabar', name: 'Ulya (Tingkat Lanjutan/Dewasa)', code: 'ULY', status: 'Aktif' as const },
+  { id: 'j-3', tenantId: 'tenant-jabar', name: 'Jami’ah (Tingkat Perguruan Tinggi)', code: 'JAM', status: 'Aktif' as const }
+];
+
+export const INITIAL_CABANG = [
+  { id: 'cb-1', tenantId: 'tenant-jabar', name: 'Tilawah Dewasa Putra', code: 'TLW-PA', status: 'Aktif' as const },
+  { id: 'cb-2', tenantId: 'tenant-jabar', name: 'Tilawah Dewasa Putri', code: 'TLW-PI', status: 'Aktif' as const },
+  { id: 'cb-3', tenantId: 'tenant-jabar', name: 'Hifzhil Qur’an 10 Juz', code: 'HQ-10', status: 'Aktif' as const },
+  { id: 'cb-4', tenantId: 'tenant-jabar', name: 'Hifzhil Qur’an 30 Juz', code: 'HQ-30', status: 'Aktif' as const }
 ];
 
 export const INITIAL_ERROR_CATEGORIES: ErrorCategory[] = [
