@@ -149,7 +149,7 @@ interface MtqContextType {
   // Master Data & Config (Tenant Scoped)
   addKafilah: (kafilah: Omit<Kafilah, 'id' | 'tenantId'>) => void;
   updateKafilah: (id: string, updated: Partial<Kafilah>) => void;
-  addParticipant: (part: Omit<Participant, 'id' | 'tenantId'>) => void;
+  addParticipant: (part: Omit<Participant, 'id' | 'tenantId'>) => { success: boolean; message: string };
   updateParticipant: (id: string, updated: Partial<Participant>) => void;
   addQuestion: (q: Omit<Question, 'id' | 'tenantId'>) => void;
   updateQuestion: (id: string, updated: Partial<Question>) => void;
@@ -162,7 +162,7 @@ interface MtqContextType {
     participantId: string,
     questionId: string,
     stageName?: string
-  ) => void;
+  ) => { success: boolean; message: string };
   removeQuestionFromParticipant: (
     participantId: string,
     questionId: string,
@@ -231,6 +231,12 @@ const MtqContext = createContext<MtqContextType | undefined>(undefined);
 
 // Storage Prefix V3 with clean isolation and schema versioning
 const STORAGE_PREFIX = 'mtq_platform_data_v3_';
+
+let logIdSequence = 0;
+const generateUniqueLogId = (prefix: string = 'act') => {
+  logIdSequence = (logIdSequence + 1) % 1000000;
+  return `${prefix}-${Date.now()}-${logIdSequence}-${Math.random().toString(36).substring(2, 8)}`;
+};
 
 export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [tenants, setTenants] = useState<Tenant[]>(() => {
@@ -394,7 +400,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'logs');
-      return saved ? JSON.parse(saved) : INITIAL_ACTIVITY_LOGS;
+      const rawLogs: ActivityLogItem[] = saved ? JSON.parse(saved) : INITIAL_ACTIVITY_LOGS;
+      const seenIds = new Set<string>();
+      const sanitized: ActivityLogItem[] = [];
+
+      rawLogs.forEach((item, idx) => {
+        let uniqueId = item.id;
+        if (!uniqueId || seenIds.has(uniqueId)) {
+          uniqueId = `act-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+        }
+        seenIds.add(uniqueId);
+        sanitized.push({ ...item, id: uniqueId });
+      });
+
+      return sanitized;
     } catch {
       return INITIAL_ACTIVITY_LOGS;
     }
@@ -403,7 +422,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'audit_logs');
-      return saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
+      const rawLogs: AuditLogItem[] = saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
+      const seenIds = new Set<string>();
+      const sanitized: AuditLogItem[] = [];
+
+      rawLogs.forEach((item, idx) => {
+        let uniqueId = item.id;
+        if (!uniqueId || seenIds.has(uniqueId)) {
+          uniqueId = `aud-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+        }
+        seenIds.add(uniqueId);
+        sanitized.push({ ...item, id: uniqueId });
+      });
+
+      return sanitized;
     } catch {
       return INITIAL_AUDIT_LOGS;
     }
@@ -929,7 +961,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (cat && delta !== 0) {
       const sign = delta > 0 ? `+${delta}` : `${delta}`;
       const newLog: ActivityLogItem = {
-        id: 'act-' + Date.now(),
+        id: generateUniqueLogId('act'),
         tenantId: currentTenantId,
         type: 'autosave',
         title: 'Koreksi Nilai',
@@ -937,7 +969,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: nowTime,
         actorName: targetJudge.name
       };
-      setActivityLogs((prev) => [newLog, ...prev.slice(0, 20)]);
+      setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
     }
 
     setSyncStatus('Tersimpan di browser');
@@ -1228,7 +1260,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const currentQObj = stageQuestions.find((q) => q.questionId === targetQuestionId);
     const qLabel = currentQObj?.code || 'Maqra';
     const newLog: ActivityLogItem = {
-      id: 'act-' + Date.now(),
+      id: generateUniqueLogId('act'),
       tenantId: currentTenantId,
       type: 'finalized',
       title: 'Penilaian Hakim Terkunci',
@@ -1236,7 +1268,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       timestamp: nowTime,
       actorName: targetJudge.name
     };
-    setActivityLogs((prev) => [newLog, ...prev.slice(0, 20)]);
+    setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
 
     setSyncStatus('Tersimpan di browser');
     setLastSyncTime(nowTime);
@@ -1268,7 +1300,36 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Participant Actions (Tenant Scoped)
-  const addParticipant = (data: Omit<Participant, 'id' | 'tenantId'>) => {
+  const addParticipant = (data: Omit<Participant, 'id' | 'tenantId'>): { success: boolean; message: string } => {
+    const idTrimmed = (data.participantId || '').trim();
+    if (idTrimmed) {
+      const existingId = participants.find(
+        (p) => p.tenantId === currentTenantId && p.participantId.trim().toLowerCase() === idTrimmed.toLowerCase()
+      );
+      if (existingId) {
+        return {
+          success: false,
+          message: `ID Peserta "${data.participantId}" sudah terdaftar atas nama ${existingId.name}.`
+        };
+      }
+    }
+
+    const lotteryTrimmed = (data.lotteryNumber || '').trim();
+    if (lotteryTrimmed) {
+      const existingLottery = participants.find(
+        (p) =>
+          p.tenantId === currentTenantId &&
+          p.branchName === data.branchName &&
+          p.lotteryNumber.trim().toLowerCase() === lotteryTrimmed.toLowerCase()
+      );
+      if (existingLottery) {
+        return {
+          success: false,
+          message: `Nomor undian "${data.lotteryNumber}" sudah digunakan oleh peserta ${existingLottery.name} pada cabang ${data.branchName}.`
+        };
+      }
+    }
+
     const newPartId = 'part-' + Date.now();
     const targetStage = data.stageName || 'Penyisihan';
     const targetStageObj = stages.find(
@@ -1276,10 +1337,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     const stageId = targetStageObj?.id || 'stage-penyisihan';
 
+    const hasQuestion = Boolean(data.questionId && data.questionId.trim() !== '');
+
     const newPart: Participant = {
       ...data,
       id: newPartId,
       tenantId: currentTenantId,
+      questionId: hasQuestion ? data.questionId : '',
+      assignedMaqra: hasQuestion ? data.assignedMaqra : 'Belum Ditetapkan',
+      pageNumber: hasQuestion ? data.pageNumber : 1,
+      assignedQuestions: data.assignedQuestions || [],
+      questionIds: data.questionIds || (hasQuestion ? [data.questionId] : []),
       stageHistory: [
         {
           stageId,
@@ -1297,10 +1365,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stageName: targetStage,
       branchName: data.branchName,
       lotteryNumber: data.lotteryNumber,
-      questionId: data.questionId,
-      assignedMaqra: data.assignedMaqra,
-      pageNumber: data.pageNumber,
-      status: 'Belum Dimulai'
+      questionId: hasQuestion ? data.questionId : '',
+      assignedMaqra: hasQuestion ? data.assignedMaqra : 'Belum Ditetapkan',
+      pageNumber: hasQuestion ? data.pageNumber : 1,
+      assignedQuestions: data.assignedQuestions || [],
+      status: hasQuestion ? 'Belum Dimulai' : 'Maqra Belum Ditetapkan'
     };
 
     setParticipants((prev) => [...prev, newPart]);
@@ -1313,6 +1382,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : k
       )
     );
+
+    const newLog: ActivityLogItem = {
+      id: generateUniqueLogId('act'),
+      tenantId: currentTenantId,
+      type: 'config',
+      title: 'Pendaftaran Peserta',
+      description: `Pendaftaran peserta ${newPart.participantId} (${newPart.name}) pada cabang ${newPart.branchName}.`,
+      timestamp: getWibTime(),
+      actorName: currentUser.name
+    };
+    setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
+
+    return {
+      success: true,
+      message: `Peserta "${newPart.name}" (${newPart.participantId}) berhasil didaftarkan.`
+    };
   };
 
   const updateParticipant = (id: string, updated: Partial<Participant>) => {
@@ -1367,12 +1452,39 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     participantId: string,
     questionId: string,
     stageName?: string
-  ) => {
+  ): { success: boolean; message: string } => {
     const q = questions.find((item) => item.id === questionId && item.tenantId === currentTenantId);
-    const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
-    if (!q || !part) return;
+    if (!q) {
+      return { success: false, message: 'Soal tidak ditemukan pada tenant ini.' };
+    }
+    if (q.status !== 'Aktif') {
+      return { success: false, message: `Soal ${q.code} sedang berstatus Nonaktif.` };
+    }
 
-    const targetStage = stageName || part.stageName || selectedStageName;
+    const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
+    if (!part) {
+      return { success: false, message: 'Peserta tidak ditemukan pada tenant ini.' };
+    }
+
+    const targetStage = stageName || q.stageName || part.stageName || selectedStageName;
+
+    // Validate stage compatibility: question's designated stage must match target stage
+    if (q.stageName && targetStage && q.stageName !== targetStage) {
+      return {
+        success: false,
+        message: `Ketidaksesuaian babak: Soal ${q.code} dialokasikan untuk Babak ${q.stageName}, sedangkan target adalah Babak ${targetStage}.`
+      };
+    }
+
+    // Check if participant already has this question in this stage
+    const currentStageQs = getParticipantStageQuestions(participantId, targetStage);
+    if (currentStageQs.some((item) => item.questionId === q.id)) {
+      return {
+        success: false,
+        message: `Peserta ${part.name} sudah memiliki soal ${q.code} pada Babak ${targetStage}.`
+      };
+    }
+
     const pageLabel = q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd
       ? `Hal. ${q.pageStart} - ${q.pageEnd}`
       : `Hal. ${q.pageNumber}`;
@@ -1398,24 +1510,16 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setParticipants((prev) =>
       prev.map((p) => {
         if (p.id === participantId && p.tenantId === currentTenantId) {
-          const currentList = p.assignedQuestions || (p.questionId ? [{
-            questionId: p.questionId,
-            title: p.assignedMaqra || 'Maqra Perlombaan',
-            pageNumber: p.pageNumber || 305,
-            stageName: p.stageName
-          }] : []);
-
-          if (currentList.some((item) => item.questionId === q.id)) {
-            return p;
-          }
-
+          const currentList = (p.assignedQuestions || []).filter(
+            (item) => item.questionId !== ''
+          );
           const updatedList = [...currentList, newMaqraItem];
           const updatedQIds = Array.from(new Set([...(p.questionIds || []), q.id]));
 
           return {
             ...p,
             questionId: q.id,
-            assignedMaqra: assignedLabel,
+            assignedMaqra: updatedList.length === 1 ? assignedLabel : `${updatedList.length} Maqra Ditetapkan`,
             pageNumber: q.pageNumber,
             assignedQuestions: updatedList,
             questionIds: updatedQIds
@@ -1441,19 +1545,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             sp.participantId === participantId &&
             sp.stageName === targetStage
           ) {
-            const currentList = sp.assignedQuestions || [{
-              questionId: sp.questionId,
-              title: sp.assignedMaqra || 'Maqra Perlombaan',
-              pageNumber: sp.pageNumber || 305,
-              stageName: sp.stageName
-            }];
-            if (currentList.some((item) => item.questionId === q.id)) return sp;
+            const currentList = (sp.assignedQuestions || []).filter((item) => item.questionId !== '');
+            const updatedList = [...currentList, newMaqraItem];
+            const nextStatus: ParticipantProgressStatus =
+              sp.status === 'Maqra Belum Ditetapkan' ? 'Belum Dimulai' : sp.status;
             return {
               ...sp,
               questionId: q.id,
-              assignedMaqra: assignedLabel,
+              assignedMaqra: updatedList.length === 1 ? assignedLabel : `${updatedList.length} Maqra Ditetapkan`,
               pageNumber: q.pageNumber,
-              assignedQuestions: [...currentList, newMaqraItem]
+              assignedQuestions: updatedList,
+              status: nextStatus
             };
           }
           return sp;
@@ -1497,7 +1599,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     const newLog: ActivityLogItem = {
-      id: 'act-' + Date.now(),
+      id: generateUniqueLogId('act'),
       tenantId: currentTenantId,
       type: 'config',
       title: 'Penetapan Maqra',
@@ -1505,7 +1607,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       timestamp: getWibTime(),
       actorName: currentUser.name
     };
-    setActivityLogs((prev) => [newLog, ...prev.slice(0, 20)]);
+    setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
+
+    return {
+      success: true,
+      message: `Soal ${q.code} berhasil ditetapkan untuk peserta ${part.name} pada Babak ${targetStage}.`
+    };
   };
 
   const removeQuestionFromParticipant = (
@@ -1549,7 +1656,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             questionId: fallback ? fallback.questionId : '',
             assignedMaqra: fallback ? fallback.title : 'Belum Ditetapkan',
             pageNumber: fallback ? fallback.pageNumber : 305,
-            assignedQuestions: remaining
+            assignedQuestions: remaining,
+            status: remaining.length === 0 ? ('Maqra Belum Ditetapkan' as ParticipantProgressStatus) : sp.status
           };
         }
         return sp;
@@ -1580,12 +1688,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       questionTitles: string[];
     }[],
     stageName: string
-  ) => {
+  ): { success: boolean; message: string } => {
     if (!results || results.length === 0) {
       return { success: false, message: 'Tidak ada hasil undian untuk ditetapkan.' };
     }
 
-    // Pre-validation: verify all participants and questions exist in current tenant and are valid
+    // 1. Validation across entire batch
     for (const r of results) {
       const part = participants.find((p) => p.id === r.participantId && p.tenantId === currentTenantId);
       if (!part) {
@@ -1605,27 +1713,160 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Atomic execution
+    const nowTime = getWibTime();
+    const targetStageObj = stages.find((s) => s.tenantId === currentTenantId && s.name === stageName);
+    const stageId = targetStageObj?.id || 'stage-penyisihan';
+
+    // Map of participantId -> AssignedMaqraItem[] to add
+    const itemsByParticipant: Record<string, AssignedMaqraItem[]> = {};
+    const questionToParticipantsMap: Record<string, string[]> = {};
+
     results.forEach((r) => {
+      itemsByParticipant[r.participantId] = [];
       r.questionIds.forEach((qId) => {
-        addQuestionToParticipant(r.participantId, qId, stageName);
+        const q = questions.find((item) => item.id === qId && item.tenantId === currentTenantId)!;
+        const pageLabel = q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd
+          ? `Hal. ${q.pageStart} - ${q.pageEnd}`
+          : `Hal. ${q.pageNumber}`;
+        const newMaqraItem: AssignedMaqraItem = {
+          questionId: q.id,
+          code: q.code,
+          title: q.title,
+          surahName: q.surahName,
+          surahNumber: q.surahNumber,
+          startAyah: q.startAyah,
+          endAyah: q.endAyah,
+          pageNumber: q.pageNumber,
+          pageStart: q.pageStart || q.pageNumber,
+          pageEnd: q.pageEnd || q.pageNumber,
+          pageNumbers: q.pageNumbers || [q.pageNumber],
+          assignedAt: nowTime,
+          stageName
+        };
+        itemsByParticipant[r.participantId].push(newMaqraItem);
+
+        if (!questionToParticipantsMap[qId]) {
+          questionToParticipantsMap[qId] = [];
+        }
+        questionToParticipantsMap[qId].push(r.participantId);
       });
     });
 
+    // 2. Atomic Participants Update
+    setParticipants((prev) =>
+      prev.map((p) => {
+        if (p.tenantId === currentTenantId && itemsByParticipant[p.id]) {
+          const newItems = itemsByParticipant[p.id];
+          const existing = (p.assignedQuestions || []).filter((item) => item.questionId !== '');
+          const combined = [...existing];
+          newItems.forEach((item) => {
+            if (!combined.some((c) => c.questionId === item.questionId)) {
+              combined.push(item);
+            }
+          });
+          const combinedQIds = Array.from(new Set([...(p.questionIds || []), ...newItems.map((n) => n.questionId)]));
+          const lastItem = combined[combined.length - 1];
+          return {
+            ...p,
+            questionId: lastItem ? lastItem.questionId : '',
+            assignedMaqra: combined.length === 1 ? combined[0].title : `${combined.length} Maqra Ditetapkan`,
+            pageNumber: lastItem ? lastItem.pageNumber : 1,
+            assignedQuestions: combined,
+            questionIds: combinedQIds
+          };
+        }
+        return p;
+      })
+    );
+
+    // 3. Atomic StageParticipations Update
+    setStageParticipations((prev) => {
+      const updated = prev.map((sp) => {
+        if (sp.tenantId === currentTenantId && sp.stageName === stageName && itemsByParticipant[sp.participantId]) {
+          const newItems = itemsByParticipant[sp.participantId];
+          const existing = (sp.assignedQuestions || []).filter((item) => item.questionId !== '');
+          const combined = [...existing];
+          newItems.forEach((item) => {
+            if (!combined.some((c) => c.questionId === item.questionId)) {
+              combined.push(item);
+            }
+          });
+          const lastItem = combined[combined.length - 1];
+          return {
+            ...sp,
+            questionId: lastItem ? lastItem.questionId : '',
+            assignedMaqra: combined.length === 1 ? combined[0].title : `${combined.length} Maqra Ditetapkan`,
+            pageNumber: lastItem ? lastItem.pageNumber : 1,
+            assignedQuestions: combined,
+            status: sp.status === 'Maqra Belum Ditetapkan' ? ('Belum Dimulai' as ParticipantProgressStatus) : sp.status
+          };
+        }
+        return sp;
+      });
+
+      // Ensure any participant without existing SP gets created
+      results.forEach((r) => {
+        const hasSp = updated.some(
+          (sp) => sp.tenantId === currentTenantId && sp.stageName === stageName && sp.participantId === r.participantId
+        );
+        if (!hasSp) {
+          const part = participants.find((p) => p.id === r.participantId && p.tenantId === currentTenantId);
+          if (part) {
+            const newItems = itemsByParticipant[r.participantId] || [];
+            const lastItem = newItems[newItems.length - 1];
+            updated.push({
+              id: `sp-${r.participantId}-${stageId}-${Date.now()}`,
+              tenantId: currentTenantId,
+              participantId: r.participantId,
+              stageId,
+              stageName,
+              branchName: part.branchName,
+              lotteryNumber: part.lotteryNumber,
+              questionId: lastItem ? lastItem.questionId : '',
+              assignedMaqra: newItems.length === 1 ? newItems[0].title : `${newItems.length} Maqra Ditetapkan`,
+              pageNumber: lastItem ? lastItem.pageNumber : 1,
+              assignedQuestions: newItems,
+              status: 'Belum Dimulai'
+            });
+          }
+        }
+      });
+
+      return updated;
+    });
+
+    // 4. Atomic Questions Update
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.tenantId === currentTenantId && questionToParticipantsMap[q.id]) {
+          const newPIds = questionToParticipantsMap[q.id];
+          const existingIds = q.assignedToParticipantIds || (q.assignedToParticipantId ? [q.assignedToParticipantId] : []);
+          const merged = Array.from(new Set([...existingIds, ...newPIds]));
+          return {
+            ...q,
+            assignedToParticipantId: merged[0] || undefined,
+            assignedToParticipantIds: merged
+          };
+        }
+        return q;
+      })
+    );
+
+    // 5. Single Consolidated Activity Log
     const newLog: ActivityLogItem = {
-      id: 'act-' + Date.now(),
+      id: generateUniqueLogId('act'),
       tenantId: currentTenantId,
       type: 'config',
       title: 'Penetapan Hasil Undian',
-      description: `Penetapan hasil undian maqra untuk ${results.length} peserta pada Babak ${stageName}.`,
-      timestamp: getWibTime(),
+      description: `Penetapan hasil undian maqra untuk ${results.length} peserta pada Babak ${stageName} berhasil disimpan secara permanen.`,
+      timestamp: nowTime,
       actorName: currentUser.name
     };
-    setActivityLogs((prev) => [newLog, ...prev.slice(0, 20)]);
+    setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
 
     return {
       success: true,
-      message: `Berhasil menetapkan maqra untuk ${results.length} peserta.`
+      message: `Berhasil menetapkan maqra untuk ${results.length} peserta pada Babak ${stageName}.`
     };
   };
 
@@ -1918,6 +2159,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * - Prevents duplicate stage participation
    * - Scoped strictly to currentTenantId
    * - Documents tie-break override reasons
+   * - Supports final stage championship finalization (when nextStageName is empty)
+   * - Records complete historical snapshots (score, rank, finalizedAt)
    */
   const advanceQualifiers = (
     currentStageName: string,
@@ -1928,9 +2171,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const currentStg = stages.find(
       (s) => s.tenantId === currentTenantId && s.name === currentStageName
     );
-    const nextStg = stages.find(
-      (s) => s.tenantId === currentTenantId && s.name === nextStageName
-    );
 
     if (!currentStg) {
       return {
@@ -1938,16 +2178,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         message: `Babak "${currentStageName}" tidak ditemukan pada tenant ini.`
       };
     }
-    if (!nextStg) {
-      return {
-        success: false,
-        message: `Babak lanjutan "${nextStageName}" tidak ditemukan pada tenant ini.`
-      };
-    }
     if (currentStg.isFinalized) {
       return {
         success: false,
         message: `Babak "${currentStageName}" sudah pernah difinalisasi sebelumnya.`
+      };
+    }
+
+    const isFinalChampionship = !nextStageName || nextStageName.trim() === '';
+    const nextStg = isFinalChampionship
+      ? null
+      : stages.find((s) => s.tenantId === currentTenantId && s.name === nextStageName);
+
+    if (!isFinalChampionship && !nextStg) {
+      return {
+        success: false,
+        message: `Babak lanjutan "${nextStageName}" tidak ditemukan pada tenant ini.`
       };
     }
 
@@ -1984,6 +2230,166 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    // Helper to compute participant's stage score
+    const computeParticipantScore = (partId: string): number => {
+      const stageQs = getParticipantStageQuestions(partId, currentStageName);
+      const scores: number[] = [];
+      stageQs.forEach((q) => {
+        assessments.forEach((a) => {
+          if (
+            a.tenantId === currentTenantId &&
+            a.participantId === partId &&
+            a.stageName === currentStageName &&
+            a.questionId === q.questionId &&
+            a.status === 'finalized'
+          ) {
+            scores.push(a.finalScore);
+          }
+        });
+      });
+      if (scores.length === 0) return 0;
+      return Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2));
+    };
+
+    // Calculate score and rank for every participant in current stage
+    const rankedList = stageParts
+      .map((sp) => ({
+        sp,
+        score: computeParticipantScore(sp.participantId)
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    const scoreMap: Record<string, { score: number; rank: number }> = {};
+    rankedList.forEach((item, index) => {
+      scoreMap[item.sp.participantId] = {
+        score: item.score,
+        rank: index + 1
+      };
+    });
+
+    const nowTime = getWibTime();
+    const quota = currentStg.qualificationQuota;
+
+    if (isFinalChampionship) {
+      // FINAL STAGE CHAMPIONSHIP FINALIZATION FLOW
+      // 1. Mark current stage as finalized and completed
+      setStages((prev) =>
+        prev.map((s) => {
+          if (s.id === currentStg.id && s.tenantId === currentTenantId) {
+            return {
+              ...s,
+              isFinalized: true,
+              status: 'Selesai',
+              finalizedAt: nowTime,
+              finalizedBy: currentUser.name
+            };
+          }
+          return s;
+        })
+      );
+
+      // 2. Update stageParticipations with permanent snapshot
+      setStageParticipations((prev) =>
+        prev.map((sp) => {
+          if (sp.tenantId === currentTenantId && sp.stageName === currentStageName) {
+            const data = scoreMap[sp.participantId] || { score: 0, rank: 99 };
+            const isWinner = qualifiedParticipantIds.includes(sp.participantId);
+            const championTitle =
+              data.rank === 1
+                ? 'Juara 1'
+                : data.rank === 2
+                ? 'Juara 2'
+                : data.rank === 3
+                ? 'Juara 3'
+                : `Finalis (Peringkat ${data.rank})`;
+            const reason = overrideReasons?.[sp.participantId] || championTitle;
+
+            return {
+              ...sp,
+              finalScore: data.score,
+              rank: data.rank,
+              isQualified: isWinner,
+              qualificationReason: reason,
+              finalizedAt: nowTime,
+              status: 'Lengkap' as ParticipantProgressStatus
+            };
+          }
+          return sp;
+        })
+      );
+
+      // 3. Update participants records with permanent championship history
+      setParticipants((prev) =>
+        prev.map((p) => {
+          if (p.tenantId === currentTenantId && scoreMap[p.id]) {
+            const data = scoreMap[p.id];
+            const isWinner = qualifiedParticipantIds.includes(p.id);
+            const championTitle =
+              data.rank === 1
+                ? 'Juara 1'
+                : data.rank === 2
+                ? 'Juara 2'
+                : data.rank === 3
+                ? 'Juara 3'
+                : `Finalis (Peringkat ${data.rank})`;
+            const reason = overrideReasons?.[p.id] || championTitle;
+
+            const historyEntry = {
+              stageId: currentStg.id,
+              stageName: currentStageName,
+              status: championTitle,
+              score: data.score,
+              rank: data.rank,
+              qualified: isWinner,
+              reason,
+              finalizedAt: nowTime
+            };
+
+            return {
+              ...p,
+              status: 'Final' as const,
+              stageHistory: [...(p.stageHistory || []), historyEntry]
+            };
+          }
+          return p;
+        })
+      );
+
+      // 4. Audit Log Entry
+      const newAudit: AuditLogItem = {
+        id: generateUniqueLogId('aud'),
+        timestamp: nowTime,
+        actor: `${currentUser.name} (${currentUser.role})`,
+        action: 'CHAMPIONSHIP_FINALIZED',
+        target: `Babak ${currentStageName} (Puncak Kejuaraan)`,
+        tenantName: currentTenant.name,
+        summary: `Pengesahan resmi pemenang dan kejuaraan Musabaqah Babak ${currentStageName}.`,
+        reason:
+          Object.keys(overrideReasons || {}).length > 0
+            ? JSON.stringify(overrideReasons)
+            : undefined,
+        outcome: 'Success'
+      };
+      setAuditLogs((prev) => [newAudit, ...prev.filter((l) => l.id !== newAudit.id)]);
+
+      const newLog: ActivityLogItem = {
+        id: generateUniqueLogId('act'),
+        tenantId: currentTenantId,
+        type: 'stage',
+        title: 'Musabaqah Selesai & Juara Disahkan',
+        description: `Seluruh rangkaian penilaian Babak ${currentStageName} telah disahkan dan ditetapkan secara resmi.`,
+        timestamp: nowTime,
+        actorName: currentUser.name
+      };
+      setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
+
+      return {
+        success: true,
+        message: `Hasil kejuaraan Babak ${currentStageName} berhasil disahkan secara resmi dan musabaqah dinyatakan selesai.`
+      };
+    }
+
+    // STANDARD ADVANCEMENT TO NEXT STAGE
     // VALIDATION: Prevent duplicate advancement if participants already exist in nextStage
     const alreadyAdvanced = stageParticipations.some(
       (sp) =>
@@ -1998,9 +2404,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    const nowTime = getWibTime();
-    const quota = currentStg.qualificationQuota;
-
     // 1. Mark current stage as finalized and activate next stage
     setStages((prev) =>
       prev.map((s) => {
@@ -2013,7 +2416,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             finalizedBy: currentUser.name
           };
         }
-        if (s.id === nextStg.id && s.tenantId === currentTenantId) {
+        if (nextStg && s.id === nextStg.id && s.tenantId === currentTenantId) {
           return { ...s, status: 'Aktif' };
         }
         return s;
@@ -2027,13 +2430,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = prev.map((sp) => {
         if (sp.tenantId === currentTenantId && sp.stageName === currentStageName) {
           const isQual = qualifiedParticipantIds.includes(sp.participantId);
+          const data = scoreMap[sp.participantId] || { score: 0, rank: 99 };
           const reason =
             overrideReasons?.[sp.participantId] ||
             (isQual ? `Lolos kuota Top ${quota}` : 'Tidak memenuhi kuota kelulusan');
           return {
             ...sp,
+            finalScore: data.score,
+            rank: data.rank,
             isQualified: isQual,
-            qualificationReason: reason
+            qualificationReason: reason,
+            finalizedAt: nowTime
           };
         }
         return sp;
@@ -2042,7 +2449,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Generate new distinct StageParticipation records for next stage with EMPTY questions
       qualifiedParticipantIds.forEach((pId) => {
         const part = participants.find((p) => p.id === pId && p.tenantId === currentTenantId);
-        if (part) {
+        if (part && nextStg) {
           newParticipations.push({
             id: `sp-${part.id}-${nextStg.id}-${Date.now()}`,
             tenantId: currentTenantId,
@@ -2052,10 +2459,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             branchName: part.branchName,
             lotteryNumber: part.lotteryNumber,
             questionId: '',
-            assignedMaqra: 'Belum ditetapkan untuk Babak ' + nextStg.name,
+            assignedMaqra: 'Belum Ditetapkan',
             pageNumber: 1,
             assignedQuestions: [],
-            status: 'Belum Dimulai'
+            status: 'Maqra Belum Ditetapkan'
           });
         }
       });
@@ -2067,15 +2474,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setParticipants((prev) =>
       prev.map((p) => {
         if (p.tenantId === currentTenantId) {
+          const data = scoreMap[p.id];
           if (qualifiedParticipantIds.includes(p.id)) {
-            const sp = stageParts.find((item) => item.participantId === p.id);
             const historyEntry = {
               stageId: currentStg.id,
               stageName: currentStageName,
               status: 'Lolos ke ' + nextStageName,
-              score: sp?.finalScore || sp?.provisionalScore,
+              score: data?.score,
+              rank: data?.rank,
               qualified: true,
-              reason: overrideReasons?.[p.id]
+              reason: overrideReasons?.[p.id] || `Lolos kuota Top ${quota}`,
+              finalizedAt: nowTime
             };
             return {
               ...p,
@@ -2083,19 +2492,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               status: 'Menunggu',
               stageHistory: [...(p.stageHistory || []), historyEntry],
               questionId: '',
-              assignedMaqra: 'Belum ditetapkan untuk Babak ' + nextStageName,
+              assignedMaqra: 'Belum Ditetapkan',
               assignedQuestions: [],
               questionIds: []
             };
           } else if (stageParts.some((item) => item.participantId === p.id)) {
-            const sp = stageParts.find((item) => item.participantId === p.id);
             const historyEntry = {
               stageId: currentStg.id,
               stageName: currentStageName,
               status: 'Gugur di ' + currentStageName,
-              score: sp?.finalScore || sp?.provisionalScore,
+              score: data?.score,
+              rank: data?.rank,
               qualified: false,
-              reason: overrideReasons?.[p.id]
+              reason: overrideReasons?.[p.id] || 'Tidak memenuhi kuota kelulusan',
+              finalizedAt: nowTime
             };
             return {
               ...p,
@@ -2109,7 +2519,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // 4. Audit Log Entry
     const newAudit: AuditLogItem = {
-      id: 'aud-' + Date.now(),
+      id: generateUniqueLogId('aud'),
       timestamp: nowTime,
       actor: `${currentUser.name} (${currentUser.role})`,
       action: 'STAGE_QUALIFICATION_ADVANCE',
@@ -2122,7 +2532,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : undefined,
       outcome: 'Success'
     };
-    setAuditLogs((prev) => [newAudit, ...prev]);
+    setAuditLogs((prev) => [newAudit, ...prev.filter((l) => l.id !== newAudit.id)]);
 
     return {
       success: true,

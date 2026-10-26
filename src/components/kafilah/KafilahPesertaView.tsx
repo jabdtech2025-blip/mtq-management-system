@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Plus, Search, Eye, X, UserPlus, Edit3, Check, Users } from 'lucide-react';
+import { Plus, Search, Eye, X, UserPlus, Edit3, Check, Users, AlertTriangle } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Kafilah, Participant } from '../../types/mtq';
 
 export const KafilahPesertaView: React.FC = () => {
-  const { kafilahs, participants, addKafilah, updateKafilah, addParticipant, updateParticipant } = useMtq();
+  const { kafilahs, participants, stages, addKafilah, updateKafilah, addParticipant, updateParticipant } = useMtq();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedKafilah, setSelectedKafilah] = useState<Kafilah | null>(null);
   const [isAddKafilahOpen, setIsAddKafilahOpen] = useState(false);
@@ -41,6 +41,8 @@ export const KafilahPesertaView: React.FC = () => {
   const [newPartLottery, setNewPartLottery] = useState('');
   const [newPartGender, setNewPartGender] = useState<'Putra' | 'Putri'>('Putra');
   const [newPartBranch, setNewPartBranch] = useState('Tilawah Dewasa Putra');
+  const [newPartStage, setNewPartStage] = useState('Penyisihan');
+  const [addPartError, setAddPartError] = useState('');
 
   const filteredKafilahs = kafilahs.filter(
     (k) =>
@@ -129,25 +131,35 @@ export const KafilahPesertaView: React.FC = () => {
 
   const handleSaveParticipant = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedKafilah || !newPartName) return;
-    addParticipant({
-      participantId: newPartId || `TLW-00${participants.length + 1}`,
-      lotteryNumber: newPartLottery || `0${participants.length + 1}`,
-      name: newPartName,
+    setAddPartError('');
+    if (!selectedKafilah || !newPartName.trim()) return;
+
+    const res = addParticipant({
+      participantId: newPartId.trim() || `TLW-${String(participants.length + 1).padStart(3, '0')}`,
+      lotteryNumber: newPartLottery.trim() || String(participants.length + 1).padStart(2, '0'),
+      name: newPartName.trim(),
       gender: newPartGender,
       kafilahId: selectedKafilah.id,
       kafilahName: selectedKafilah.name,
       branchName: newPartBranch,
       levelName: 'Ulya',
-      stageName: 'Penyisihan',
-      questionId: 'mq-04',
-      assignedMaqra: 'Maqra 04: QS. Maryam [19]: 1 - 15 (Hal. 305)',
-      pageNumber: 305,
+      stageName: newPartStage || 'Penyisihan',
+      questionId: '',
+      assignedMaqra: 'Belum Ditetapkan',
+      pageNumber: 1,
+      assignedQuestions: [],
       status: 'Menunggu'
     });
+
+    if (!res.success) {
+      setAddPartError(res.message);
+      return;
+    }
+
     setNewPartName('');
     setNewPartId('');
     setNewPartLottery('');
+    setAddPartError('');
     setIsAddParticipantOpen(false);
   };
 
@@ -340,9 +352,20 @@ export const KafilahPesertaView: React.FC = () => {
                           </td>
                           <td className="py-2.5 px-4 text-slate-500">
                             <div>{p.branchName}</div>
-                            <span className="text-[10px] text-emerald-800 font-semibold font-mono">
-                              Babak: {p.stageName}
-                            </span>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] text-emerald-800 font-semibold font-mono">
+                                Babak: {p.stageName}
+                              </span>
+                              {(!p.questionId || p.assignedMaqra === 'Belum Ditetapkan') && (!p.assignedQuestions || p.assignedQuestions.length === 0) ? (
+                                <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded font-medium">
+                                  Maqra Belum Ditetapkan
+                                </span>
+                              ) : (
+                                <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.2 rounded font-medium">
+                                  {p.assignedQuestions && p.assignedQuestions.length > 1 ? `${p.assignedQuestions.length} Maqra` : 'Maqra Ditetapkan'}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-2.5 px-4 text-center">
                             <span
@@ -737,6 +760,13 @@ export const KafilahPesertaView: React.FC = () => {
               </button>
             </div>
 
+            {addPartError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{addPartError}</span>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Nama Lengkap Peserta
@@ -778,7 +808,7 @@ export const KafilahPesertaView: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Jenis Kelamin
@@ -806,6 +836,26 @@ export const KafilahPesertaView: React.FC = () => {
                   <option value="Tahfidz 30 Juz Putra">Tahfidz 30 Juz Putra</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Babak Awal
+                </label>
+                <select
+                  value={newPartStage}
+                  onChange={(e) => setNewPartStage(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg outline-none"
+                >
+                  {stages.map((stg) => (
+                    <option key={stg.id} value={stg.name}>
+                      {stg.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-500">
+              <span className="font-semibold text-slate-700">Catatan Soal & Maqra:</span> Peserta baru belum memiliki maqra saat pendaftaran. Penetapan maqra dilakukan secara terpisah melalui modul Bank Soal (undian otomatis atau penetapan manual).
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">

@@ -257,9 +257,9 @@ export const DashboardView: React.FC = () => {
         </div>
 
         <div className="space-y-2.5">
-          {activityLogs.slice(0, 5).map((log) => (
+          {activityLogs.slice(0, 5).map((log, idx) => (
             <div
-              key={log.id}
+              key={`${log.id}-${idx}`}
               className="p-3 rounded-lg bg-slate-50 border border-slate-200/70 flex items-start justify-between gap-3 text-xs"
             >
               <div>

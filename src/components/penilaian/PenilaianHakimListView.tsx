@@ -16,6 +16,7 @@ export const PenilaianHakimListView: React.FC = () => {
     stageParticipations,
     judgeAssignments,
     assessments,
+    getParticipantStageQuestions,
     setSelectedParticipantId,
     setMonitoringJudgeId,
     setCurrentView
@@ -66,26 +67,53 @@ export const PenilaianHakimListView: React.FC = () => {
     });
   }, [participants, myAssignments, currentTenant.id]);
 
-  // Get assessment for each participant by this judge
+  // Get assessment for each participant by this judge across all stage questions
   const participantsWithJudgeState = useMemo(() => {
     return assignedParticipants.map((p) => {
-      const asm = assessments.find(
-        (a) =>
-          a.tenantId === currentTenant.id &&
-          a.participantId === p.id &&
-          a.judgeId === activeJudgeId &&
-          (a.stageName === p.stageName || !a.stageName)
-      );
-      const score = asm ? asm.finalScore.toFixed(2) : '--';
-      const status = asm ? asm.status : 'not_started';
+      const stageQuestions = getParticipantStageQuestions(p.id, p.stageName);
+      const judgeQuestionAssessments = stageQuestions.map((q) => {
+        return assessments.find(
+          (a) =>
+            a.tenantId === currentTenant.id &&
+            a.participantId === p.id &&
+            a.judgeId === activeJudgeId &&
+            (a.stageName === p.stageName || !a.stageName) &&
+            a.questionId === q.questionId
+        );
+      });
+
+      const finalizedAsms = judgeQuestionAssessments.filter((a) => a?.status === 'finalized');
+      const inProgressAsms = judgeQuestionAssessments.filter((a) => a?.status === 'in_progress');
+
+      const finalizedCount = finalizedAsms.length;
+      const totalQuestions = stageQuestions.length;
+
+      let status = 'not_started';
+      if (totalQuestions === 0) {
+        status = 'no_maqra';
+      } else if (finalizedCount === totalQuestions && totalQuestions > 0) {
+        status = 'finalized';
+      } else if (finalizedCount > 0 || inProgressAsms.length > 0) {
+        status = 'in_progress';
+      }
+
+      // Judge score: average across finalized questions for this judge
+      let score = '--';
+      if (finalizedCount > 0) {
+        const sum = finalizedAsms.reduce((acc, curr) => acc + (curr?.finalScore || 0), 0);
+        score = (sum / finalizedCount).toFixed(2);
+      }
+
       return {
         ...p,
-        judgeAssessment: asm,
+        stageQuestions,
+        finalizedCount,
+        totalQuestions,
         judgeScore: score,
         judgeStatus: status
       };
     });
-  }, [assignedParticipants, assessments, currentTenant.id, activeJudgeId]);
+  }, [assignedParticipants, assessments, currentTenant.id, activeJudgeId, getParticipantStageQuestions]);
 
   const filteredParticipants = participantsWithJudgeState.filter((p) => {
     const matchesSearch =
@@ -98,7 +126,7 @@ export const PenilaianHakimListView: React.FC = () => {
       statusFilter === 'Semua Status' ||
       (statusFilter === 'Final' && p.judgeStatus === 'finalized') ||
       (statusFilter === 'Berlangsung' && p.judgeStatus === 'in_progress') ||
-      (statusFilter === 'Menunggu' && p.judgeStatus === 'not_started');
+      (statusFilter === 'Menunggu' && (p.judgeStatus === 'not_started' || p.judgeStatus === 'no_maqra'));
 
     const matchesBranch =
       branchFilter === 'Semua Cabang' || p.branchName.includes(branchFilter);
@@ -114,7 +142,7 @@ export const PenilaianHakimListView: React.FC = () => {
     (p) => p.judgeStatus === 'in_progress'
   ).length;
   const totalPending = participantsWithJudgeState.filter(
-    (p) => p.judgeStatus === 'not_started'
+    (p) => p.judgeStatus === 'not_started' || p.judgeStatus === 'no_maqra'
   ).length;
 
   const handleOpenScoring = (participantId: string) => {
@@ -287,24 +315,44 @@ export const PenilaianHakimListView: React.FC = () => {
                       <p className="text-[11px] text-slate-400">{p.stageName}</p>
                     </td>
                     <td className="py-3.5 px-4">
-                      <p className="font-semibold text-emerald-800">{p.assignedMaqra}</p>
-                      <p className="text-[11px] text-slate-400">Riwayat Hafs 'an 'Ashim</p>
+                      {p.totalQuestions === 0 ? (
+                        <span className="inline-block px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                          Maqra Belum Ditetapkan
+                        </span>
+                      ) : (
+                        <div className="space-y-1">
+                          {p.stageQuestions.map((q) => (
+                            <div key={q.questionId} className="flex flex-wrap items-center gap-1.5 text-xs">
+                              <span className="font-semibold text-emerald-800">
+                                {q.code ? `${q.code}: ` : ''}{q.title}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                (Hal. {q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd ? `${q.pageStart}-${q.pageEnd}` : q.pageNumber})
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-center">
-                      {isFinal ? (
+                      {p.judgeStatus === 'no_maqra' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                          Maqra Belum Ada
+                        </span>
+                      ) : isFinal ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                           <Lock className="w-3 h-3" />
-                          Final/Terkunci
+                          Final ({p.finalizedCount}/{p.totalQuestions} Maqra)
                         </span>
                       ) : isInProgress ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                          Berlangsung
+                          Berlangsung ({p.finalizedCount}/{p.totalQuestions} Maqra)
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600">
                           <Clock className="w-3 h-3 text-slate-400" />
-                          Menunggu
+                          Belum Dimulai (0/{p.totalQuestions} Maqra)
                         </span>
                       )}
                     </td>
@@ -312,18 +360,26 @@ export const PenilaianHakimListView: React.FC = () => {
                       {p.judgeScore}
                     </td>
                     <td className="py-3.5 px-4 text-center">
-                      {isInProgress ? (
+                      {p.totalQuestions === 0 ? (
+                        <button
+                          disabled
+                          className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-400 font-semibold text-xs px-3 py-1.5 rounded-lg cursor-not-allowed shadow-none"
+                          title="Peserta belum memiliki maqra pada babak ini"
+                        >
+                          <span>Menunggu Maqra</span>
+                        </button>
+                      ) : isInProgress ? (
                         <button
                           onClick={() => handleOpenScoring(p.id)}
-                          className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-3.5 py-1.5 rounded-lg shadow-xs transition-all"
+                          className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-3.5 py-1.5 rounded-lg shadow-xs transition-all cursor-pointer"
                         >
                           <BookmarkCheck className="w-3.5 h-3.5" />
-                          <span>Mulai Menilai</span>
+                          <span>Lanjut Menilai</span>
                         </button>
                       ) : isFinal ? (
                         <button
                           onClick={() => handleOpenScoring(p.id)}
-                          className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-xs px-3 py-1.5 rounded-lg transition-all"
+                          className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer"
                         >
                           <BookmarkCheck className="w-3.5 h-3.5 text-slate-400" />
                           <span>Lihat Lembar</span>
@@ -331,7 +387,7 @@ export const PenilaianHakimListView: React.FC = () => {
                       ) : (
                         <button
                           onClick={() => handleOpenScoring(p.id)}
-                          className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-xs px-3 py-1.5 rounded-lg transition-all"
+                          className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer"
                         >
                           <BookmarkCheck className="w-3.5 h-3.5 text-slate-400" />
                           <span>Mulai Menilai</span>

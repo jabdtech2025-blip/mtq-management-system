@@ -286,12 +286,11 @@ export const HasilKelulusanView: React.FC = () => {
     });
   };
 
-  // Confirm Advancement to Next Stage with validation feedback
+  // Confirm Advancement to Next Stage OR Finalize Championship
   const handleConfirmAdvancement = () => {
-    if (!nextStage) return;
-
     const qualifiedIds = qualifiedParticipants.map((item) => item.participant.id);
-    const result = advanceQualifiers(selectedStageName, nextStage.name, qualifiedIds, overrideReasons);
+    const targetNextStage = nextStage ? nextStage.name : '';
+    const result = advanceQualifiers(selectedStageName, targetNextStage, qualifiedIds, overrideReasons);
 
     setIsConfirmAdvancementOpen(false);
     if (result.success) {
@@ -463,6 +462,59 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
+      {/* Championship Podium for Final Round when finalized */}
+      {!nextStage && currentStage?.isFinalized && rankedParticipants.length > 0 && (
+        <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-slate-900 rounded-2xl p-6 text-white shadow-lg space-y-5 border border-emerald-700/50">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-800/80 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold text-xl shadow-md">
+                🏆
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-white">Podium Pemenang & Juara Resmi MTQ</h3>
+                <p className="text-xs text-emerald-200">
+                  Keputusan Dewan Hakim telah disahkan secara resmi untuk Babak {selectedStageName} · Cabang {currentStage?.branchName}
+                </p>
+              </div>
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-800/80 text-emerald-200 border border-emerald-600/40 text-xs font-mono">
+              <Check className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Final & Mengikat</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+            {rankedParticipants.slice(0, 3).map((item, idx) => {
+              const titles = ['Juara 1 (Terbaik I)', 'Juara 2 (Terbaik II)', 'Juara 3 (Terbaik III)'];
+              const medals = ['🥇', '🥈', '🥉'];
+              const cardBg =
+                idx === 0
+                  ? 'bg-amber-500/20 border-amber-400/60 shadow-amber-500/10'
+                  : idx === 1
+                  ? 'bg-slate-500/20 border-slate-300/40'
+                  : 'bg-amber-700/20 border-amber-600/40';
+              return (
+                <div
+                  key={item.participant.id}
+                  className={`rounded-xl border p-4 ${cardBg} backdrop-blur-xs flex flex-col items-center text-center space-y-2 shadow-sm`}
+                >
+                  <span className="text-2xl">{medals[idx]}</span>
+                  <span className="font-bold text-xs uppercase tracking-wider text-amber-300">{titles[idx]}</span>
+                  <div className="font-extrabold text-base text-white">{item.participant.name}</div>
+                  <div className="text-xs text-emerald-200">{item.participant.kafilahName}</div>
+                  <div className="text-[11px] font-mono text-emerald-300">
+                    Undian #{item.participant.lotteryNumber} · {item.participant.participantId}
+                  </div>
+                  <div className="mt-2 px-3 py-1 rounded-lg bg-emerald-950/80 border border-emerald-600/50 text-sm font-black font-mono text-amber-300">
+                    Skor Akhir: {item.displayScore !== null ? item.displayScore.toFixed(2) : '—'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Qualification Results Table */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50">
@@ -475,53 +527,51 @@ export const HasilKelulusanView: React.FC = () => {
             </p>
           </div>
 
-          {/* Action to confirm advancement with strict conditions */}
-          {nextStage && (
-            <div>
-              {currentStage?.isFinalized ? (
-                <div className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs border border-slate-200">
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Babak Ini Telah Difinalisasi</span>
-                </div>
-              ) : !allAssessmentsFinalized ? (
-                <div className="flex flex-col items-end gap-1">
-                  <button
-                    disabled
-                    className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
-                    title="Penilaian belum lengkap"
-                  >
-                    <Lock className="w-4 h-4" />
-                    <span>Konfirmasi & Loloskan ke Babak {nextStage.name}</span>
-                  </button>
-                  <span className="text-[10px] text-amber-700 font-medium">
-                    Belum dapat diloloskan ({incompleteParticipants.length} peserta belum lengkap)
-                  </span>
-                </div>
-              ) : hasBoundaryTie ? (
-                <div className="flex flex-col items-end gap-1">
-                  <button
-                    disabled
-                    className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
-                    title="Ada nilai kembar pada batas kuota Top-N"
-                  >
-                    <Lock className="w-4 h-4" />
-                    <span>Konfirmasi & Loloskan ke Babak {nextStage.name}</span>
-                  </button>
-                  <span className="text-[10px] text-rose-700 font-medium">
-                    Selesaikan nilai seri di batas Top-{quota} terlebih dahulu
-                  </span>
-                </div>
-              ) : (
+          {/* Action to confirm advancement with strict conditions OR finalize championship */}
+          <div>
+            {currentStage?.isFinalized ? (
+              <div className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 text-emerald-800 rounded-xl font-bold text-xs border border-emerald-300">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                <span>{nextStage ? 'Babak Ini Telah Difinalisasi' : 'Musabaqah & Juara Resmi Disahkan'}</span>
+              </div>
+            ) : !allAssessmentsFinalized ? (
+              <div className="flex flex-col items-end gap-1">
                 <button
-                  onClick={() => setIsConfirmAdvancementOpen(true)}
-                  className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer self-start sm:self-auto"
+                  disabled
+                  className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
+                  title="Penilaian belum lengkap"
                 >
-                  <FileCheck2 className="w-4 h-4" />
-                  <span>Konfirmasi & Loloskan ke Babak {nextStage.name}</span>
+                  <Lock className="w-4 h-4" />
+                  <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
                 </button>
-              )}
-            </div>
-          )}
+                <span className="text-[10px] text-amber-700 font-medium">
+                  Belum dapat disahkan ({incompleteParticipants.length} peserta belum lengkap)
+                </span>
+              </div>
+            ) : hasBoundaryTie ? (
+              <div className="flex flex-col items-end gap-1">
+                <button
+                  disabled
+                  className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
+                  title="Ada nilai kembar pada batas kuota Top-N"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
+                </button>
+                <span className="text-[10px] text-rose-700 font-medium">
+                  Selesaikan nilai seri di batas Top-{quota} terlebih dahulu
+                </span>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsConfirmAdvancementOpen(true)}
+                className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer self-start sm:self-auto"
+              >
+                {nextStage ? <FileCheck2 className="w-4 h-4" /> : <Trophy className="w-4 h-4" />}
+                <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -748,33 +798,38 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
-      {/* Confirmation Modal to Advance Qualifiers to Next Stage */}
-      {isConfirmAdvancementOpen && nextStage && (
+      {/* Confirmation Modal to Advance Qualifiers OR Finalize Championship */}
+      {isConfirmAdvancementOpen && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center gap-3 text-emerald-800 mb-3">
               <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                <Award className="w-5 h-5 text-emerald-800" />
+                {nextStage ? <Award className="w-5 h-5 text-emerald-800" /> : <Trophy className="w-5 h-5 text-amber-600" />}
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900">
-                  Konfirmasi Pelolosan Babak
+                  {nextStage ? 'Konfirmasi Pelolosan Babak' : 'Pengesahan Juara & Selesaikan Musabaqah'}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {selectedStageName} ➔ Babak {nextStage.name}
+                  {nextStage ? `${selectedStageName} ➔ Babak ${nextStage.name}` : `Babak ${selectedStageName} (Puncak Kejuaraan)`}
                 </p>
               </div>
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed mb-4">
-              Sebanyak <strong>{qualifiedParticipants.length} peserta</strong> di bawah ini akan diloloskan ke <strong>Babak {nextStage.name}</strong>:
+              {nextStage ? (
+                <>Sebanyak <strong>{qualifiedParticipants.length} peserta</strong> di bawah ini akan diloloskan ke <strong>Babak {nextStage.name}</strong>:</>
+              ) : (
+                <>Dewan Hakim akan mengesahkan secara resmi hasil penilaian Babak {selectedStageName} dan menetapkan juara podium berikut:</>
+              )}
             </p>
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 max-h-48 overflow-y-auto space-y-1 mb-4 text-xs">
-              {qualifiedParticipants.map((item, idx) => (
+              {(nextStage ? qualifiedParticipants : evaluatedParticipants).map((item, idx) => (
                 <div key={item.participant.id} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
                   <span className="font-semibold text-slate-900">
                     {idx + 1}. #{item.participant.lotteryNumber} {item.participant.name}
+                    {!nextStage && idx < 3 ? ` (${idx === 0 ? 'Juara 1' : idx === 1 ? 'Juara 2' : 'Juara 3'})` : ''}
                   </span>
                   <span className="font-mono text-emerald-800 font-bold">
                     {item.displayScore !== null ? item.displayScore.toFixed(2) : '—'}
@@ -784,21 +839,23 @@ export const HasilKelulusanView: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-500 leading-relaxed mb-5">
-              Peserta yang lolos akan memasuki Babak {nextStage.name} dengan paket maqra dan lembar penilaian baru. Rekam jejak babak sebelumnya tetap tersimpan rapi.
+              {nextStage
+                ? `Peserta yang lolos akan memasuki Babak ${nextStage.name} dengan paket maqra dan lembar penilaian baru. Rekam jejak babak sebelumnya tetap tersimpan rapi.`
+                : 'Pengesahan ini bersifat final dan mengikat. Rekam jejak nilai, peringkat podium, dan riwayat seluruh babak akan dibekukan secara permanen.'}
             </p>
 
             <div className="flex items-center justify-end gap-2.5">
               <button
                 onClick={() => setIsConfirmAdvancementOpen(false)}
-                className="px-4 py-2 border rounded-lg text-xs font-semibold text-slate-700"
+                className="px-4 py-2 border rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
               >
                 Batal
               </button>
               <button
                 onClick={handleConfirmAdvancement}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-xs"
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
               >
-                Ya, Loloskan Peserta
+                {nextStage ? 'Ya, Loloskan Peserta' : 'Sahkan Juara Sekarang'}
               </button>
             </div>
           </div>

@@ -88,8 +88,8 @@ export const SuperadminAuditView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-slate-50/70">
+              {filteredLogs.map((log, idx) => (
+                <tr key={`${log.id}-${idx}`} className="hover:bg-slate-50/70">
                   <td className="px-5 py-3.5 font-mono text-slate-500 text-[11px]">
                     {log.timestamp}
                   </td>

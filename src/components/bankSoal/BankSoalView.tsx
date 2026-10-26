@@ -460,37 +460,50 @@ export const BankSoalView: React.FC = () => {
   // Open Single Question Manual Assignment
   const handleOpenManualAssign = (q: Question) => {
     setManualAssignQuestion(q);
-    const defaultP = participants[0]?.id || '';
+    // Find eligible participants in the same stage who don't already have this question
+    const matchingParts = participants.filter((p) => {
+      const matchStage = !q.stageName || p.stageName === q.stageName;
+      const alreadyHas =
+        (p.questionId === q.id && (!p.stageName || p.stageName === q.stageName)) ||
+        (p.assignedQuestions || []).some(
+          (aq) => aq.questionId === q.id && (!aq.stageName || aq.stageName === q.stageName)
+        );
+      return matchStage && !alreadyHas;
+    });
+
+    const defaultP =
+      matchingParts[0]?.id ||
+      participants.find((p) => !q.stageName || p.stageName === q.stageName)?.id ||
+      participants[0]?.id ||
+      '';
     setTargetParticipantId(defaultP);
     setManualAssignFeedback(null);
   };
 
-  // Add question to target participant with duplicate prevention and user feedback
+  // Add question to target participant with strict validation and user feedback
   const handleAddQuestionToParticipant = () => {
     if (!manualAssignQuestion || !targetParticipantId) return;
 
     const targetPart = participants.find((p) => p.id === targetParticipantId);
     if (!targetPart) return;
 
-    const alreadyHasInStage =
-      (targetPart.questionId === manualAssignQuestion.id && (!targetPart.stageName || targetPart.stageName === manualAssignQuestion.stageName)) ||
-      (targetPart.assignedQuestions || []).some(
-        (aq) => aq.questionId === manualAssignQuestion.id && (!aq.stageName || aq.stageName === targetPart.stageName)
-      );
+    const res = addQuestionToParticipant(
+      targetParticipantId,
+      manualAssignQuestion.id,
+      manualAssignQuestion.stageName
+    );
 
-    if (alreadyHasInStage) {
+    if (res.success) {
+      setManualAssignFeedback({
+        type: 'success',
+        message: res.message
+      });
+    } else {
       setManualAssignFeedback({
         type: 'error',
-        message: `Peserta ${targetPart.name} sudah memiliki soal ini pada babak ${targetPart.stageName}.`
+        message: res.message
       });
-      return;
     }
-
-    addQuestionToParticipant(targetParticipantId, manualAssignQuestion.id);
-    setManualAssignFeedback({
-      type: 'success',
-      message: `Soal ${manualAssignQuestion.code} berhasil ditambahkan ke peserta ${targetPart.name}.`
-    });
   };
 
   return (
@@ -604,9 +617,11 @@ export const BankSoalView: React.FC = () => {
             className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
           >
             <option value="Semua Babak">Semua Babak</option>
-            <option value="Penyisihan">Penyisihan</option>
-            <option value="Semifinal">Semifinal</option>
-            <option value="Final">Final</option>
+            {stages.map((stg) => (
+              <option key={stg.id} value={stg.name}>
+                Babak {stg.name}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -1019,33 +1034,49 @@ export const BankSoalView: React.FC = () => {
             </div>
 
             {/* Maqra Details */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 text-xs">
-              <p className="font-bold text-slate-800">{manualAssignQuestion.title}</p>
-              <p className="text-slate-500 mt-0.5">
-                QS. {manualAssignQuestion.surahName} [{manualAssignQuestion.surahNumber}]: {manualAssignQuestion.startAyah} - {manualAssignQuestion.endAyah} · Hal. {manualAssignQuestion.pageStart || manualAssignQuestion.pageNumber} s/d {manualAssignQuestion.pageEnd || manualAssignQuestion.pageNumber}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mb-4 text-xs space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="font-extrabold text-slate-900 text-sm">{manualAssignQuestion.title}</span>
+                <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold border border-emerald-200">
+                    Babak: {manualAssignQuestion.stageName}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold">
+                    {manualAssignQuestion.branchAndLevel}
+                  </span>
+                </div>
+              </div>
+              <p className="text-slate-600">
+                QS. {manualAssignQuestion.surahName} [{manualAssignQuestion.surahNumber}]: {manualAssignQuestion.startAyah} - {manualAssignQuestion.endAyah} · Rentang Halaman: Hal. {manualAssignQuestion.pageStart || manualAssignQuestion.pageNumber} s/d {manualAssignQuestion.pageEnd || manualAssignQuestion.pageNumber}
               </p>
             </div>
 
             {/* Currently assigned participants */}
             <div className="mb-4">
               <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                Peserta yang Saat Ini Memiliki Soal Ini:
+                Peserta yang Saat Ini Memiliki Soal Ini di Babak {manualAssignQuestion.stageName}:
               </label>
               <div className="space-y-1.5 max-h-36 overflow-y-auto">
                 {participants.filter(
                   (p) =>
-                    p.questionId === manualAssignQuestion.id ||
-                    p.assignedQuestions?.some((aq) => aq.questionId === manualAssignQuestion.id)
+                    (p.stageName === manualAssignQuestion.stageName || !p.stageName) &&
+                    (p.questionId === manualAssignQuestion.id ||
+                      p.assignedQuestions?.some(
+                        (aq) => aq.questionId === manualAssignQuestion.id && (!aq.stageName || aq.stageName === manualAssignQuestion.stageName)
+                      ))
                 ).length === 0 ? (
                   <p className="text-xs text-slate-400 italic bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                    Belum ada peserta yang ditugaskan maqra ini.
+                    Belum ada peserta yang ditugaskan maqra ini pada Babak {manualAssignQuestion.stageName}.
                   </p>
                 ) : (
                   participants
                     .filter(
                       (p) =>
-                        p.questionId === manualAssignQuestion.id ||
-                        p.assignedQuestions?.some((aq) => aq.questionId === manualAssignQuestion.id)
+                        (p.stageName === manualAssignQuestion.stageName || !p.stageName) &&
+                        (p.questionId === manualAssignQuestion.id ||
+                          p.assignedQuestions?.some(
+                            (aq) => aq.questionId === manualAssignQuestion.id && (!aq.stageName || aq.stageName === manualAssignQuestion.stageName)
+                          ))
                     )
                     .map((p) => (
                       <div
@@ -1058,14 +1089,14 @@ export const BankSoalView: React.FC = () => {
                           </span>
                           <span className="font-semibold text-slate-800">{p.name}</span>
                           <span className="text-[10px] text-slate-500 ml-1.5">
-                            ({p.kafilahName})
+                            ({p.kafilahName} · Babak {p.stageName})
                           </span>
                         </div>
                         <button
                           onClick={() =>
-                            removeQuestionFromParticipant(p.id, manualAssignQuestion.id)
+                            removeQuestionFromParticipant(p.id, manualAssignQuestion.id, manualAssignQuestion.stageName)
                           }
-                          className="p-1 text-rose-600 hover:bg-rose-100 rounded transition-colors"
+                          className="p-1 text-rose-600 hover:bg-rose-100 rounded transition-colors cursor-pointer"
                           title="Hapus soal ini dari peserta"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -1079,7 +1110,7 @@ export const BankSoalView: React.FC = () => {
             {/* Target participant select to add */}
             <div className="space-y-2 mb-6">
               <label className="text-xs font-bold text-slate-700 block">
-                Tambah Maqra Ini ke Peserta:
+                Pilih Peserta untuk Diberikan Maqra Ini:
               </label>
               <select
                 value={targetParticipantId}
@@ -1087,19 +1118,37 @@ export const BankSoalView: React.FC = () => {
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 bg-white"
               >
                 {participants.map((p) => {
+                  const matchesStage = !manualAssignQuestion.stageName || p.stageName === manualAssignQuestion.stageName;
                   const alreadyHas =
-                    p.questionId === manualAssignQuestion.id ||
-                    p.assignedQuestions?.some((aq) => aq.questionId === manualAssignQuestion.id);
-                  const totalAssignedCount = (p.assignedQuestions?.length || (p.questionId ? 1 : 0));
+                    (p.questionId === manualAssignQuestion.id && (!p.stageName || p.stageName === manualAssignQuestion.stageName)) ||
+                    p.assignedQuestions?.some(
+                      (aq) => aq.questionId === manualAssignQuestion.id && (!aq.stageName || aq.stageName === manualAssignQuestion.stageName)
+                    );
+                  const totalAssignedCount =
+                    p.assignedQuestions?.filter((aq) => !aq.stageName || aq.stageName === manualAssignQuestion.stageName).length ||
+                    (p.questionId && p.questionId !== '' && p.stageName === manualAssignQuestion.stageName ? 1 : 0);
+
+                  const note = alreadyHas
+                    ? '✓ Sudah Memiliki Soal Ini'
+                    : totalAssignedCount === 0
+                    ? '★ Belum Memiliki Maqra'
+                    : `${totalAssignedCount} soal aktif`;
+
+                  const stageNote = !matchesStage ? ` [BEDA BABAK: ${p.stageName}]` : '';
+
                   return (
-                    <option key={p.id} value={p.id}>
-                      #{p.lotteryNumber} - {p.name} ({p.participantId} · {totalAssignedCount} soal) {alreadyHas ? '✓ sudah memiliki' : ''}
+                    <option
+                      key={p.id}
+                      value={p.id}
+                      disabled={alreadyHas || !matchesStage}
+                    >
+                      #{p.lotteryNumber} - {p.name} ({p.participantId} · {p.branchName}) · {note}{stageNote}
                     </option>
                   );
                 })}
               </select>
               <p className="text-[11px] text-slate-500">
-                Fitur ini mendukung penugasan banyak soal per peserta tanpa menghapus soal sebelumnya.
+                Catatan: Hanya peserta pada <strong>Babak {manualAssignQuestion.stageName}</strong> yang belum memiliki soal ini yang dapat dipilih untuk menjaga konsistensi kompetisi.
               </p>
 
               {manualAssignFeedback && (
@@ -1172,14 +1221,24 @@ export const BankSoalView: React.FC = () => {
                   <select
                     value={lotteryStage}
                     onChange={(e) => {
-                      setLotteryStage(e.target.value);
+                      const newStg = e.target.value;
+                      setLotteryStage(newStg);
                       setLotteryDrawResults(null);
+                      setLotteryFeedback('');
+                      const newEligible = participants.filter((p) => {
+                        const matchStage = !newStg || p.stageName === newStg;
+                        const matchBranch = lotteryBranch === 'Semua Cabang' || p.branchName.includes(lotteryBranch);
+                        return matchStage && matchBranch;
+                      });
+                      setSelectedParticipantIds(newEligible.map((p) => p.id));
                     }}
                     className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                   >
-                    <option value="Penyisihan">Penyisihan</option>
-                    <option value="Semifinal">Semifinal</option>
-                    <option value="Final">Final</option>
+                    {stages.map((stg) => (
+                      <option key={stg.id} value={stg.name}>
+                        {stg.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1188,8 +1247,16 @@ export const BankSoalView: React.FC = () => {
                   <select
                     value={lotteryBranch}
                     onChange={(e) => {
-                      setLotteryBranch(e.target.value);
+                      const newBr = e.target.value;
+                      setLotteryBranch(newBr);
                       setLotteryDrawResults(null);
+                      setLotteryFeedback('');
+                      const newEligible = participants.filter((p) => {
+                        const matchStage = !lotteryStage || p.stageName === lotteryStage;
+                        const matchBranch = newBr === 'Semua Cabang' || p.branchName.includes(newBr);
+                        return matchStage && matchBranch;
+                      });
+                      setSelectedParticipantIds(newEligible.map((p) => p.id));
                     }}
                     className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                   >
@@ -1523,9 +1590,11 @@ export const BankSoalView: React.FC = () => {
                     onChange={(e) => setFormStage(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
                   >
-                    <option value="Penyisihan">Penyisihan</option>
-                    <option value="Semifinal">Semifinal</option>
-                    <option value="Final">Final</option>
+                    {stages.map((stg) => (
+                      <option key={stg.id} value={stg.name}>
+                        {stg.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

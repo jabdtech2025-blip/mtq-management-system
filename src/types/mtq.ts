@@ -110,6 +110,7 @@ export interface Participant {
     rank?: number;
     qualified?: boolean;
     reason?: string;
+    finalizedAt?: string;
   }[];
 }
 
