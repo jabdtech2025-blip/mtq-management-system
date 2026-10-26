@@ -25,6 +25,7 @@ export const RekapNilaiView: React.FC = () => {
     errorCategories,
     getJudgeAssessment: getJudgeAssessmentFromContext,
     getParticipantProgress,
+    getParticipantStageQuestions,
     setSelectedParticipantId,
     setCurrentView
   } = useMtq();
@@ -34,6 +35,7 @@ export const RekapNilaiView: React.FC = () => {
   const [selectedKafilah, setSelectedKafilah] = useState('Semua Grup');
   const [selectedStatus, setSelectedStatus] = useState('Semua Status');
   const [inspectedParticipant, setInspectedParticipant] = useState<Participant | null>(null);
+  const [modalSelectedQuestionId, setModalSelectedQuestionId] = useState<string>('');
 
   // Available stages from configured stages
   const stageOptions = useMemo(() => {
@@ -106,11 +108,16 @@ export const RekapNilaiView: React.FC = () => {
     });
   }, [participants, searchQuery, selectedStage, selectedKafilah, selectedStatus, getParticipantProgress]);
 
-  const getJudgeAssessment = (participantId: string, judgeId: string, stageName?: string) => {
-    return getJudgeAssessmentFromContext(participantId, judgeId, stageName);
+  const getJudgeAssessment = (
+    participantId: string,
+    judgeId: string,
+    stageName?: string,
+    questionId?: string
+  ) => {
+    return getJudgeAssessmentFromContext(participantId, judgeId, stageName, questionId);
   };
 
-  // Export CSV dynamically based on active judges and escaped cells
+  // Export CSV dynamically including all assigned maqras per participant
   const handleExportCSV = () => {
     const headers = [
       'No Undian',
@@ -118,39 +125,108 @@ export const RekapNilaiView: React.FC = () => {
       'Nama Peserta',
       'Grup',
       'Babak',
+      'Kode Maqra',
+      'Judul Maqra',
+      ...activeJudges.map((j) => `Pengurangan ${j.name} (${j.field})`),
       ...activeJudges.map((j) => `Nilai ${j.name} (${j.field})`),
-      'Rata-rata Akhir',
+      'Rata-rata Maqra',
+      'Status Maqra',
+      'Rata-rata Keseluruhan',
       'Status Kelengkapan'
     ];
 
-    const rows = filteredParticipants.map((p) => {
-      const judgeAssessments = activeJudges.map((j) => getJudgeAssessment(p.id, j.id, p.stageName));
-      const judgeScores = judgeAssessments.map((asm) => (asm ? asm.finalScore : null));
+    const rows: string[] = [];
 
-      const validScores = judgeScores.filter((s): s is number => s !== null);
-      const isComplete =
-        judgeAssessments.every((a) => a?.status === 'finalized') &&
-        activeJudges.length > 0;
+    filteredParticipants.forEach((p) => {
+      const stageQuestions = getParticipantStageQuestions(p.id, p.stageName);
+      const overallProgress = getParticipantProgress(p.id, p.stageName);
 
-      const avgText =
-        validScores.length > 0
-          ? `${(validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2)}${
-              !isComplete ? ' (Sementara)' : ''
-            }`
+      // Compute participant overall average across all maqras
+      let allScoresSum = 0;
+      let allScoresCount = 0;
+      let allUnitsFinalized = true;
+
+      stageQuestions.forEach((q) => {
+        activeJudges.forEach((j) => {
+          const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
+          if (asm && asm.status === 'finalized') {
+            allScoresSum += asm.finalScore;
+            allScoresCount++;
+          } else {
+            allUnitsFinalized = false;
+            if (asm) {
+              allScoresSum += asm.finalScore;
+              allScoresCount++;
+            }
+          }
+        });
+      });
+
+      const participantOverallAvg =
+        allScoresCount > 0
+          ? `${(allScoresSum / allScoresCount).toFixed(2)}${!allUnitsFinalized ? ' (Sementara)' : ''}`
           : '-';
 
-      const progress = getParticipantProgress(p.id, p.stageName);
+      if (stageQuestions.length === 0) {
+        rows.push([
+          `"${p.lotteryNumber}"`,
+          `"${p.participantId}"`,
+          `"${p.name.replace(/"/g, '""')}"`,
+          `"${p.kafilahName.replace(/"/g, '""')}"`,
+          `"${p.stageName}"`,
+          `"-"`,
+          `"Maqra Belum Ditetapkan"`,
+          ...activeJudges.map(() => `"-"`),
+          ...activeJudges.map(() => `"-"`),
+          `"-"`,
+          `"Belum Ditetapkan"`,
+          `"-"`,
+          `"${overallProgress}"`
+        ].join(','));
+      } else {
+        stageQuestions.forEach((q) => {
+          const judgeAssessments = activeJudges.map((j) =>
+            getJudgeAssessment(p.id, j.id, p.stageName, q.questionId)
+          );
+          const deductions = judgeAssessments.map((a) => (a ? `-${a.totalDeductions.toFixed(2)}` : `"-"`));
+          const scores = judgeAssessments.map((a) => (a ? `"${a.finalScore.toFixed(2)}"` : `"-"`));
+          const validScores = judgeAssessments
+            .map((a) => (a ? a.finalScore : null))
+            .filter((s): s is number => s !== null);
 
-      return [
-        `"${p.lotteryNumber}"`,
-        `"${p.participantId}"`,
-        `"${p.name.replace(/"/g, '""')}"`,
-        `"${p.kafilahName.replace(/"/g, '""')}"`,
-        `"${p.stageName}"`,
-        ...judgeScores.map((s) => (s !== null ? `"${s.toFixed(2)}"` : `"-"`)),
-        `"${avgText}"`,
-        `"${progress}"`
-      ].join(',');
+          const isMaqraFinalized =
+            judgeAssessments.every((a) => a?.status === 'finalized') && activeJudges.length > 0;
+
+          const maqraAvg =
+            validScores.length > 0
+              ? `${(validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2)}${
+                  !isMaqraFinalized ? ' (Sementara)' : ''
+                }`
+              : '-';
+
+          const maqraStatus = isMaqraFinalized
+            ? 'Selesai'
+            : judgeAssessments.some((a) => a?.status === 'in_progress')
+            ? 'Berlangsung'
+            : 'Menunggu';
+
+          rows.push([
+            `"${p.lotteryNumber}"`,
+            `"${p.participantId}"`,
+            `"${p.name.replace(/"/g, '""')}"`,
+            `"${p.kafilahName.replace(/"/g, '""')}"`,
+            `"${p.stageName}"`,
+            `"${q.code}"`,
+            `"${q.title.replace(/"/g, '""')}"`,
+            ...deductions,
+            ...scores,
+            `"${maqraAvg}"`,
+            `"${maqraStatus}"`,
+            `"${participantOverallAvg}"`,
+            `"${overallProgress}"`
+          ].join(','));
+        });
+      }
     });
 
     const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows].join('\n');
@@ -240,15 +316,15 @@ export const RekapNilaiView: React.FC = () => {
       {/* Dynamic Grouped-Header Table with Sticky Identification & Horizontal Scrolling */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto max-w-full">
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[950px]">
             <thead>
               {/* Top Grouped Header */}
               <tr className="bg-slate-100/80 text-slate-600 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
                 <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 px-4 py-2.5 border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
                   Identitas Peserta
                 </th>
-                <th className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50 text-slate-700">
-                  Babak
+                <th className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50 text-slate-700 min-w-[190px]">
+                  Babak & Maqra
                 </th>
                 {activeJudges.map((j) => (
                   <th
@@ -265,13 +341,16 @@ export const RekapNilaiView: React.FC = () => {
                 <th colSpan={2} className="px-4 py-2.5 text-center bg-slate-100 text-slate-700 border-l border-slate-200">
                   Hasil Rekap
                 </th>
+                <th className="px-3 py-2.5 text-center bg-slate-50 text-slate-700 w-16">
+                  Aksi
+                </th>
               </tr>
 
-              {/* Secondary Subheaders */}
+              {/* Secondary Subheaders with Centered Text */}
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[10px] font-semibold uppercase">
                 <th className="sticky left-0 z-20 bg-slate-50 px-4 py-2 w-16">Undian</th>
                 <th className="sticky left-16 z-20 bg-slate-50 px-4 py-2 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">Nama & Grup</th>
-                <th className="px-3 py-2 w-24 border-r border-slate-200">Babak</th>
+                <th className="px-3 py-2 border-r border-slate-200 text-center">Maqra / Soal</th>
 
                 {activeJudges.map((j) => (
                   <React.Fragment key={j.id}>
@@ -290,6 +369,9 @@ export const RekapNilaiView: React.FC = () => {
                 <th className="px-4 py-2 text-center w-28 text-slate-600">
                   Status
                 </th>
+                <th className="px-3 py-2 text-center w-16 text-slate-600">
+                  Rincian
+                </th>
               </tr>
             </thead>
 
@@ -297,7 +379,7 @@ export const RekapNilaiView: React.FC = () => {
               {filteredParticipants.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5 + activeJudges.length * 2}
+                    colSpan={6 + activeJudges.length * 2}
                     className="p-8 text-center text-slate-400"
                   >
                     Tidak ada data peserta yang cocok dengan filter.
@@ -305,98 +387,353 @@ export const RekapNilaiView: React.FC = () => {
                 </tr>
               ) : (
                 filteredParticipants.map((p) => {
-                  const progress = getParticipantProgress(p.id, p.stageName);
+                  const stageQuestions = getParticipantStageQuestions(p.id, p.stageName);
+                  const overallProgress = getParticipantProgress(p.id, p.stageName);
 
-                  // Collect valid judge scores
-                  const judgeAssessments = activeJudges.map((j) =>
-                    getJudgeAssessment(p.id, j.id, p.stageName)
-                  );
+                  // Calculate overall average across all questions for this participant
+                  let totalScoreSum = 0;
+                  let totalScoreCount = 0;
+                  let allFinalized = true;
 
-                  const scores = judgeAssessments.map((a) => (a ? a.finalScore : null));
-                  const validScores = scores.filter((s): s is number => s !== null);
-                  const isAllFinalized =
-                    judgeAssessments.every((a) => a?.status === 'finalized') &&
-                    activeJudges.length > 0;
+                  stageQuestions.forEach((q) => {
+                    activeJudges.forEach((j) => {
+                      const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
+                      if (asm && asm.status === 'finalized') {
+                        totalScoreSum += asm.finalScore;
+                        totalScoreCount++;
+                      } else {
+                        allFinalized = false;
+                        if (asm) {
+                          totalScoreSum += asm.finalScore;
+                          totalScoreCount++;
+                        }
+                      }
+                    });
+                  });
 
-                  const averageScore =
-                    validScores.length > 0
-                      ? validScores.reduce((a, b) => a + b, 0) / validScores.length
-                      : null;
+                  const overallAvg =
+                    totalScoreCount > 0 ? totalScoreSum / totalScoreCount : null;
 
-                  return (
-                    <tr key={p.id} className="hover:bg-slate-50/80 transition-colors group">
-                      {/* Undian (Sticky left) */}
-                      <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 font-mono font-bold text-slate-900 transition-colors">
-                        #{p.lotteryNumber}
-                      </td>
-
-                      {/* Participant identity (Sticky left-16 with shadow delimiter) */}
-                      <td className="sticky left-16 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)] transition-colors">
-                        <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {p.participantId} · {p.kafilahName}
-                        </p>
-                      </td>
-
-                      {/* Babak */}
-                      <td className="px-3 py-3 border-r border-slate-200 text-slate-600 font-medium">
-                        {p.stageName}
-                      </td>
-
-                      {/* Judge columns with border between Pengurangan and Nilai Hakim, equal width, no dots, standard text */}
-                      {activeJudges.map((j) => {
-                        const asm = getJudgeAssessment(p.id, j.id, p.stageName);
-
-                        return (
+                  // Case 1: Participant has NO assigned questions for this stage
+                  if (stageQuestions.length === 0) {
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-50/80 transition-colors group">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 font-mono font-bold text-slate-900">
+                          #{p.lotteryNumber}
+                        </td>
+                        <td className="sticky left-16 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
+                          <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            {p.participantId} · {p.kafilahName}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3 border-r border-slate-200 text-center">
+                          <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                            Maqra Belum Ditetapkan
+                          </span>
+                        </td>
+                        {activeJudges.map((j) => (
                           <React.Fragment key={j.id}>
-                            <td className="px-2.5 py-3 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
-                              {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
+                            <td className="px-2.5 py-3 text-center font-mono text-[11px] text-slate-400 border-r border-slate-200">
+                              -
                             </td>
-                            <td className="px-2.5 py-3 text-center font-mono font-bold border-r border-slate-200 tabular-nums w-24 min-w-[96px] whitespace-nowrap">
-                              {asm ? (
-                                <span className="text-slate-900">
-                                  {asm.finalScore.toFixed(2)}
-                                </span>
-                              ) : (
-                                <span className="text-slate-300 font-normal">--</span>
-                              )}
+                            <td className="px-2.5 py-3 text-center font-mono text-slate-300 border-r border-slate-200">
+                              --
                             </td>
                           </React.Fragment>
-                        );
-                      })}
-
-                      {/* Aggregated Average Score (neutral standard styling, center-aligned) */}
-                      <td className="px-3 py-3 text-center font-mono font-extrabold text-slate-900 border-l border-slate-100">
-                        {averageScore !== null ? (
-                          <div>
-                            <span className="text-sm">{averageScore.toFixed(2)}</span>
-                            {!isAllFinalized && (
-                              <span className="block text-[9px] text-slate-500 font-normal">
-                                Sementara
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-slate-300">--</span>
-                        )}
-                      </td>
-
-                      {/* Actions & Detail with plain text status (no background badge) */}
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <span className="text-xs font-medium text-slate-700">
-                            {progress}
+                        ))}
+                        <td className="px-3 py-3 text-center font-mono text-slate-300 border-l border-slate-100">
+                          --
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="text-[11px] font-medium text-amber-700">
+                            {overallProgress}
                           </span>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <span className="text-slate-300">-</span>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  // Case 2: Participant has exactly 1 assigned question
+                  if (stageQuestions.length === 1) {
+                    const q = stageQuestions[0];
+                    const judgeAssessments = activeJudges.map((j) =>
+                      getJudgeAssessment(p.id, j.id, p.stageName, q.questionId)
+                    );
+                    const validScores = judgeAssessments
+                      .map((a) => (a ? a.finalScore : null))
+                      .filter((s): s is number => s !== null);
+                    const isSingleFinalized =
+                      judgeAssessments.every((a) => a?.status === 'finalized') &&
+                      activeJudges.length > 0;
+                    const avgScore =
+                      validScores.length > 0
+                        ? validScores.reduce((a, b) => a + b, 0) / validScores.length
+                        : null;
+
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-50/80 transition-colors group">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 font-mono font-bold text-slate-900">
+                          #{p.lotteryNumber}
+                        </td>
+                        <td className="sticky left-16 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
+                          <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            {p.participantId} · {p.kafilahName}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3 border-r border-slate-200 text-center">
+                          <div className="inline-block text-center max-w-[220px]">
+                            <span className="font-mono text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mr-1">
+                              {q.code}
+                            </span>
+                            <span className="text-slate-800 font-medium text-[11px] truncate block">
+                              {q.title}
+                            </span>
+                          </div>
+                        </td>
+                        {activeJudges.map((j) => {
+                          const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
+                          return (
+                            <React.Fragment key={j.id}>
+                              <td className="px-2.5 py-3 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
+                                {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
+                              </td>
+                              <td className="px-2.5 py-3 text-center font-mono font-bold border-r border-slate-200 tabular-nums w-24 min-w-[96px] whitespace-nowrap">
+                                {asm ? (
+                                  <span className="text-slate-900">{asm.finalScore.toFixed(2)}</span>
+                                ) : (
+                                  <span className="text-slate-300 font-normal">--</span>
+                                )}
+                              </td>
+                            </React.Fragment>
+                          );
+                        })}
+                        <td className="px-3 py-3 text-center font-mono font-extrabold text-slate-900 border-l border-slate-100">
+                          {avgScore !== null ? (
+                            <div>
+                              <span className="text-sm">{avgScore.toFixed(2)}</span>
+                              {!isSingleFinalized && (
+                                <span className="block text-[9px] text-slate-500 font-normal">
+                                  Sementara
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-300">--</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="text-xs font-medium text-slate-700">
+                            {overallProgress}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-center">
                           <button
-                            onClick={() => setInspectedParticipant(p)}
-                            className="p-1 rounded text-slate-400 hover:text-emerald-800 hover:bg-slate-100 transition-colors cursor-pointer"
+                            onClick={() => {
+                              setModalSelectedQuestionId(q.questionId);
+                              setInspectedParticipant(p);
+                            }}
+                            className="p-1 rounded text-slate-400 hover:text-emerald-800 hover:bg-slate-100 transition-colors cursor-pointer inline-flex items-center justify-center"
                             title="Lihat Rincian Pengurangan Nilai"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  // Case 3: Participant has MULTIPLE assigned questions (Setiap satu maqra satu baris + baris akumulasi)
+                  return (
+                    <React.Fragment key={p.id}>
+                      {stageQuestions.map((q, qIdx) => {
+                        const judgeAssessments = activeJudges.map((j) =>
+                          getJudgeAssessment(p.id, j.id, p.stageName, q.questionId)
+                        );
+                        const validScores = judgeAssessments
+                          .map((a) => (a ? a.finalScore : null))
+                          .filter((s): s is number => s !== null);
+                        const isMaqraFinalized =
+                          judgeAssessments.every((a) => a?.status === 'finalized') &&
+                          activeJudges.length > 0;
+                        const maqraAvg =
+                          validScores.length > 0
+                            ? validScores.reduce((a, b) => a + b, 0) / validScores.length
+                            : null;
+                        const maqraStatus = isMaqraFinalized
+                          ? 'Selesai'
+                          : judgeAssessments.some((a) => a?.status === 'in_progress')
+                          ? 'Berlangsung'
+                          : 'Menunggu';
+
+                        return (
+                          <tr
+                            key={`${p.id}-${q.questionId}`}
+                            className={`hover:bg-slate-50/80 transition-colors ${
+                              qIdx === 0 ? 'border-t-2 border-slate-200' : ''
+                            }`}
+                          >
+                            {/* Sticky Participant columns for first question row, or empty continuation */}
+                            <td className="sticky left-0 z-10 bg-white px-4 py-2.5 font-mono font-bold text-slate-900 border-b border-slate-100">
+                              #{p.lotteryNumber}
+                            </td>
+                            <td className="sticky left-16 z-10 bg-white px-4 py-2.5 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)] border-b border-slate-100">
+                              <p className="font-bold text-slate-900 leading-tight">
+                                {p.name}
+                              </p>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                {p.participantId} · {p.kafilahName}
+                              </p>
+                            </td>
+
+                            {/* Maqra Specific Column */}
+                            <td className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50/30">
+                              <div className="inline-flex items-center gap-1.5 max-w-[240px]">
+                                <span className="font-mono text-[10px] font-bold text-emerald-800 bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-200 shrink-0">
+                                  Maqra {qIdx + 1}
+                                </span>
+                                <span className="text-slate-800 font-semibold text-[11px] truncate">
+                                  [{q.code}] {q.title}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Scores for this specific maqra */}
+                            {activeJudges.map((j) => {
+                              const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
+                              return (
+                                <React.Fragment key={j.id}>
+                                  <td className="px-2.5 py-2.5 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
+                                    {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
+                                  </td>
+                                  <td className="px-2.5 py-2.5 text-center font-mono font-bold border-r border-slate-200 tabular-nums w-24 min-w-[96px] whitespace-nowrap">
+                                    {asm ? (
+                                      <span className="text-slate-900">{asm.finalScore.toFixed(2)}</span>
+                                    ) : (
+                                      <span className="text-slate-300 font-normal">--</span>
+                                    )}
+                                  </td>
+                                </React.Fragment>
+                              );
+                            })}
+
+                            {/* Rata-Rata Maqra */}
+                            <td className="px-3 py-2.5 text-center font-mono font-bold text-slate-800 border-l border-slate-100">
+                              {maqraAvg !== null ? (
+                                <div>
+                                  <span className="text-xs">{maqraAvg.toFixed(2)}</span>
+                                  {!isMaqraFinalized && (
+                                    <span className="block text-[8px] text-slate-400 font-normal">
+                                      Sementara
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-300">--</span>
+                              )}
+                            </td>
+
+                            {/* Status Maqra */}
+                            <td className="px-4 py-2.5 text-center">
+                              <span
+                                className={`text-[11px] font-semibold ${
+                                  isMaqraFinalized
+                                    ? 'text-emerald-700'
+                                    : maqraStatus === 'Berlangsung'
+                                    ? 'text-amber-700'
+                                    : 'text-slate-400'
+                                }`}
+                              >
+                                {maqraStatus}
+                              </span>
+                            </td>
+
+                            {/* Aksi Per Maqra */}
+                            <td className="px-3 py-2.5 text-center">
+                              <button
+                                onClick={() => {
+                                  setModalSelectedQuestionId(q.questionId);
+                                  setInspectedParticipant(p);
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-emerald-800 hover:bg-slate-100 transition-colors cursor-pointer inline-flex items-center justify-center"
+                                title={`Rincian Maqra ${qIdx + 1}`}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {/* Participant Aggregate Summary Row */}
+                      <tr className="bg-emerald-50/40 border-b-2 border-slate-300 text-xs font-semibold">
+                        <td
+                          colSpan={2}
+                          className="sticky left-0 z-10 bg-emerald-50/90 px-4 py-2 text-slate-700 font-bold text-[11px] uppercase tracking-wide border-r border-slate-200"
+                        >
+                          Akumulasi Peserta #{p.lotteryNumber}
+                        </td>
+                        <td className="px-3 py-2 text-center text-emerald-950 font-bold text-[11px] border-r border-slate-200">
+                          Rata-Rata Keseluruhan ({stageQuestions.length} Maqra)
+                        </td>
+                        {activeJudges.map((j) => {
+                          const judgeScores = stageQuestions
+                            .map((q) => getJudgeAssessment(p.id, j.id, p.stageName, q.questionId))
+                            .map((a) => (a ? a.finalScore : null))
+                            .filter((s): s is number => s !== null);
+                          const jAvg =
+                            judgeScores.length > 0
+                              ? judgeScores.reduce((a, b) => a + b, 0) / judgeScores.length
+                              : null;
+
+                          return (
+                            <React.Fragment key={j.id}>
+                              <td className="px-2.5 py-2 text-center text-slate-400 font-mono text-[10px] border-r border-slate-200">
+                                Σ Maqra
+                              </td>
+                              <td className="px-2.5 py-2 text-center font-mono font-extrabold text-emerald-950 border-r border-slate-200">
+                                {jAvg !== null ? jAvg.toFixed(2) : '--'}
+                              </td>
+                            </React.Fragment>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-center font-mono font-extrabold text-emerald-950 border-l border-slate-200 text-sm">
+                          {overallAvg !== null ? (
+                            <div>
+                              <span>{overallAvg.toFixed(2)}</span>
+                              {!allFinalized && (
+                                <span className="block text-[8px] text-amber-700 font-normal">
+                                  Sementara
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-300">--</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <span className="text-xs font-bold text-emerald-900">
+                            {overallProgress}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            onClick={() => {
+                              setModalSelectedQuestionId(stageQuestions[0]?.questionId || '');
+                              setInspectedParticipant(p);
+                            }}
+                            className="p-1 rounded text-emerald-800 hover:bg-emerald-100 transition-colors cursor-pointer inline-flex items-center justify-center"
+                            title="Buka Rincian Lengkap"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    </React.Fragment>
                   );
                 })
               )}
@@ -405,10 +742,25 @@ export const RekapNilaiView: React.FC = () => {
         </div>
       </div>
 
-      {/* Detail Breakdown Modal per Judge for Inspected Participant */}
+      {/* Detail Breakdown Modal per Judge & Maqra for Inspected Participant */}
       {inspectedParticipant && (() => {
+        const participantQuestions = getParticipantStageQuestions(
+          inspectedParticipant.id,
+          inspectedParticipant.stageName
+        );
+        const activeQuestionId =
+          modalSelectedQuestionId || participantQuestions[0]?.questionId || '';
+        const activeQuestion =
+          participantQuestions.find((q) => q.questionId === activeQuestionId) ||
+          participantQuestions[0];
+
         const participantAssessments = activeJudges.map((j) =>
-          getJudgeAssessment(inspectedParticipant.id, j.id, inspectedParticipant.stageName)
+          getJudgeAssessment(
+            inspectedParticipant.id,
+            j.id,
+            inspectedParticipant.stageName,
+            activeQuestionId
+          )
         );
         const finalizedJudges = participantAssessments.filter((a) => a?.status === 'finalized').length;
         const validJudgeScores = participantAssessments
@@ -449,6 +801,48 @@ export const RekapNilaiView: React.FC = () => {
                 </button>
               </div>
 
+              {/* Maqra Navigation Tabs if Multi-Maqra */}
+              {participantQuestions.length > 1 && (
+                <div className="flex items-center gap-2 px-4 sm:px-5 py-2.5 bg-slate-100/80 border-b border-slate-200 overflow-x-auto">
+                  <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider shrink-0 mr-1">
+                    Pilih Maqra:
+                  </span>
+                  {participantQuestions.map((q, idx) => {
+                    const isSelected = q.questionId === activeQuestionId;
+                    return (
+                      <button
+                        key={q.questionId}
+                        onClick={() => setModalSelectedQuestionId(q.questionId)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'bg-emerald-800 text-white shadow-xs'
+                            : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+                        }`}
+                      >
+                        <span className="font-mono text-[10px] opacity-75">Maqra {idx + 1}:</span>
+                        <span>[{q.code}] {q.title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Active Maqra Context Banner */}
+              {activeQuestion && (
+                <div className="px-4 sm:px-5 py-2.5 bg-emerald-50/50 border-b border-emerald-100 flex flex-wrap items-center justify-between text-xs gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-emerald-900 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                      {activeQuestion.code}
+                    </span>
+                    <span className="font-semibold text-slate-800">{activeQuestion.title}</span>
+                  </div>
+                  <span className="text-slate-600 text-[11px] font-medium">
+                    {activeQuestion.surahName ? `QS. ${activeQuestion.surahName}: ${activeQuestion.startAyah || 1} - ${activeQuestion.endAyah || 1}` : ''}
+                    {activeQuestion.pageStart ? ` · Halaman ${activeQuestion.pageStart}` : ''}
+                  </span>
+                </div>
+              )}
+
               {/* Summary Metrics Cards */}
               <div className="grid grid-cols-3 gap-3 p-4 sm:p-5 bg-white border-b border-slate-100">
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
@@ -458,13 +852,13 @@ export const RekapNilaiView: React.FC = () => {
                   </span>
                 </div>
                 <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200/80">
-                  <span className="text-[11px] text-emerald-800 block font-medium">Status Penilaian</span>
+                  <span className="text-[11px] text-emerald-800 block font-medium">Status Penilaian Maqra</span>
                   <span className="font-mono font-bold text-base text-emerald-900 mt-0.5 block tabular-nums">
                     {finalizedJudges} dari {activeJudges.length} Selesai
                   </span>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                  <span className="text-[11px] text-slate-500 block font-medium">Rata-Rata Saat Ini</span>
+                  <span className="text-[11px] text-slate-500 block font-medium">Rata-Rata Maqra Ini</span>
                   <span className="font-mono font-bold text-base text-emerald-900 mt-0.5 block tabular-nums">
                     {avgScore} {validJudgeScores.length < activeJudges.length && validJudgeScores.length > 0 ? '(Sementara)' : ''}
                   </span>
@@ -479,14 +873,19 @@ export const RekapNilaiView: React.FC = () => {
                       <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
                         <th className="px-4 py-2.5">Dewan Hakim & Bidang</th>
                         <th className="px-4 py-2.5">Rincian Kesalahan</th>
-                        <th className="px-3 py-2.5 text-right">Pengurangan</th>
-                        <th className="px-3 py-2.5 text-right">Nilai Akhir</th>
+                        <th className="px-3 py-2.5 text-center">Pengurangan</th>
+                        <th className="px-3 py-2.5 text-center">Nilai Akhir</th>
                         <th className="px-4 py-2.5 text-center">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {activeJudges.map((j) => {
-                        const asm = getJudgeAssessment(inspectedParticipant.id, j.id, inspectedParticipant.stageName);
+                        const asm = getJudgeAssessment(
+                          inspectedParticipant.id,
+                          j.id,
+                          inspectedParticipant.stageName,
+                          activeQuestionId
+                        );
                         const isFinal = asm?.status === 'finalized';
                         const inProgress = asm?.status === 'in_progress';
                         const activeErrors = Object.entries(asm?.errorCounts || {}).filter(
@@ -538,11 +937,11 @@ export const RekapNilaiView: React.FC = () => {
                               )}
                             </td>
 
-                            <td className="px-3 py-3 align-top text-right font-mono font-bold text-rose-600 tabular-nums">
+                            <td className="px-3 py-3 align-top text-center font-mono font-bold text-rose-600 tabular-nums">
                               {asm ? `-${asm.totalDeductions.toFixed(2)}` : '—'}
                             </td>
 
-                            <td className="px-3 py-3 align-top text-right font-mono font-bold text-slate-900 text-sm tabular-nums">
+                            <td className="px-3 py-3 align-top text-center font-mono font-bold text-slate-900 text-sm tabular-nums">
                               {asm ? asm.finalScore.toFixed(2) : '—'}
                             </td>
 

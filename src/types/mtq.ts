@@ -40,7 +40,12 @@ export interface Kafilah {
   status: 'Aktif' | 'Nonaktif';
 }
 
-export type ParticipantProgressStatus = 'Belum Dimulai' | 'Berlangsung' | 'Menunggu Hakim Lain' | 'Lengkap';
+export type ParticipantProgressStatus =
+  | 'Belum Dimulai'
+  | 'Berlangsung'
+  | 'Menunggu Hakim Lain'
+  | 'Lengkap'
+  | 'Maqra Belum Ditetapkan';
 
 export interface AssignedMaqraItem {
   questionId: string;

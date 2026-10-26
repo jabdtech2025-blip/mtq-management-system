@@ -43,6 +43,7 @@ export const PenilaianDualPanelView: React.FC = () => {
     saveAnnotations,
     finalizeAssessment,
     getJudgeAssessment,
+    getParticipantStageQuestions,
     syncStatus,
     lastSyncTime,
     toggleSidebar
@@ -54,26 +55,11 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   const activeStageName = currentParticipant?.stageName || 'Penyisihan';
 
-  // Multi-Question support: list of questions assigned to this participant in active stage
+  // Multi-Question support: strictly retrieved per stage via getParticipantStageQuestions (NO cross-stage fallback!)
   const participantAssignedQuestions = useMemo<AssignedMaqraItem[]>(() => {
     if (!currentParticipant) return [];
-    if (currentParticipant.assignedQuestions && currentParticipant.assignedQuestions.length > 0) {
-      const stageSpecific = currentParticipant.assignedQuestions.filter(
-        (aq: AssignedMaqraItem) => !aq.stageName || aq.stageName === activeStageName
-      );
-      return stageSpecific.length > 0 ? stageSpecific : currentParticipant.assignedQuestions;
-    }
-    if (currentParticipant.questionId) {
-      return [{
-        questionId: currentParticipant.questionId,
-        code: 'MQ-01',
-        title: currentParticipant.assignedMaqra || 'Maqra Tilawah',
-        pageNumber: currentParticipant.pageNumber || 305,
-        stageName: activeStageName
-      }];
-    }
-    return [];
-  }, [currentParticipant, activeStageName]);
+    return getParticipantStageQuestions(currentParticipant.id, activeStageName);
+  }, [currentParticipant, activeStageName, getParticipantStageQuestions]);
 
   const [activeQuestionId, setActiveQuestionId] = useState<string>('');
 
@@ -629,6 +615,27 @@ export const PenilaianDualPanelView: React.FC = () => {
               }}
               className="relative select-none transition-all"
             >
+              {/* 0. Empty State: No Maqra Assigned in Active Stage */}
+              {participantAssignedQuestions.length === 0 && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white z-30 p-6 text-center min-h-[420px]">
+                  <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 mb-3">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-900 mb-1">
+                    Maqra Belum Ditetapkan untuk Babak {activeStageName}
+                  </h4>
+                  <p className="text-xs text-slate-500 max-w-sm mb-4">
+                    Peserta {currentParticipant?.name} ({currentParticipant?.participantId}) belum memiliki maqra yang ditetapkan pada Babak {activeStageName}. Silakan tetapkan soal di menu Bank Soal & Maqra terlebih dahulu.
+                  </p>
+                  <button
+                    onClick={() => setCurrentView('bank_soal')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-lg shadow-2xs cursor-pointer"
+                  >
+                    <span>Buka Bank Soal & Maqra</span>
+                  </button>
+                </div>
+              )}
+
               {/* 1. Loading State */}
               {!imageLoaded && !imageLoadError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/95 z-20 min-h-[420px]">
@@ -720,6 +727,17 @@ export const PenilaianDualPanelView: React.FC = () => {
           }`}
         >
           <div className="p-3.5 sm:p-4 space-y-3.5 sm:space-y-4">
+            {/* Empty Maqra notice */}
+            {participantAssignedQuestions.length === 0 && (
+              <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200 text-center">
+                <AlertTriangle className="w-5 h-5 text-amber-700 mx-auto mb-1.5" />
+                <p className="text-xs font-bold text-amber-900">Maqra Belum Ditetapkan</p>
+                <p className="text-[11px] text-amber-700 mt-0.5">
+                  Peserta belum memiliki maqra yang ditetapkan pada Babak {activeStageName}. Penilaian tidak dapat dilakukan.
+                </p>
+              </div>
+            )}
+
             {/* Multi-Question Selector Toolbar (when participant has >1 assigned maqra in this stage) */}
             {participantAssignedQuestions.length > 1 && (
               <div className="space-y-1">
@@ -861,7 +879,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                                 activeQuestionId
                               )
                             }
-                            disabled={count <= 0 || isFinalized || isAdminMode}
+                            disabled={count <= 0 || isFinalized || isAdminMode || participantAssignedQuestions.length === 0}
                             className="w-7 h-7 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
                             title="Kurangi 1 Kesalahan"
                             aria-label={`Kurangi kesalahan ${cat.name}`}
@@ -880,7 +898,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                                 activeQuestionId
                               )
                             }
-                            disabled={isFinalized || isAdminMode}
+                            disabled={isFinalized || isAdminMode || participantAssignedQuestions.length === 0}
                             className="w-7 h-7 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
                             title="Tambah 1 Kesalahan"
                             aria-label={`Tambah kesalahan ${cat.name}`}
@@ -916,6 +934,15 @@ export const PenilaianDualPanelView: React.FC = () => {
                 </p>
                 <p className="text-[10px] text-emerald-700 mt-0.5">
                   Difinalisasi pada: {currentAssessment?.finalizedAt || lastSyncTime}
+                </p>
+              </div>
+            ) : participantAssignedQuestions.length === 0 ? (
+              <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-xl text-center">
+                <p className="text-xs font-bold text-slate-700">
+                  Maqra Belum Ditetapkan
+                </p>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Tetapkan soal terlebih dahulu untuk memulai penilaian.
                 </p>
               </div>
             ) : (

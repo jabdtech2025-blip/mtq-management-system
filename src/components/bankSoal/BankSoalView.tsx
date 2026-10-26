@@ -51,6 +51,10 @@ export const BankSoalView: React.FC = () => {
   // Manual Assign Modal
   const [manualAssignQuestion, setManualAssignQuestion] = useState<Question | null>(null);
   const [targetParticipantId, setTargetParticipantId] = useState('');
+  const [manualAssignFeedback, setManualAssignFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   // Lottery Draw Workflow Modal
   const [isLotteryModalOpen, setIsLotteryModalOpen] = useState(false);
@@ -458,13 +462,35 @@ export const BankSoalView: React.FC = () => {
     setManualAssignQuestion(q);
     const defaultP = participants[0]?.id || '';
     setTargetParticipantId(defaultP);
+    setManualAssignFeedback(null);
   };
 
-  // Add question to target participant
+  // Add question to target participant with duplicate prevention and user feedback
   const handleAddQuestionToParticipant = () => {
-    if (manualAssignQuestion && targetParticipantId) {
-      addQuestionToParticipant(targetParticipantId, manualAssignQuestion.id);
+    if (!manualAssignQuestion || !targetParticipantId) return;
+
+    const targetPart = participants.find((p) => p.id === targetParticipantId);
+    if (!targetPart) return;
+
+    const alreadyHasInStage =
+      (targetPart.questionId === manualAssignQuestion.id && (!targetPart.stageName || targetPart.stageName === manualAssignQuestion.stageName)) ||
+      (targetPart.assignedQuestions || []).some(
+        (aq) => aq.questionId === manualAssignQuestion.id && (!aq.stageName || aq.stageName === targetPart.stageName)
+      );
+
+    if (alreadyHasInStage) {
+      setManualAssignFeedback({
+        type: 'error',
+        message: `Peserta ${targetPart.name} sudah memiliki soal ini pada babak ${targetPart.stageName}.`
+      });
+      return;
     }
+
+    addQuestionToParticipant(targetParticipantId, manualAssignQuestion.id);
+    setManualAssignFeedback({
+      type: 'success',
+      message: `Soal ${manualAssignQuestion.code} berhasil ditambahkan ke peserta ${targetPart.name}.`
+    });
   };
 
   return (
@@ -1075,18 +1101,35 @@ export const BankSoalView: React.FC = () => {
               <p className="text-[11px] text-slate-500">
                 Fitur ini mendukung penugasan banyak soal per peserta tanpa menghapus soal sebelumnya.
               </p>
+
+              {manualAssignFeedback && (
+                <div
+                  className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${
+                    manualAssignFeedback.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200'
+                  }`}
+                >
+                  {manualAssignFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span>{manualAssignFeedback.message}</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-2.5">
               <button
                 onClick={() => setManualAssignQuestion(null)}
-                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
               >
                 Selesai
               </button>
               <button
                 onClick={handleAddQuestionToParticipant}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-2xs"
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
               >
                 Tambahkan ke Peserta
               </button>

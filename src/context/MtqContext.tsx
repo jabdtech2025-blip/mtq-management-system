@@ -141,6 +141,10 @@ interface MtqContextType {
     participantId: string,
     stageName?: string
   ) => StageParticipation | undefined;
+  getParticipantStageQuestions: (
+    participantId: string,
+    stageName?: string
+  ) => AssignedMaqraItem[];
 
   // Master Data & Config (Tenant Scoped)
   addKafilah: (kafilah: Omit<Kafilah, 'id' | 'tenantId'>) => void;
@@ -299,7 +303,25 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [stageParticipations, setStageParticipations] = useState<StageParticipation[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'stage_participations');
-      return saved ? JSON.parse(saved) : INITIAL_STAGE_PARTICIPATIONS;
+      const loaded: StageParticipation[] = saved ? JSON.parse(saved) : INITIAL_STAGE_PARTICIPATIONS;
+      return loaded.map((sp) => {
+        if (!sp.assignedQuestions || sp.assignedQuestions.length === 0) {
+          if (sp.questionId && sp.questionId.trim() !== '') {
+            return {
+              ...sp,
+              assignedQuestions: [
+                {
+                  questionId: sp.questionId,
+                  title: sp.assignedMaqra || 'Maqra Tilawah',
+                  pageNumber: sp.pageNumber || 305,
+                  stageName: sp.stageName
+                }
+              ]
+            };
+          }
+        }
+        return sp;
+      });
     } catch {
       return INITIAL_STAGE_PARTICIPATIONS;
     }
@@ -326,7 +348,44 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [assessments, setAssessments] = useState<JudgeAssessment[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'assessments');
-      return saved ? JSON.parse(saved) : INITIAL_ASSESSMENTS;
+      const loaded: JudgeAssessment[] = saved ? JSON.parse(saved) : INITIAL_ASSESSMENTS;
+      // Conservative, idempotent migration:
+      // Ensure all assessments have tenantId, stageName, and questionId if unambiguously resolvable
+      return loaded.map((a) => {
+        let stage = a.stageName;
+        let qId = a.questionId;
+
+        if (!stage) {
+          if (a.stageParticipationId) {
+            const spMatch = INITIAL_STAGE_PARTICIPATIONS.find((s) => s.id === a.stageParticipationId);
+            stage = spMatch?.stageName || 'Penyisihan';
+          } else {
+            stage = 'Penyisihan';
+          }
+        }
+
+        if (!qId) {
+          if (a.stageParticipationId) {
+            const spMatch = INITIAL_STAGE_PARTICIPATIONS.find((s) => s.id === a.stageParticipationId);
+            if (spMatch?.questionId) {
+              qId = spMatch.questionId;
+            }
+          }
+          if (!qId && a.participantId) {
+            const partMatch = INITIAL_PARTICIPANTS.find((p) => p.id === a.participantId);
+            if (partMatch?.questionId && (!partMatch.stageName || partMatch.stageName === stage)) {
+              qId = partMatch.questionId;
+            }
+          }
+        }
+
+        return {
+          ...a,
+          tenantId: a.tenantId || 'tenant-jabar',
+          stageName: stage,
+          questionId: qId
+        };
+      });
     } catch {
       return INITIAL_ASSESSMENTS;
     }
@@ -531,7 +590,86 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   /**
-   * Helper to retrieve assessment matching participant, judge, stage, and questionId
+   * Helper to retrieve all questions assigned to a participant on a specific stage.
+   * Primary source of truth is StageParticipation for targetStage.
+   * STRICT: Never leaks questions from other stages!
+   */
+  const getParticipantStageQuestions = (
+    participantId: string,
+    stageName?: string
+  ): AssignedMaqraItem[] => {
+    const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
+    if (!part) return [];
+    const targetStage = stageName || part.stageName || selectedStageName;
+
+    // 1. Check StageParticipation for targetStage
+    const sp = stageParticipations.find(
+      (item) =>
+        item.tenantId === currentTenantId &&
+        item.participantId === participantId &&
+        item.stageName === targetStage
+    );
+
+    if (sp?.assignedQuestions && sp.assignedQuestions.length > 0) {
+      const stageSpecific = sp.assignedQuestions.filter(
+        (aq) => !aq.stageName || aq.stageName === targetStage
+      );
+      if (stageSpecific.length > 0) return stageSpecific;
+    }
+
+    // 2. Check Participant assignedQuestions strictly matching targetStage
+    if (part.assignedQuestions && part.assignedQuestions.length > 0) {
+      const stageSpecific = part.assignedQuestions.filter(
+        (aq) => aq.stageName === targetStage
+      );
+      if (stageSpecific.length > 0) return stageSpecific;
+    }
+
+    // 3. Fallback for legacy single-question data ONLY IF stage matches
+    if (sp?.questionId && sp.questionId.trim() !== '') {
+      const qObj = questions.find((q) => q.id === sp.questionId);
+      return [
+        {
+          questionId: sp.questionId,
+          code: qObj?.code || 'MQ-01',
+          title: sp.assignedMaqra || qObj?.title || 'Maqra Tilawah',
+          surahName: qObj?.surahName,
+          surahNumber: qObj?.surahNumber,
+          startAyah: qObj?.startAyah,
+          endAyah: qObj?.endAyah,
+          pageNumber: sp.pageNumber || qObj?.pageNumber || 305,
+          pageStart: qObj?.pageStart || sp.pageNumber || 305,
+          pageEnd: qObj?.pageEnd || sp.pageNumber || 305,
+          stageName: targetStage
+        }
+      ];
+    }
+
+    if (part.questionId && part.questionId.trim() !== '' && part.stageName === targetStage) {
+      const qObj = questions.find((q) => q.id === part.questionId);
+      return [
+        {
+          questionId: part.questionId,
+          code: qObj?.code || 'MQ-01',
+          title: part.assignedMaqra || qObj?.title || 'Maqra Tilawah',
+          surahName: qObj?.surahName,
+          surahNumber: qObj?.surahNumber,
+          startAyah: qObj?.startAyah,
+          endAyah: qObj?.endAyah,
+          pageNumber: part.pageNumber || qObj?.pageNumber || 305,
+          pageStart: qObj?.pageStart || part.pageNumber || 305,
+          pageEnd: qObj?.pageEnd || part.pageNumber || 305,
+          stageName: targetStage
+        }
+      ];
+    }
+
+    return [];
+  };
+
+  /**
+   * Helper to retrieve assessment matching participant, judge, stage, and questionId strictly.
+   * Identity: tenantId + participantId + judgeId + stageName + questionId
    */
   const getJudgeAssessment = (
     participantId: string,
@@ -546,9 +684,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (a.tenantId !== currentTenantId) return false;
       if (a.participantId !== participantId) return false;
       if (a.judgeId !== judgeId) return false;
-      if (a.stageName && targetStage && a.stageName !== targetStage) return false;
+      // Strict stage match
+      if (a.stageName !== targetStage) return false;
+      // Strict questionId match
       if (questionId) {
-        if (a.questionId && a.questionId !== questionId) return false;
+        return a.questionId === questionId;
       }
       return true;
     });
@@ -572,7 +712,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   /**
-   * Derive overall participant status for a stage based on required judge assignments
+   * Derive overall participant status for a stage based on ALL required judge assignments AND ALL assigned maqras.
+   * P0: Status "Lengkap" ONLY when ALL required judges have finalized ALL assigned questions for that stage.
+   * If no maqras assigned on this stage, returns "Maqra Belum Ditetapkan".
    */
   const getParticipantProgress = (
     participantId: string,
@@ -582,52 +724,58 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!part) return 'Belum Dimulai';
     const targetStage = stageName || part.stageName || selectedStageName;
 
-    const sp = stageParticipations.find(
-      (item) =>
-        item.tenantId === currentTenantId &&
-        item.participantId === participantId &&
-        item.stageName === targetStage
-    );
+    const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
+    if (stageQuestions.length === 0) {
+      return 'Maqra Belum Ditetapkan';
+    }
 
     // Find required judge assignments in current tenant for this stage and branch
     const requiredAssignments = judgeAssignments.filter(
       (ja) =>
         ja.tenantId === currentTenantId &&
         ja.stageName === targetStage &&
-        ja.branchName === part.branchName
+        (!ja.branchName || ja.branchName === part.branchName || part.branchName.includes(ja.branchName) || ja.branchName.includes(part.branchName))
     );
 
-    const requiredJudgeIds = requiredAssignments.map((ja) => ja.judgeId);
-
-    // If no judge assigned yet, return Belum Dimulai
+    let requiredJudgeIds = Array.from(new Set(requiredAssignments.map((ja) => ja.judgeId)));
     if (requiredJudgeIds.length === 0) {
-      return sp?.status || 'Belum Dimulai';
+      requiredJudgeIds = users
+        .filter((u) => u.role === 'judge' && u.tenantId === currentTenantId)
+        .map((u) => u.id);
+    }
+    if (requiredJudgeIds.length === 0) {
+      return 'Belum Dimulai';
     }
 
-    // Find assessments belonging to this stage participation or participant's stage
-    const partAssessments = assessments.filter((a) => {
-      if (a.tenantId !== currentTenantId) return false;
-      if (sp && a.stageParticipationId) {
-        return a.stageParticipationId === sp.id;
+    const totalRequiredUnits = requiredJudgeIds.length * stageQuestions.length;
+    let finalizedUnits = 0;
+    let inProgressUnits = 0;
+
+    for (const q of stageQuestions) {
+      for (const jId of requiredJudgeIds) {
+        const asm = assessments.find(
+          (a) =>
+            a.tenantId === currentTenantId &&
+            a.participantId === participantId &&
+            a.judgeId === jId &&
+            a.stageName === targetStage &&
+            a.questionId === q.questionId
+        );
+        if (asm?.status === 'finalized') {
+          finalizedUnits++;
+        } else if (asm?.status === 'in_progress') {
+          inProgressUnits++;
+        }
       }
-      return a.participantId === participantId && (!a.stageName || a.stageName === targetStage);
-    });
+    }
 
-    const finalizedCount = requiredJudgeIds.filter((jId) =>
-      partAssessments.some((a) => a.judgeId === jId && a.status === 'finalized')
-    ).length;
-
-    const inProgressCount = requiredJudgeIds.filter((jId) =>
-      partAssessments.some((a) => a.judgeId === jId && a.status === 'in_progress')
-    ).length;
-
-    if (finalizedCount === requiredJudgeIds.length && requiredJudgeIds.length > 0) {
+    if (finalizedUnits === totalRequiredUnits && totalRequiredUnits > 0) {
       return 'Lengkap';
     }
-    if (finalizedCount > 0) {
+    if (finalizedUnits > 0) {
       return 'Menunggu Hakim Lain';
     }
-    if (inProgressCount > 0) {
+    if (inProgressUnits > 0) {
       return 'Berlangsung';
     }
     return 'Belum Dimulai';
@@ -635,6 +783,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   /**
    * Update error count with centralized calculation helper and strict read-only lock for finalized
+   * Identity: participantId + judgeId + targetStage + targetQuestionId
    */
   const updateErrorCount = (
     participantId: string,
@@ -653,7 +802,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!part) return;
     const targetStage = stageName || part.stageName || selectedStageName;
-    const targetQuestionId = questionId || part.questionId;
+    const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
+    const targetQuestionId = questionId || stageQuestions[0]?.questionId;
+
+    if (!targetQuestionId) {
+      console.warn('Penilaian ditolak: Peserta belum memiliki maqra yang ditetapkan pada babak ini.');
+      return;
+    }
 
     // Get or create stage participation
     let sp = stageParticipations.find(
@@ -688,8 +843,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         a.tenantId === currentTenantId &&
         a.judgeId === judgeId &&
         a.participantId === participantId &&
-        (!a.stageName || a.stageName === targetStage) &&
-        (!targetQuestionId || !a.questionId || a.questionId === targetQuestionId)
+        a.stageName === targetStage &&
+        a.questionId === targetQuestionId
     );
 
     if (existing?.status === 'finalized') {
@@ -718,7 +873,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           stageParticipationId: sp.id,
           stageId,
           stageName: targetStage,
-          questionId: targetQuestionId || existing.questionId,
+          questionId: targetQuestionId,
           errorCounts: currentCounts,
           deductions,
           totalDeductions,
@@ -727,7 +882,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           lastUpdated: nowTime
         }
       : {
-          id: `asm-${participantId}-${judgeId}-${Date.now()}`,
+          id: `asm-${participantId}-${judgeId}-${targetStage}-${targetQuestionId}`,
           tenantId: currentTenantId,
           stageParticipationId: sp.id,
           stageId,
@@ -791,6 +946,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   /**
    * Save annotations independently without needing error counts first
+   * Strictly scoped by participantId, judgeId, targetStage, and targetQuestionId
    */
   const saveAnnotations = (
     participantId: string,
@@ -807,7 +963,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!part) return;
     const targetStage = stageName || part.stageName || selectedStageName;
-    const targetQuestionId = questionId || part.questionId;
+    const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
+    const targetQuestionId = questionId || stageQuestions[0]?.questionId;
+    if (!targetQuestionId) return;
 
     let sp = stageParticipations.find(
       (item) =>
@@ -841,8 +999,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         a.tenantId === currentTenantId &&
         a.judgeId === judgeId &&
         a.participantId === participantId &&
-        (!a.stageName || a.stageName === targetStage) &&
-        (!targetQuestionId || !a.questionId || a.questionId === targetQuestionId)
+        a.stageName === targetStage &&
+        a.questionId === targetQuestionId
     );
 
     if (existing?.status === 'finalized') {
@@ -863,7 +1021,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     } else {
       const newAsm: JudgeAssessment = {
-        id: `asm-${participantId}-${judgeId}-${Date.now()}`,
+        id: `asm-${participantId}-${judgeId}-${targetStage}-${targetQuestionId}`,
         tenantId: currentTenantId,
         stageParticipationId: sp.id,
         stageId,
@@ -889,7 +1047,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   /**
-   * Finalize individual judge assessment
+   * Finalize individual judge assessment scoped strictly to question and stage.
+   * Updates participant stage completion accurately across all assigned questions.
    */
   const finalizeAssessment = (
     participantId: string,
@@ -906,7 +1065,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!part) return;
     const targetStage = stageName || part.stageName || selectedStageName;
-    const targetQuestionId = questionId || part.questionId;
+    const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
+    const targetQuestionId = questionId || stageQuestions[0]?.questionId;
+
+    if (!targetQuestionId) {
+      console.warn('Finalisasi ditolak: Peserta belum memiliki maqra pada babak ini.');
+      return;
+    }
+
     const nowTime = getWibTime();
 
     let sp = stageParticipations.find(
@@ -943,23 +1109,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         a.tenantId === currentTenantId &&
         a.judgeId === judgeId &&
         a.participantId === participantId &&
-        (!a.stageName || a.stageName === targetStage) &&
-        (!targetQuestionId || !a.questionId || a.questionId === targetQuestionId)
+        a.stageName === targetStage &&
+        a.questionId === targetQuestionId
     );
 
     const finalizedScore = existing ? existing.finalScore : 100.0;
 
+    let updatedAssessments: JudgeAssessment[];
     if (existing) {
-      setAssessments((prev) =>
-        prev.map((a) =>
-          a.id === existing.id
-            ? { ...a, status: 'finalized', finalizedAt: nowTime, lastUpdated: nowTime }
-            : a
-        )
+      updatedAssessments = assessments.map((a) =>
+        a.id === existing.id
+          ? { ...a, status: 'finalized', finalizedAt: nowTime, lastUpdated: nowTime }
+          : a
       );
     } else {
       const newAsm: JudgeAssessment = {
-        id: `asm-${participantId}-${judgeId}-${Date.now()}`,
+        id: `asm-${participantId}-${judgeId}-${targetStage}-${targetQuestionId}`,
         tenantId: currentTenantId,
         stageParticipationId: sp.id,
         stageId,
@@ -978,40 +1143,54 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastUpdated: nowTime,
         finalizedAt: nowTime
       };
-      setAssessments((prev) => [...prev, newAsm]);
+      updatedAssessments = [...assessments, newAsm];
     }
+    setAssessments(updatedAssessments);
 
     // Check required judges in this stage and branch
     const requiredJudges = judgeAssignments.filter(
       (ja) =>
         ja.tenantId === currentTenantId &&
         ja.stageName === targetStage &&
-        ja.branchName === part.branchName
+        (!ja.branchName || ja.branchName === part.branchName || part.branchName.includes(ja.branchName) || ja.branchName.includes(part.branchName))
     );
-    const requiredJudgeIds = requiredJudges.map((ja) => ja.judgeId);
+    let requiredJudgeIds = Array.from(new Set(requiredJudges.map((ja) => ja.judgeId)));
+    if (requiredJudgeIds.length === 0) {
+      requiredJudgeIds = users
+        .filter((u) => u.role === 'judge' && u.tenantId === currentTenantId)
+        .map((u) => u.id);
+    }
 
-    // Compute updated completion
-    const allFinalized =
-      requiredJudgeIds.length > 0 &&
-      requiredJudgeIds.every(
-        (jId) =>
-          jId === judgeId ||
-          assessments.some(
-            (a) =>
-              a.tenantId === currentTenantId &&
-              a.judgeId === jId &&
-              a.participantId === participantId &&
-              a.stageName === targetStage &&
-              a.status === 'finalized'
-          )
-      );
+    // Compute updated completion across ALL assigned questions and ALL required judges on this stage
+    const totalRequiredUnits = requiredJudgeIds.length * stageQuestions.length;
+    let finalizedUnits = 0;
+    for (const q of stageQuestions) {
+      for (const jId of requiredJudgeIds) {
+        const isCurrent = jId === judgeId && q.questionId === targetQuestionId;
+        const asm = updatedAssessments.find(
+          (a) =>
+            a.tenantId === currentTenantId &&
+            a.judgeId === jId &&
+            a.participantId === participantId &&
+            a.stageName === targetStage &&
+            a.questionId === q.questionId
+        );
+        if (isCurrent || asm?.status === 'finalized') {
+          finalizedUnits++;
+        }
+      }
+    }
+
+    const allFinalized = finalizedUnits === totalRequiredUnits && totalRequiredUnits > 0;
+    const updatedStatus: ParticipantProgressStatus = allFinalized
+      ? 'Lengkap'
+      : finalizedUnits > 0
+      ? 'Menunggu Hakim Lain'
+      : 'Berlangsung';
 
     // Update StageParticipation state
     setStageParticipations((prev) => {
       const existsInList = prev.some((item) => item.id === sp!.id);
-      const updatedStatus: ParticipantProgressStatus = allFinalized
-        ? 'Lengkap'
-        : 'Menunggu Hakim Lain';
 
       if (existsInList) {
         return prev.map((item) =>
@@ -1046,12 +1225,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Activity Log
+    const currentQObj = stageQuestions.find((q) => q.questionId === targetQuestionId);
+    const qLabel = currentQObj?.code || 'Maqra';
     const newLog: ActivityLogItem = {
       id: 'act-' + Date.now(),
       tenantId: currentTenantId,
       type: 'finalized',
       title: 'Penilaian Hakim Terkunci',
-      description: `Penilaian peserta ${part.participantId} ${part.name} berhasil dikunci oleh ${targetJudge.name} (Skor: ${finalizedScore.toFixed(2)}).`,
+      description: `Penilaian ${qLabel} peserta ${part.participantId} ${part.name} berhasil dikunci oleh ${targetJudge.name} (Skor: ${finalizedScore.toFixed(2)}).`,
       timestamp: nowTime,
       actorName: targetJudge.name
     };
@@ -1404,6 +1585,27 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'Tidak ada hasil undian untuk ditetapkan.' };
     }
 
+    // Pre-validation: verify all participants and questions exist in current tenant and are valid
+    for (const r of results) {
+      const part = participants.find((p) => p.id === r.participantId && p.tenantId === currentTenantId);
+      if (!part) {
+        return {
+          success: false,
+          message: `Transaksi dibatalkan: Peserta "${r.participantName}" tidak ditemukan di tenant aktif.`
+        };
+      }
+      for (const qId of r.questionIds) {
+        const q = questions.find((item) => item.id === qId && item.tenantId === currentTenantId);
+        if (!q || q.status !== 'Aktif') {
+          return {
+            success: false,
+            message: `Transaksi dibatalkan: Soal dengan ID "${qId}" tidak tersedia atau nonaktif.`
+          };
+        }
+      }
+    }
+
+    // Atomic execution
     results.forEach((r) => {
       r.questionIds.forEach((qId) => {
         addQuestionToParticipant(r.participantId, qId, stageName);
@@ -1761,17 +1963,25 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    // VALIDATION: All participants in current stage must have all required judge assessments finalized!
-    const incompleteParts = stageParts.filter((sp) => {
-      const progress = getParticipantProgress(sp.participantId, currentStageName);
-      return progress !== 'Lengkap';
-    });
+    // VALIDATION: All participants in current stage must have assigned questions and all required judge assessments finalized!
+    for (const sp of stageParts) {
+      const stageQuestions = getParticipantStageQuestions(sp.participantId, currentStageName);
+      if (stageQuestions.length === 0) {
+        const part = participants.find((p) => p.id === sp.participantId);
+        return {
+          success: false,
+          message: `Finalisasi ditolak: Peserta "${part?.name || sp.participantId}" belum memiliki penetapan soal wajib untuk Babak ${currentStageName}.`
+        };
+      }
 
-    if (incompleteParts.length > 0) {
-      return {
-        success: false,
-        message: `Finalisasi belum dapat dilakukan. Masih terdapat ${incompleteParts.length} peserta dengan penilaian dewan hakim yang belum lengkap.`
-      };
+      const progress = getParticipantProgress(sp.participantId, currentStageName);
+      if (progress !== 'Lengkap') {
+        const part = participants.find((p) => p.id === sp.participantId);
+        return {
+          success: false,
+          message: `Finalisasi ditolak: Penilaian peserta "${part?.name || sp.participantId}" di Babak ${currentStageName} belum lengkap dari seluruh dewan hakim yang diwajibkan (Status saat ini: ${progress}).`
+        };
+      }
     }
 
     // VALIDATION: Prevent duplicate advancement if participants already exist in nextStage
@@ -1829,7 +2039,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return sp;
       });
 
-      // Generate new distinct StageParticipation records for next stage
+      // Generate new distinct StageParticipation records for next stage with EMPTY questions
       qualifiedParticipantIds.forEach((pId) => {
         const part = participants.find((p) => p.id === pId && p.tenantId === currentTenantId);
         if (part) {
@@ -1844,6 +2054,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             questionId: '',
             assignedMaqra: 'Belum ditetapkan untuk Babak ' + nextStg.name,
             pageNumber: 1,
+            assignedQuestions: [],
             status: 'Belum Dimulai'
           });
         }
@@ -1852,7 +2063,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [...updated, ...newParticipations];
     });
 
-    // 3. Update participants records: carry forward identity, update stageName and stageHistory
+    // 3. Update participants records: carry forward identity, update stageName and stageHistory, reset questions for new stage
     setParticipants((prev) =>
       prev.map((p) => {
         if (p.tenantId === currentTenantId) {
@@ -1872,7 +2083,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               status: 'Menunggu',
               stageHistory: [...(p.stageHistory || []), historyEntry],
               questionId: '',
-              assignedMaqra: 'Belum ditetapkan untuk Babak ' + nextStageName
+              assignedMaqra: 'Belum ditetapkan untuk Babak ' + nextStageName,
+              assignedQuestions: [],
+              questionIds: []
             };
           } else if (stageParts.some((item) => item.participantId === p.id)) {
             const sp = stageParts.find((item) => item.participantId === p.id);
@@ -1984,6 +2197,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getJudgeAssessment,
         getParticipantProgress,
         getStageParticipation,
+        getParticipantStageQuestions,
         addKafilah,
         updateKafilah,
         addParticipant,

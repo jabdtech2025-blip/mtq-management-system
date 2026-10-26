@@ -27,6 +27,7 @@ export const HasilKelulusanView: React.FC = () => {
     judgeAssignments,
     users,
     getParticipantProgress,
+    getParticipantStageQuestions,
     advanceQualifiers,
     setCurrentView,
     setSelectedParticipantId
@@ -71,34 +72,44 @@ export const HasilKelulusanView: React.FC = () => {
     return users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id).map((u) => u.id);
   }, [judgeAssignments, selectedStageName, users, currentTenant.id]);
 
-  // Compute ranking, completion, and provisional vs valid scores
+  // Compute ranking, completion, and provisional vs valid scores with full multi-maqra support
   const rankedParticipants = useMemo(() => {
     return currentStageParticipations
       .map((sp) => {
         const participantObj = participants.find((p) => p.id === sp.participantId && p.tenantId === currentTenant.id);
+        const stageQuestions = getParticipantStageQuestions(sp.participantId, selectedStageName);
+        const progress = getParticipantProgress(sp.participantId, selectedStageName);
 
-        const pAssessments = stageJudges.map((jId) =>
-          assessments.find(
-            (a) =>
-              a.tenantId === currentTenant.id &&
-              a.participantId === sp.participantId &&
-              a.judgeId === jId &&
-              (a.stageId === currentStage?.id || a.stageName === selectedStageName || a.stageParticipationId === sp.id)
-          )
-        );
+        // Gather assessments for all assigned questions and judges
+        const allAssessmentUnits: NonNullable<(typeof assessments)[0]>[] = [];
 
-        const validFinalizedScores = pAssessments
-          .filter((a): a is NonNullable<typeof a> => !!a && a.status === 'finalized')
+        stageQuestions.forEach((q) => {
+          stageJudges.forEach((jId) => {
+            const match = assessments.find(
+              (a) =>
+                a.tenantId === currentTenant.id &&
+                a.participantId === sp.participantId &&
+                a.judgeId === jId &&
+                a.stageName === selectedStageName &&
+                a.questionId === q.questionId
+            );
+            if (match) {
+              allAssessmentUnits.push(match);
+            }
+          });
+        });
+
+        const validFinalizedScores = allAssessmentUnits
+          .filter((a) => a.status === 'finalized')
           .map((a) => a.finalScore);
 
-        const allAvailableScores = pAssessments
-          .filter((a): a is NonNullable<typeof a> => !!a)
-          .map((a) => a.finalScore);
+        const allAvailableScores = allAssessmentUnits.map((a) => a.finalScore);
 
+        const totalRequiredUnits = stageJudges.length * stageQuestions.length;
         const isFullyFinalized =
-          pAssessments.length === stageJudges.length &&
-          pAssessments.every((a) => a?.status === 'finalized') &&
-          stageJudges.length > 0;
+          progress === 'Lengkap' &&
+          totalRequiredUnits > 0 &&
+          validFinalizedScores.length === totalRequiredUnits;
 
         // Valid score only if fully finalized; otherwise provisional score for preview
         const averageFinalScore =
@@ -110,8 +121,6 @@ export const HasilKelulusanView: React.FC = () => {
           allAvailableScores.length > 0
             ? Number((allAvailableScores.reduce((a, b) => a + b, 0) / allAvailableScores.length).toFixed(2))
             : null;
-
-        const progress = getParticipantProgress(sp.participantId, selectedStageName);
 
         return {
           participation: sp,
@@ -134,13 +143,14 @@ export const HasilKelulusanView: React.FC = () => {
             status: 'Menunggu' as const,
             progressStatus: 'Belum Dimulai' as const
           },
+          stageQuestions,
           averageFinalScore,
           provisionalAverageScore,
           displayScore: averageFinalScore !== null ? averageFinalScore : provisionalAverageScore,
           isFullyFinalized,
           progress,
           finalizedJudgeCount: validFinalizedScores.length,
-          totalAssignedJudges: stageJudges.length
+          totalAssignedJudges: totalRequiredUnits > 0 ? totalRequiredUnits : stageJudges.length
         };
       })
       .sort((a, b) => {
@@ -148,7 +158,7 @@ export const HasilKelulusanView: React.FC = () => {
         const scoreB = b.displayScore ?? -1;
         return scoreB - scoreA;
       });
-  }, [currentStageParticipations, stageJudges, assessments, participants, currentTenant.id, currentStage?.id, selectedStageName, getParticipantProgress]);
+  }, [currentStageParticipations, stageJudges, assessments, participants, currentTenant.id, selectedStageName, getParticipantProgress, getParticipantStageQuestions]);
 
   // Quota configuration
   const quota = currentStage?.qualificationQuota || 3;
