@@ -267,57 +267,38 @@ export const KafilahPesertaView: React.FC = () => {
           <div className="bg-white rounded-2xl max-w-3xl w-full border border-slate-200 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                    {selectedKafilah.code}
-                  </span>
-                  <span
-                    className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
-                      selectedKafilah.status === 'Aktif'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
-                    {selectedKafilah.status}
-                  </span>
-                </div>
-                <h3 className="text-lg font-bold text-slate-900 mt-1">
+                <h3 className="text-lg font-bold text-slate-900">
                   Grup {selectedKafilah.name}
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 mt-0.5">
                   {selectedKafilah.region} · PJ: {selectedKafilah.contactPerson} ({selectedKafilah.contactPhone})
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  onClick={() => setIsAddParticipantOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  title="Tambah peserta baru ke grup ini"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Tambah Peserta</span>
+                </button>
+                <button
                   onClick={() => handleOpenEditKafilah(selectedKafilah)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200 transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200 transition-colors cursor-pointer"
                   title="Edit data grup ini"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
                   <span>Edit Grup</span>
                 </button>
-                <button
-                  onClick={() => setSelectedKafilah(null)}
-                  className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
               </div>
             </div>
 
             <div className="p-6 overflow-y-auto space-y-4 flex-1">
-              <div className="flex items-center justify-between">
+              <div>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                   Daftar Peserta Terdaftar ({kafilahParticipants.length})
                 </h4>
-                <button
-                  onClick={() => setIsAddParticipantOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 cursor-pointer"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>Daftarkan Peserta Baru</span>
-                </button>
               </div>
 
               {kafilahParticipants.length > 0 ? (

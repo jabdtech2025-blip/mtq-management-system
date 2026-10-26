@@ -4,8 +4,6 @@ import {
   Plus,
   CheckCircle2,
   Clock,
-  Award,
-  ChevronRight,
   ArrowRight,
   Pencil,
   X,
@@ -79,14 +77,9 @@ export const StageManagementView: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
-              Manajemen Babak Musabaqah
-            </h1>
-            <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-              {stages.length} Babak Dikonfigurasi
-            </span>
-          </div>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+            Manajemen Babak Musabaqah
+          </h1>
           <p className="text-xs text-slate-500 mt-1">
             {currentTenant.name} · Kelola struktur tahapan babak (Penyisihan, Semifinal, Final) dan kuota kelulusan
           </p>
@@ -94,15 +87,8 @@ export const StageManagementView: React.FC = () => {
 
         <div className="flex items-center gap-2.5">
           <button
-            onClick={() => setCurrentView('hasil_kelulusan')}
-            className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all"
-          >
-            <Award className="w-4 h-4" />
-            <span>Hasil & Kelulusan</span>
-          </button>
-          <button
             onClick={handleOpenAdd}
-            className="inline-flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all"
+            className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah Babak</span>
@@ -114,7 +100,7 @@ export const StageManagementView: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {stages
           .sort((a, b) => a.order - b.order)
-          .map((stg, idx) => {
+          .map((stg) => {
             const stageParticipants = participants.filter((p) => p.stageName === stg.name);
             const totalStage = stageParticipants.length;
             const finalizedStage = stageParticipants.filter((p) => p.status === 'Final').length;
@@ -171,21 +157,13 @@ export const StageManagementView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="pt-5 mt-4 border-t border-slate-100 flex items-center justify-between">
+                <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-end">
                   <button
                     onClick={() => handleOpenEdit(stg)}
-                    className="p-1.5 text-slate-500 hover:text-emerald-800 hover:bg-emerald-50 rounded text-xs inline-flex items-center gap-1"
+                    className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-slate-50 rounded text-xs inline-flex items-center gap-1 cursor-pointer font-medium"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                     <span>Edit Konfigurasi</span>
-                  </button>
-
-                  <button
-                    onClick={() => setCurrentView('hasil_kelulusan')}
-                    className="text-xs font-bold text-emerald-800 hover:underline inline-flex items-center gap-1"
-                  >
-                    <span>Hasil Babak</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>

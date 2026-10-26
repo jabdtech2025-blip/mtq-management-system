@@ -298,29 +298,24 @@ export const HasilKelulusanView: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
-              Hasil Babak & Kelulusan (Kualifikasi)
-            </h1>
-            <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-              Alur Kompetisi Bertingkat
-            </span>
-          </div>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+            Hasil Babak & Kelulusan (Kualifikasi)
+          </h1>
           <p className="text-xs text-slate-500 mt-1">
             {currentTenant.name} · Verifikasi penilaian juri, penetapan peringkat, dan pelolosan peserta ke babak berikutnya
           </p>
         </div>
 
-        {/* Stage Selector */}
+        {/* Stage Selector (No label) */}
         <div className="flex items-center gap-2">
-          <label className="text-xs font-bold text-slate-600 hidden sm:inline">Pilih Babak:</label>
           <select
             value={selectedStageName}
             onChange={(e) => {
               setSelectedStageName(e.target.value);
               setAdvancementSuccessMessage('');
             }}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 bg-white shadow-xs"
+            aria-label="Pilih Babak"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 bg-white shadow-xs outline-none"
           >
             {stages.map((stg) => (
               <option key={stg.id} value={stg.name}>
@@ -340,7 +335,7 @@ export const HasilKelulusanView: React.FC = () => {
           </div>
           <button
             onClick={() => setAdvancementSuccessMessage('')}
-            className="p-1 text-emerald-700 hover:text-emerald-900"
+            className="p-1 text-emerald-700 hover:text-emerald-900 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -355,39 +350,26 @@ export const HasilKelulusanView: React.FC = () => {
           </div>
           <button
             onClick={() => setAdvancementErrorMessage('')}
-            className="p-1 text-rose-700 hover:text-rose-900"
+            className="p-1 text-rose-700 hover:text-rose-900 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* Stage Overall Status Banner */}
-      <div
-        className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-          stageStatusBadge.variant === 'emerald'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-            : stageStatusBadge.variant === 'rose'
-            ? 'bg-rose-50 border-rose-200 text-rose-900'
-            : stageStatusBadge.variant === 'amber'
-            ? 'bg-amber-50 border-amber-200 text-amber-900'
-            : 'bg-blue-50 border-blue-200 text-blue-900'
-        }`}
-      >
-        <div className="flex items-start sm:items-center gap-3">
-          <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5 sm:mt-0" />
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-sm">{stageStatusBadge.label}</span>
-            </div>
-            <p className="text-xs opacity-90 mt-0.5">{stageStatusBadge.description}</p>
+      {/* Stage Overall Status Banner (Clean White, No Shield Icon) */}
+      <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="font-extrabold text-sm text-slate-900">{stageStatusBadge.label}</span>
           </div>
+          <p className="text-xs text-slate-500 mt-0.5">{stageStatusBadge.description}</p>
         </div>
 
         {!allAssessmentsFinalized && (
           <button
             onClick={() => setCurrentView('rekap_nilai')}
-            className="self-start sm:self-auto text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            className="self-start sm:self-auto text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors shrink-0 border border-slate-200 cursor-pointer"
           >
             Tinjau di Rekap Nilai →
           </button>
@@ -400,7 +382,7 @@ export const HasilKelulusanView: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-medium text-slate-500">Status Penilaian Babak</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <ShieldCheck className="w-4 h-4 text-slate-400" />
           </div>
           <div className="flex items-baseline gap-2 mt-3">
             <span className="text-2xl font-bold text-slate-900 font-mono">
@@ -410,9 +392,9 @@ export const HasilKelulusanView: React.FC = () => {
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
             {allAssessmentsFinalized ? (
-              <span className="text-emerald-700 font-semibold">Seluruh penilaian dewan juri lengkap</span>
+              <span className="text-slate-500">Seluruh penilaian dewan juri lengkap</span>
             ) : (
-              <span className="text-amber-700 font-semibold">
+              <span className="text-slate-500">
                 {incompleteParticipants.length} peserta belum lengkap dinilai
               </span>
             )}
@@ -423,7 +405,7 @@ export const HasilKelulusanView: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-medium text-slate-500">Kuota Kelulusan Babak</span>
-            <Trophy className="w-4 h-4 text-amber-500" />
+            <Trophy className="w-4 h-4 text-emerald-700" />
           </div>
           <div className="flex items-baseline gap-2 mt-3">
             <span className="text-2xl font-bold text-slate-900 font-mono">
@@ -432,7 +414,7 @@ export const HasilKelulusanView: React.FC = () => {
             <span className="text-xs text-slate-500">Peserta Terbaik</span>
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            Target melaju ke: <strong>{nextStage ? `Babak ${nextStage.name}` : 'Juara Akhir'}</strong>
+            Target melaju ke: <strong className="text-slate-700">{nextStage ? `Babak ${nextStage.name}` : 'Juara Akhir'}</strong>
           </p>
         </div>
 
@@ -440,10 +422,10 @@ export const HasilKelulusanView: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-medium text-slate-500">Calon Peserta Lolos</span>
-            <Users className="w-4 h-4 text-emerald-700" />
+            <Users className="w-4 h-4 text-slate-400" />
           </div>
           <div className="flex items-baseline gap-2 mt-3">
-            <span className="text-2xl font-bold text-emerald-800 font-mono">
+            <span className="text-2xl font-bold text-slate-900 font-mono">
               {qualifiedParticipants.length}
             </span>
             <span className="text-xs text-slate-500">Peserta Terpilih</span>
@@ -559,19 +541,11 @@ export const HasilKelulusanView: React.FC = () => {
                   return (
                     <tr
                       key={p.id}
-                      className={`hover:bg-slate-50 transition-colors ${
-                        item.isQualified ? 'bg-emerald-50/20' : ''
-                      }`}
+                      className="hover:bg-slate-50 transition-colors"
                     >
                       {/* Rank */}
-                      <td className="px-5 py-3.5 text-center font-mono font-extrabold text-sm">
-                        {item.rank <= 3 ? (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-900 font-bold text-xs">
-                            {item.rank}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">#{item.rank}</span>
-                        )}
+                      <td className="px-5 py-3.5 text-center font-mono font-bold text-xs text-slate-700">
+                        #{item.rank}
                       </td>
 
                       {/* Lottery */}
@@ -588,7 +562,7 @@ export const HasilKelulusanView: React.FC = () => {
                               setSelectedParticipantId(p.id);
                               setCurrentView('penilaian_dual_panel');
                             }}
-                            className="text-[10px] text-emerald-800 hover:underline font-semibold"
+                            className="text-[10px] text-slate-500 hover:text-slate-900 hover:underline font-medium cursor-pointer"
                             title="Buka Lembar Penilaian Peserta Ini"
                           >
                             [Buka]
@@ -598,72 +572,64 @@ export const HasilKelulusanView: React.FC = () => {
                           {p.participantId} · {p.kafilahName}
                         </p>
                         {item.isOverridden && (
-                          <p className="text-[10px] text-amber-700 font-medium mt-0.5 italic">
+                          <p className="text-[10px] text-slate-500 mt-0.5 italic">
                             Catatan Override: {item.overrideReason}
                           </p>
                         )}
                       </td>
 
-                      {/* Score: Distinguish valid vs provisional */}
+                      {/* Score: Distinguish valid vs provisional with subtle neutral shades */}
                       <td className="px-4 py-3.5 text-right font-mono">
                         {item.isFullyFinalized && item.averageFinalScore !== null ? (
                           <div>
                             <span className="font-extrabold text-sm text-slate-900">
                               {item.averageFinalScore.toFixed(2)}
                             </span>
-                            <span className="block text-[9px] font-bold text-emerald-700">Resmi</span>
+                            <span className="block text-[9px] font-medium text-slate-500">Resmi</span>
                           </div>
                         ) : (
                           <div>
-                            <span className="text-slate-500 font-bold text-xs italic">
+                            <span className="text-slate-600 font-bold text-xs">
                               {item.provisionalAverageScore !== null
                                 ? item.provisionalAverageScore.toFixed(2)
                                 : '—'}
                             </span>
-                            <span className="block text-[9px] font-semibold text-amber-600">
+                            <span className="block text-[9px] font-medium text-slate-400">
                               (Sementara)
                             </span>
                           </div>
                         )}
                       </td>
 
-                      {/* Completeness */}
+                      {/* Completeness (Neutral text) */}
                       <td className="px-4 py-3.5 text-center">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                            item.isFullyFinalized
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
+                        <span className="text-[11px] font-medium text-slate-600">
                           {item.finalizedJudgeCount} / {item.totalAssignedJudges} Juri Final
                         </span>
                       </td>
 
-                      {/* Qualification status badge */}
+                      {/* Qualification status (Subtle black-to-gray tones) */}
                       <td className="px-4 py-3.5 text-center">
                         {item.isOverridden ? (
                           item.isQualified ? (
-                            <span className="inline-flex items-center gap-1 bg-amber-600 text-white font-bold text-[10px] px-2 py-0.5 rounded-full shadow-2xs">
-                              <Check className="w-3 h-3" />
-                              <span>Override (Lolos)</span>
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-800 border border-slate-300">
+                              Override (Lolos)
                             </span>
                           ) : (
-                            <span className="inline-block bg-rose-100 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
                               Override (Gugur)
                             </span>
                           )
                         ) : !allAssessmentsFinalized ? (
-                          <span className="inline-block bg-slate-100 text-slate-500 text-[10px] font-medium px-2 py-0.5 rounded-full">
+                          <span className="inline-block text-[11px] text-slate-400">
                             Menunggu Penilaian
                           </span>
                         ) : item.isQualified ? (
-                          <span className="inline-flex items-center gap-1 bg-emerald-800 text-white font-bold text-[11px] px-2.5 py-0.5 rounded-full shadow-2xs">
-                            <Check className="w-3 h-3" />
-                            <span>Lolos</span>
+                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-900 border border-slate-200">
+                            Lolos
                           </span>
                         ) : (
-                          <span className="inline-block bg-slate-100 text-slate-500 text-[11px] font-medium px-2 py-0.5 rounded-full">
+                          <span className="inline-block text-[11px] text-slate-500">
                             Tidak Lolos
                           </span>
                         )}
@@ -673,7 +639,7 @@ export const HasilKelulusanView: React.FC = () => {
                       <td className="px-5 py-3.5 text-right space-x-2">
                         <button
                           onClick={() => handleOpenOverride(p, item.isQualified)}
-                          className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-emerald-800 hover:bg-slate-100 rounded-lg border border-slate-200"
+                          className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 cursor-pointer"
                         >
                           {item.isQualified ? 'Gugurkan' : 'Loloskan'}
                         </button>

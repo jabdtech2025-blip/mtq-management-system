@@ -36,6 +36,7 @@ export const BankSoalView: React.FC = () => {
     stages
   } = useMtq();
 
+  const [activeTab, setActiveTab] = useState<'daftar_soal' | 'penetapan_soal'>('daftar_soal');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('Semua Cabang');
   const [selectedStage, setSelectedStage] = useState('Semua Babak');
@@ -95,6 +96,101 @@ export const BankSoalView: React.FC = () => {
       return matchesSearch && matchesBranch && matchesStage;
     });
   }, [questions, searchQuery, selectedBranch, selectedStage]);
+
+  // Assigned Maqra Rows for Tab 2 (Setiap satu maqra satu baris)
+  const assignedMaqraRows = useMemo(() => {
+    interface MaqraRowItem {
+      rowKey: string;
+      participantId: string;
+      participantNo: string;
+      participantName: string;
+      kafilahName: string;
+      branchName: string;
+      stageName: string;
+      questionId: string;
+      questionCode: string;
+      questionTitle: string;
+      surahDisplay: string;
+      pageDisplay: string;
+      questionObj?: Question;
+    }
+
+    const rows: MaqraRowItem[] = [];
+
+    participants.forEach((p) => {
+      if (p.assignedQuestions && p.assignedQuestions.length > 0) {
+        p.assignedQuestions.forEach((aq, idx) => {
+          const qObj = questions.find((q) => q.id === aq.questionId);
+          const code = aq.code || qObj?.code || `MQ-${idx + 1}`;
+          const title = aq.title || qObj?.title || 'Maqra Tilawah';
+          const surah = aq.surahName
+            ? `QS. ${aq.surahName} [${aq.surahNumber || ''}]: ${aq.startAyah || 1} - ${aq.endAyah || 1}`
+            : qObj
+            ? `QS. ${qObj.surahName} [${qObj.surahNumber}]: ${qObj.startAyah} - ${qObj.endAyah}`
+            : '';
+          const pStart = aq.pageStart || qObj?.pageStart || aq.pageNumber || qObj?.pageNumber || 1;
+          const pEnd = aq.pageEnd || qObj?.pageEnd || aq.pageNumber || qObj?.pageNumber || pStart;
+          const pageDisplay = pStart !== pEnd ? `Hal. ${pStart} - ${pEnd}` : `Hal. ${pStart}`;
+
+          rows.push({
+            rowKey: `${p.id}-${aq.questionId}-${idx}`,
+            participantId: p.id,
+            participantNo: p.lotteryNumber || p.participantId,
+            participantName: p.name,
+            kafilahName: p.kafilahName,
+            branchName: p.branchName,
+            stageName: aq.stageName || p.stageName,
+            questionId: aq.questionId,
+            questionCode: code,
+            questionTitle: title,
+            surahDisplay: surah,
+            pageDisplay,
+            questionObj: qObj
+          });
+        });
+      } else if (p.questionId) {
+        const qObj = questions.find((q) => q.id === p.questionId);
+        const code = qObj?.code || 'MQ-01';
+        const title = p.assignedMaqra || qObj?.title || 'Maqra Tilawah';
+        const surah = qObj
+          ? `QS. ${qObj.surahName} [${qObj.surahNumber}]: ${qObj.startAyah} - ${qObj.endAyah}`
+          : '';
+        const pStart = qObj?.pageStart || p.pageNumber || qObj?.pageNumber || 1;
+        const pEnd = qObj?.pageEnd || p.pageNumber || qObj?.pageNumber || pStart;
+        const pageDisplay = pStart !== pEnd ? `Hal. ${pStart} - ${pEnd}` : `Hal. ${pStart}`;
+
+        rows.push({
+          rowKey: `${p.id}-${p.questionId}-single`,
+          participantId: p.id,
+          participantNo: p.lotteryNumber || p.participantId,
+          participantName: p.name,
+          kafilahName: p.kafilahName,
+          branchName: p.branchName,
+          stageName: p.stageName,
+          questionId: p.questionId,
+          questionCode: code,
+          questionTitle: title,
+          surahDisplay: surah,
+          pageDisplay,
+          questionObj: qObj
+        });
+      }
+    });
+
+    return rows.filter((r) => {
+      const matchesSearch =
+        r.participantName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        r.participantNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        r.questionCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        r.questionTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        r.kafilahName.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesBranch =
+        selectedBranch === 'Semua Cabang' || r.branchName.includes(selectedBranch);
+      const matchesStage =
+        selectedStage === 'Semua Babak' || r.stageName === selectedStage;
+      return matchesSearch && matchesBranch && matchesStage;
+    });
+  }, [participants, questions, searchQuery, selectedBranch, selectedStage]);
 
   // Pages list for active preview question
   const previewPages = useMemo(() => {
@@ -350,9 +446,6 @@ export const BankSoalView: React.FC = () => {
             <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
               Bank Soal & Maqra Tilawah
             </h1>
-            <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-              {questions.length} Maqra Tersedia
-            </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
             Kelola paket maqra, surah, ayat, rentang halaman mushaf, serta pengundian penetapan soal musabaqah
@@ -378,6 +471,48 @@ export const BankSoalView: React.FC = () => {
         </div>
       </div>
 
+      {/* Tabs Navigation */}
+      <div className="flex border-b border-slate-200 gap-6">
+        <button
+          onClick={() => setActiveTab('daftar_soal')}
+          className={`pb-3 text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'daftar_soal'
+              ? 'border-emerald-800 text-emerald-800'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>Daftar Soal</span>
+          <span
+            className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
+              activeTab === 'daftar_soal'
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {filteredQuestions.length}
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveTab('penetapan_soal')}
+          className={`pb-3 text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'penetapan_soal'
+              ? 'border-emerald-800 text-emerald-800'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>Penetapan Soal</span>
+          <span
+            className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
+              activeTab === 'penetapan_soal'
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {assignedMaqraRows.length}
+          </span>
+        </button>
+      </div>
+
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
@@ -386,7 +521,11 @@ export const BankSoalView: React.FC = () => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari kode soal, nama surah, atau judul maqra..."
+            placeholder={
+              activeTab === 'daftar_soal'
+                ? 'Cari kode soal, nama surah, atau judul maqra...'
+                : 'Cari nama santri, nomor undian, atau kode maqra...'
+            }
             className="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 text-slate-800 placeholder-slate-400 bg-white"
           />
         </div>
@@ -416,120 +555,206 @@ export const BankSoalView: React.FC = () => {
         </div>
       </div>
 
-      {/* Questions Table */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[760px]">
-            <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
-                <th className="px-5 py-3 w-28">Kode Maqra</th>
-                <th className="px-5 py-3">Surah & Ayat</th>
-                <th className="px-4 py-3">Hal. Mushaf</th>
-                <th className="px-4 py-3">Cabang & Babak</th>
-                <th className="px-4 py-3">Status Penetapan</th>
-                <th className="px-5 py-3 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredQuestions.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400">
-                    Tidak ada soal / maqra yang sesuai kriteria pencarian.
-                  </td>
+      {/* Tab 1: Questions Table */}
+      {activeTab === 'daftar_soal' && (
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[760px]">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
+                  <th className="px-5 py-3 w-28">Kode Maqra</th>
+                  <th className="px-5 py-3">Surah & Ayat</th>
+                  <th className="px-4 py-3">Hal. Mushaf</th>
+                  <th className="px-4 py-3">Cabang & Babak</th>
+                  <th className="px-4 py-3">Status Penetapan</th>
+                  <th className="px-5 py-3 text-right">Aksi</th>
                 </tr>
-              ) : (
-                filteredQuestions.map((q) => {
-                  // Check all participants assigned to this question
-                  const assignedParts = participants.filter((p) => {
-                    if (p.questionId === q.id) return true;
-                    if (p.assignedQuestions?.some((aq) => aq.questionId === q.id)) return true;
-                    return false;
-                  });
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {filteredQuestions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                      Tidak ada soal / maqra yang sesuai kriteria pencarian.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredQuestions.map((q) => {
+                    // Check all participants assigned to this question
+                    const assignedParts = participants.filter((p) => {
+                      if (p.questionId === q.id) return true;
+                      if (p.assignedQuestions?.some((aq) => aq.questionId === q.id)) return true;
+                      return false;
+                    });
 
-                  const pageDisplay =
-                    q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd
-                      ? `Hal. ${q.pageStart} - ${q.pageEnd}`
-                      : `Hal. ${q.pageNumber}`;
+                    const pageDisplay =
+                      q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd
+                        ? `Hal. ${q.pageStart} - ${q.pageEnd}`
+                        : `Hal. ${q.pageNumber}`;
 
-                  return (
-                    <tr key={q.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
-                        {q.code}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <p className="font-bold text-slate-900">{q.title}</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          QS. {q.surahName} [{q.surahNumber}]: {q.startAyah} - {q.endAyah}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3.5 font-mono text-slate-700">
-                        <span className="inline-flex items-center gap-1">
-                          {pageDisplay}
-                          {q.pageStart && q.pageEnd && q.pageEnd > q.pageStart && (
-                            <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded font-sans">
-                              {q.pageEnd - q.pageStart + 1} Hal
+                    return (
+                      <tr key={q.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
+                          {q.code}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <p className="font-bold text-slate-900">{q.title}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            QS. {q.surahName} [{q.surahNumber}]: {q.startAyah} - {q.endAyah}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3.5 font-mono text-slate-700">
+                          <span className="inline-flex items-center gap-1">
+                            {pageDisplay}
+                            {q.pageStart && q.pageEnd && q.pageEnd > q.pageStart && (
+                              <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded font-sans">
+                                {q.pageEnd - q.pageStart + 1} Hal
+                              </span>
+                            )}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <p className="font-semibold text-slate-800">{q.branchAndLevel}</p>
+                          <span className="text-[10px] text-slate-500 font-medium">{q.stageName}</span>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          {assignedParts.length > 0 ? (
+                            <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
+                              Sudah
+                            </span>
+                          ) : (
+                            <span className="inline-block bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                              Belum Ditetapkan
                             </span>
                           )}
+                        </td>
+                        <td className="px-5 py-3.5 text-right space-x-1.5">
+                          <button
+                            onClick={() => handleOpenManualAssign(q)}
+                            className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            title="Tetapkan ke Peserta"
+                          >
+                            <Dice5 className="w-4 h-4 inline" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setPreviewQuestion(q);
+                              setPreviewCurrentPageIndex(0);
+                              setPreviewZoom(100);
+                            }}
+                            className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            title="Pratinjau Mushaf"
+                          >
+                            <Eye className="w-4 h-4 inline" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEdit(q)}
+                            className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Maqra"
+                          >
+                            <Edit2 className="w-4 h-4 inline" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 2: Penetapan Soal Table (Satu Maqra Satu Baris) */}
+      {activeTab === 'penetapan_soal' && (
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[760px]">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
+                  <th className="px-5 py-3 w-20">Undian</th>
+                  <th className="px-5 py-3 min-w-[200px]">Nama Santri</th>
+                  <th className="px-4 py-3 w-32">Kode Maqra</th>
+                  <th className="px-5 py-3">Maqra</th>
+                  <th className="px-4 py-3 w-28">Babak</th>
+                  <th className="px-5 py-3 text-right w-24">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {assignedMaqraRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                      Belum ada maqra yang ditetapkan ke santri / peserta sesuai filter saat ini.
+                    </td>
+                  </tr>
+                ) : (
+                  assignedMaqraRows.map((row) => (
+                    <tr key={row.rowKey} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
+                        #{row.participantNo}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <p className="font-bold text-slate-900">{row.participantName}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {row.kafilahName} · <span className="text-slate-600 font-medium">{row.branchName}</span>
+                        </p>
+                      </td>
+                      <td className="px-4 py-3.5 font-mono font-bold text-emerald-900">
+                        <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-200/70 px-2 py-0.5 rounded text-xs">
+                          {row.questionCode}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5">
-                        <p className="font-semibold text-slate-800">{q.branchAndLevel}</p>
-                        <span className="text-[10px] text-slate-500 font-medium">{q.stageName}</span>
+                      <td className="px-5 py-3.5">
+                        <p className="font-semibold text-slate-900">{row.questionTitle}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {row.surahDisplay && (
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              {row.surahDisplay}
+                            </span>
+                          )}
+                          <span className="text-[11px] font-mono text-emerald-700 bg-slate-100 px-1.5 py-0.2 rounded">
+                            {row.pageDisplay}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3.5">
-                        {assignedParts.length > 0 ? (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {assignedParts.map((p) => (
-                              <div
-                                key={p.id}
-                                className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold"
-                              >
-                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                <span>#{p.lotteryNumber} {p.name.split(' ')[0]}</span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="inline-block bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[11px] font-medium">
-                            Belum Ditetapkan
-                          </span>
-                        )}
+                        <span className="inline-block bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[11px] font-medium">
+                          {row.stageName}
+                        </span>
                       </td>
                       <td className="px-5 py-3.5 text-right space-x-1.5">
-                        <button
-                          onClick={() => handleOpenManualAssign(q)}
-                          className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                          title="Tetapkan ke Peserta"
-                        >
-                          <Dice5 className="w-4 h-4 inline" />
-                        </button>
+                        {row.questionObj && (
+                          <button
+                            onClick={() => {
+                              setPreviewQuestion(row.questionObj!);
+                              setPreviewCurrentPageIndex(0);
+                              setPreviewZoom(100);
+                            }}
+                            className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            title="Pratinjau Mushaf"
+                          >
+                            <Eye className="w-4 h-4 inline" />
+                          </button>
+                        )}
                         <button
                           onClick={() => {
-                            setPreviewQuestion(q);
-                            setPreviewCurrentPageIndex(0);
-                            setPreviewZoom(100);
+                            if (window.confirm(`Lepaskan maqra ${row.questionCode} dari peserta ${row.participantName}?`)) {
+                              removeQuestionFromParticipant(row.participantId, row.questionId);
+                            }
                           }}
-                          className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                          title="Pratinjau Mushaf"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          title="Hapus / Lepas Penetapan Maqra"
                         >
-                          <Eye className="w-4 h-4 inline" />
-                        </button>
-                        <button
-                          onClick={() => handleOpenEdit(q)}
-                          className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                          title="Edit Maqra"
-                        >
-                          <Edit2 className="w-4 h-4 inline" />
+                          <Trash2 className="w-4 h-4 inline" />
                         </button>
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Multi-Page Mushaf Preview Modal */}
       {previewQuestion && (

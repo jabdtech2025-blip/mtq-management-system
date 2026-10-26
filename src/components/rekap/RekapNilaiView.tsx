@@ -8,8 +8,7 @@ import {
   Lock,
   Layers,
   CheckCircle2,
-  Clock,
-  Sparkles
+  Clock
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Participant, JudgeAssessment } from '../../types/mtq';
@@ -167,17 +166,11 @@ export const RekapNilaiView: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
-              Rekap Nilai Real-Time
-            </h1>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              Matriks Dinamis
-            </span>
-          </div>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+            Rekap Nilai Real-Time
+          </h1>
           <p className="text-xs text-slate-500 mt-1">
-            {currentTenant.eventName} · {selectedStage === 'Semua Babak' ? 'Seluruh Babak' : `Babak ${selectedStage}`} · {activeJudges.length} Penilai Terkonfigurasi
+            {currentTenant.eventName} · {selectedStage === 'Semua Babak' ? 'Seluruh Babak' : `Babak ${selectedStage}`}
           </p>
         </div>
 
@@ -249,8 +242,11 @@ export const RekapNilaiView: React.FC = () => {
             <thead>
               {/* Top Grouped Header */}
               <tr className="bg-slate-100/80 text-slate-600 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
-                <th colSpan={3} className="px-4 py-2.5 border-r border-slate-200">
+                <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 px-4 py-2.5 border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
                   Identitas Peserta
+                </th>
+                <th className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50 text-slate-700">
+                  Babak
                 </th>
                 {activeJudges.map((j) => (
                   <th
@@ -264,7 +260,7 @@ export const RekapNilaiView: React.FC = () => {
                     </span>
                   </th>
                 ))}
-                <th colSpan={2} className="px-4 py-2.5 text-center bg-emerald-50 text-emerald-900">
+                <th colSpan={2} className="px-4 py-2.5 text-center bg-slate-100 text-slate-700 border-l border-slate-200">
                   Hasil Rekap
                 </th>
               </tr>
@@ -277,17 +273,19 @@ export const RekapNilaiView: React.FC = () => {
 
                 {activeJudges.map((j) => (
                   <React.Fragment key={j.id}>
-                    <th className="px-2 py-2 text-right w-16">Pengurangan</th>
-                    <th className="px-3 py-2 text-right w-20 border-r border-slate-200">
+                    <th className="px-2.5 py-2 text-center w-24 min-w-[96px] border-r border-slate-200 whitespace-nowrap">
+                      Pengurangan
+                    </th>
+                    <th className="px-2.5 py-2 text-center w-24 min-w-[96px] border-r border-slate-200 whitespace-nowrap">
                       Nilai Hakim
                     </th>
                   </React.Fragment>
                 ))}
 
-                <th className="px-3 py-2 text-right w-24 bg-emerald-50/50 text-emerald-950">
+                <th className="px-3 py-2 text-center w-24 border-l border-slate-200 text-slate-600">
                   Rata-Rata
                 </th>
-                <th className="px-4 py-2 text-center w-28 bg-emerald-50/50 text-emerald-950">
+                <th className="px-4 py-2 text-center w-28 text-slate-600">
                   Status
                 </th>
               </tr>
@@ -343,41 +341,20 @@ export const RekapNilaiView: React.FC = () => {
                         {p.stageName}
                       </td>
 
-                      {/* Judge columns */}
+                      {/* Judge columns with border between Pengurangan and Nilai Hakim, equal width, no dots, standard text */}
                       {activeJudges.map((j) => {
                         const asm = getJudgeAssessment(p.id, j.id);
-                        const isFinal = asm?.status === 'finalized';
-                        const inProgress = asm?.status === 'in_progress';
 
                         return (
                           <React.Fragment key={j.id}>
-                            <td className="px-2 py-3 text-right font-mono text-[11px] text-slate-500 tabular-nums">
+                            <td className="px-2.5 py-3 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
                               {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
                             </td>
-                            <td className="px-3 py-3 text-right font-mono font-bold border-r border-slate-200 tabular-nums">
+                            <td className="px-2.5 py-3 text-center font-mono font-bold border-r border-slate-200 tabular-nums w-24 min-w-[96px] whitespace-nowrap">
                               {asm ? (
-                                <div className="flex items-center justify-end gap-1.5">
-                                  <span
-                                    className={
-                                      isFinal
-                                        ? 'text-slate-900'
-                                        : 'text-amber-700 italic'
-                                    }
-                                  >
-                                    {asm.finalScore.toFixed(2)}
-                                  </span>
-                                  {isFinal ? (
-                                    <span
-                                      className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0"
-                                      title="Final"
-                                    />
-                                  ) : inProgress ? (
-                                    <span
-                                      className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"
-                                      title="Sedang Dinilai"
-                                    />
-                                  ) : null}
-                                </div>
+                                <span className="text-slate-900">
+                                  {asm.finalScore.toFixed(2)}
+                                </span>
                               ) : (
                                 <span className="text-slate-300 font-normal">--</span>
                               )}
@@ -386,14 +363,14 @@ export const RekapNilaiView: React.FC = () => {
                         );
                       })}
 
-                      {/* Aggregated Average Score */}
-                      <td className="px-3 py-3 text-right font-mono font-extrabold text-slate-900 bg-emerald-50/30">
+                      {/* Aggregated Average Score (neutral standard styling, center-aligned) */}
+                      <td className="px-3 py-3 text-center font-mono font-extrabold text-slate-900 border-l border-slate-100">
                         {averageScore !== null ? (
                           <div>
                             <span className="text-sm">{averageScore.toFixed(2)}</span>
                             {!isAllFinalized && (
-                              <span className="block text-[9px] text-amber-700 font-normal">
-                                Provisional
+                              <span className="block text-[9px] text-slate-500 font-normal">
+                                Sementara
                               </span>
                             )}
                           </div>
@@ -402,25 +379,15 @@ export const RekapNilaiView: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Actions & Detail */}
-                      <td className="px-4 py-3 text-center bg-emerald-50/30">
+                      {/* Actions & Detail with plain text status (no background badge) */}
+                      <td className="px-4 py-3 text-center">
                         <div className="flex items-center justify-center gap-2">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                              progress === 'Lengkap'
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                : progress === 'Menunggu Hakim Lain'
-                                ? 'bg-amber-50 text-amber-800 border border-amber-300'
-                                : progress === 'Berlangsung'
-                                ? 'bg-blue-50 text-blue-800 border border-blue-200'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
+                          <span className="text-xs font-medium text-slate-700">
                             {progress}
                           </span>
                           <button
                             onClick={() => setInspectedParticipant(p)}
-                            className="p-1 rounded text-slate-400 hover:text-emerald-800 hover:bg-emerald-50 transition-colors"
+                            className="p-1 rounded text-slate-400 hover:text-emerald-800 hover:bg-slate-100 transition-colors cursor-pointer"
                             title="Lihat Rincian Pengurangan Nilai"
                           >
                             <Eye className="w-4 h-4" />

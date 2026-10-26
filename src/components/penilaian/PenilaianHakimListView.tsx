@@ -3,8 +3,7 @@ import {
   BookmarkCheck,
   Search,
   Lock,
-  Clock,
-  Sparkles
+  Clock
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 
@@ -128,86 +127,56 @@ export const PenilaianHakimListView: React.FC = () => {
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
-      {/* Top Banner Tag matching persona */}
+      {/* Top Title Area */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
-              <Sparkles className="w-3 h-3 text-emerald-600" />
-              {currentUser.role === 'judge' ? 'Portal Penjurian Mandiri' : 'Mode Pemantauan Penilaian Dewan Hakim'}
-            </span>
-            <span className="text-slate-300">·</span>
-            <span className="text-xs text-slate-500 font-medium">{currentTenant.name}</span>
-          </div>
-
           <h1 className="text-2xl font-extrabold text-slate-900">
-            Daftar Penugasan Penilaian Peserta
+            {currentUser.role === 'judge' ? 'Daftar Penugasan Penilaian Peserta' : 'Mode Pemantauan Penilaian Dewan Hakim'}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
             Dewan Hakim: <span className="font-semibold text-slate-800">{activeJudge.name}</span> ·{' '}
             {activeJudge.judgeField || 'Bidang Penilaian'} · {activeJudge.mimbarLocation || 'Mimbar Utama'}
           </p>
         </div>
-
-        {/* If Admin / Superadmin: Allow picking which judge to monitor */}
-        {currentUser.role !== 'judge' && tenantJudges.length > 0 && (
-          <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs flex items-center gap-2">
-            <label className="text-xs font-bold text-slate-600">Pantau Hakim:</label>
-            <select
-              value={adminSelectedJudgeId}
-              onChange={(e) => {
-                setAdminSelectedJudgeId(e.target.value);
-                setMonitoringJudgeId(e.target.value);
-              }}
-              className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 bg-white"
-            >
-              {tenantJudges.map((j) => (
-                <option key={j.id} value={j.id}>
-                  {j.name} ({j.judgeField || 'Hakim'})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
 
-      {/* 4 Summary Boxes */}
+      {/* 4 Standard Summary Boxes without colored shadows */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {/* Total Ditugaskan */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-xs font-medium text-slate-500">Total Ditugaskan</p>
           <p className="text-3xl font-bold text-slate-900 mt-2 tabular-nums font-mono">
             {totalAssigned}
           </p>
         </div>
 
-        {/* Selesai (Final/Terkunci) - Green Border */}
-        <div className="bg-white p-5 rounded-xl border-2 border-emerald-200 bg-emerald-50/20 shadow-xs">
-          <p className="text-xs font-semibold text-emerald-800">Selesai (Final/Terkunci)</p>
-          <p className="text-3xl font-bold text-emerald-800 mt-2 tabular-nums font-mono">
+        {/* Selesai (Final/Terkunci) */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+          <p className="text-xs font-medium text-slate-500">Selesai (Final/Terkunci)</p>
+          <p className="text-3xl font-bold text-slate-900 mt-2 tabular-nums font-mono">
             {totalFinal}
           </p>
         </div>
 
-        {/* Sedang Berlangsung - Yellow Border */}
-        <div className="bg-white p-5 rounded-xl border-2 border-amber-200 bg-amber-50/20 shadow-xs">
-          <p className="text-xs font-semibold text-amber-700">Sedang Berlangsung</p>
-          <p className="text-3xl font-bold text-amber-700 mt-2 tabular-nums font-mono">
+        {/* Sedang Berlangsung */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+          <p className="text-xs font-medium text-slate-500">Sedang Berlangsung</p>
+          <p className="text-3xl font-bold text-slate-900 mt-2 tabular-nums font-mono">
             {totalInProgress}
           </p>
         </div>
 
         {/* Menunggu Tampil */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-xs font-medium text-slate-500">Menunggu Tampil</p>
-          <p className="text-3xl font-bold text-slate-800 mt-2 tabular-nums font-mono">
+          <p className="text-3xl font-bold text-slate-900 mt-2 tabular-nums font-mono">
             {totalPending}
           </p>
         </div>
       </div>
 
-      {/* Filter and Search Bar matching screenshot */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Filter and Search Bar */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
@@ -219,37 +188,51 @@ export const PenilaianHakimListView: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs text-slate-600">
-            <span>Status Penilaian:</span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Dropdown Pantau Hakim (Narrow, name only, with ellipsis if long) */}
+          {currentUser.role !== 'judge' && tenantJudges.length > 0 && (
             <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none"
+              value={adminSelectedJudgeId}
+              onChange={(e) => {
+                setAdminSelectedJudgeId(e.target.value);
+                setMonitoringJudgeId(e.target.value);
+              }}
+              aria-label="Pilih Dewan Hakim"
+              title="Pilih Dewan Hakim"
+              className="w-36 sm:w-40 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 bg-white outline-none truncate"
             >
-              <option value="Semua Status">Semua Status</option>
-              <option value="Berlangsung">Berlangsung</option>
-              <option value="Final">Final/Terkunci</option>
-              <option value="Menunggu">Menunggu</option>
+              {tenantJudges.map((j) => (
+                <option key={j.id} value={j.id} title={j.name}>
+                  {j.name}
+                </option>
+              ))}
             </select>
-          </div>
+          )}
 
-          <div className="flex items-center gap-2 text-xs text-slate-600">
-            <span>Cabang:</span>
-            <select
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-              className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none"
-            >
-              <option value="Semua Cabang">Semua Cabang</option>
-              <option value="Tilawah Dewasa Putra">Tilawah Dewasa Putra</option>
-              <option value="Tilawah Dewasa Putri">Tilawah Dewasa Putri</option>
-            </select>
-          </div>
+          {/* Dropdown Status Penilaian (No title label) */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Status Penilaian"
+            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-800 bg-white outline-none"
+          >
+            <option value="Semua Status">Semua Status</option>
+            <option value="Berlangsung">Berlangsung</option>
+            <option value="Final">Final/Terkunci</option>
+            <option value="Menunggu">Menunggu</option>
+          </select>
 
-          <span className="text-xs text-slate-500 font-medium ml-2">
-            {filteredParticipants.length} Peserta Ditampilkan
-          </span>
+          {/* Dropdown Cabang (No title label) */}
+          <select
+            value={branchFilter}
+            onChange={(e) => setBranchFilter(e.target.value)}
+            aria-label="Cabang"
+            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-800 bg-white outline-none"
+          >
+            <option value="Semua Cabang">Semua Cabang</option>
+            <option value="Tilawah Dewasa Putra">Tilawah Dewasa Putra</option>
+            <option value="Tilawah Dewasa Putri">Tilawah Dewasa Putri</option>
+          </select>
         </div>
       </div>
 

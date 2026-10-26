@@ -28,6 +28,7 @@ import { CanvasStroke, NormalizedPoint } from '../../types/mtq';
 
 export const PenilaianDualPanelView: React.FC = () => {
   const {
+    currentTenant,
     participants,
     selectedParticipantId,
     setSelectedParticipantId,
@@ -93,7 +94,6 @@ export const PenilaianDualPanelView: React.FC = () => {
   // Confirmation Modals
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isClearPageModalOpen, setIsClearPageModalOpen] = useState(false);
-  const [isParticipantDropdownOpen, setIsParticipantDropdownOpen] = useState(false);
 
   // Mushaf page image URL builder (High-resolution scan from Mujamma' Malik Fahd)
   const pagePad = String(currentPage).padStart(3, '0');
@@ -324,119 +324,66 @@ export const PenilaianDualPanelView: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900 text-slate-100 select-none overflow-hidden">
-      {/* Top Bar matching design constitution */}
-      <header className="h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 z-30">
-        <div className="flex items-center gap-3">
+    <div className="flex flex-col h-screen bg-white text-slate-800 select-none overflow-hidden">
+      {/* Top Header - Standard clean layout matching the app */}
+      <header className="h-14 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between shrink-0 z-30">
+        <div className="flex items-center gap-3 min-w-0">
           <button
-            onClick={() => setCurrentView('dashboard')}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            title="Kembali ke Dashboard"
+            onClick={() => setCurrentView(currentUser.role === 'judge' ? 'penilaian_hakim' : 'dashboard')}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+            title="Kembali ke Dashboard / Daftar Penilaian"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
 
           <button
             onClick={toggleSidebar}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors xl:hidden"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors md:hidden cursor-pointer shrink-0"
             title="Buka Menu"
           >
-            <Menu className="w-4 h-4" />
+            <Menu className="w-5 h-5" />
           </button>
 
-          {/* Participant Selector */}
-          <div className="relative">
-            <button
-              onClick={() => setIsParticipantDropdownOpen(!isParticipantDropdownOpen)}
-              className="flex items-center gap-2.5 bg-slate-900 border border-slate-700/80 hover:border-slate-600 px-3 py-1.5 rounded-lg text-xs transition-all text-left"
-            >
-              <div className="flex flex-col">
-                <span className="text-[10px] text-slate-400 font-mono leading-none">
-                  UNDIAN #{currentParticipant.lotteryNumber} · {currentParticipant.participantId}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate">
+                {isAdminMode ? 'Pemantauan Penilaian Hakim' : 'Lembar Penilaian Dewan Hakim'}
+              </h1>
+              {isAdminMode && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">
+                  <ShieldCheck className="w-3 h-3 text-emerald-700" />
+                  Mode Pantau
                 </span>
-                <span className="font-bold text-white leading-tight mt-0.5 truncate max-w-[180px] sm:max-w-[240px]">
-                  {currentParticipant.name}
-                </span>
-              </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            </button>
-
-            {isParticipantDropdownOpen && (
-              <div className="absolute left-0 mt-1.5 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2 z-50 max-h-80 overflow-y-auto">
-                <p className="text-[10px] font-semibold text-slate-400 px-2 py-1 uppercase tracking-wider">
-                  Daftar Peserta
-                </p>
-                <div className="space-y-1 mt-1">
-                  {participants.map((p) => {
-                    const isSelected = p.id === currentParticipant.id;
-                    const pAsm = assessments.find(
-                      (a) => a.participantId === p.id && a.judgeId === activeJudgeId
-                    );
-                    const isPartFinal = pAsm?.status === 'finalized';
-
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          setSelectedParticipantId(p.id);
-                          setIsParticipantDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center justify-between transition-colors ${
-                          isSelected
-                            ? 'bg-emerald-900/60 text-emerald-200 border border-emerald-700/50'
-                            : 'hover:bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        <div className="min-w-0 pr-2">
-                          <p className="font-semibold truncate">
-                            #{p.lotteryNumber} - {p.name}
-                          </p>
-                          <p className="text-[10px] text-slate-400 truncate">
-                            {p.kafilahName} · Hal. {p.pageNumber}
-                          </p>
-                        </div>
-                        {isPartFinal && (
-                          <span className="shrink-0 text-[10px] font-bold text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800">
-                            Final
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="hidden lg:flex items-center gap-2 pl-2 border-l border-slate-800 text-xs">
-            <span className="text-slate-400">Grup:</span>
-            <span className="font-semibold text-slate-200">{currentParticipant.kafilahName}</span>
-            <span className="text-slate-600">·</span>
-            <span className="text-slate-400">{currentParticipant.branchName}</span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 truncate hidden sm:block">
+              {currentTenant.name} · {currentTenant.eventName}
+            </p>
           </div>
         </div>
 
-        {/* Right Status */}
-        <div className="flex items-center gap-2.5 sm:gap-4">
-          <div className="hidden sm:flex items-center gap-1.5 text-right text-[11px] text-slate-400">
-            <Clock className="w-3.5 h-3.5 text-slate-500" />
-            <span>{syncStatus} ({lastSyncTime})</span>
+        {/* Right Status & Mobile Split Toggle */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono">
+            <Clock className="w-3.5 h-3.5 text-slate-400" />
+            <span className="hidden sm:inline">{syncStatus}</span>
+            <span>({lastSyncTime})</span>
           </div>
 
-          {/* Toggle Tab for narrow tablets */}
-          <div className="flex xl:hidden bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+          {/* Toggle Tab ONLY for mobile screens (<768px). Tablets and laptops show split-screen directly */}
+          <div className="flex md:hidden bg-slate-100 border border-slate-200 rounded-lg p-0.5">
             <button
               onClick={() => setTabletActiveTab('mushaf')}
-              className={`px-2.5 py-1 rounded text-xs font-semibold ${
-                tabletActiveTab === 'mushaf' ? 'bg-emerald-700 text-white' : 'text-slate-400'
+              className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                tabletActiveTab === 'mushaf' ? 'bg-emerald-800 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Mushaf
             </button>
             <button
               onClick={() => setTabletActiveTab('scoring')}
-              className={`px-2.5 py-1 rounded text-xs font-semibold ${
-                tabletActiveTab === 'scoring' ? 'bg-emerald-700 text-white' : 'text-slate-400'
+              className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                tabletActiveTab === 'scoring' ? 'bg-emerald-800 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Nilai
@@ -446,129 +393,119 @@ export const PenilaianDualPanelView: React.FC = () => {
       </header>
 
       {/* Main Dual-Panel Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden bg-white">
         {/* Left Panel: Mushaf Viewer & Annotation Canvas */}
         <div
-          className={`flex-1 flex flex-col bg-slate-900 relative ${
-            tabletActiveTab === 'scoring' ? 'hidden xl:flex' : 'flex'
+          className={`flex-1 flex flex-col bg-white border-r border-slate-200 relative min-w-0 ${
+            tabletActiveTab === 'scoring' ? 'hidden md:flex' : 'flex'
           }`}
         >
-          {/* Mushaf Canvas Toolbar - 5 Logically Grouped Sections */}
-          <div className="min-h-13 py-2 bg-slate-950 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between gap-3 shrink-0 z-20 overflow-x-auto scrollbar-thin">
+          {/* Mushaf Canvas Toolbar (Header Kedua) - Compact, Efficient, Icons Only */}
+          <div className="h-11 bg-slate-50 border-b border-slate-200 px-3 flex items-center justify-between gap-2 shrink-0 z-20 overflow-x-auto">
             {/* Left Tools Group: Page Navigation & Zoom */}
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
               {/* Group 1: Page Navigation */}
-              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800/80 rounded-lg p-1">
+              <div className="flex items-center gap-0.5 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage <= 1}
-                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                  className="p-1 rounded hover:bg-slate-100 text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
                   title="Halaman Sebelumnya"
                   aria-label="Halaman Sebelumnya"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
-                <span className="text-xs font-semibold text-slate-200 tabular-nums px-2 select-none whitespace-nowrap">
-                  Hal. <strong className="text-white font-bold">{currentPage}</strong> / 604
+                <span className="text-xs font-semibold text-slate-700 tabular-nums px-1.5 select-none whitespace-nowrap">
+                  Hal. <strong className="text-slate-900 font-bold">{currentPage}</strong> / 604
                 </span>
                 <button
                   onClick={() => setCurrentPage((p) => Math.min(604, p + 1))}
                   disabled={currentPage >= 604}
-                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                  className="p-1 rounded hover:bg-slate-100 text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
                   title="Halaman Berikutnya"
                   aria-label="Halaman Berikutnya"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* Group 2: Zoom Controls */}
-              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800/80 rounded-lg p-1">
+              {/* Group 2: Zoom Controls (Small buttons only, NO percentage number) */}
+              <div className="flex items-center gap-0.5 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
                 <button
                   onClick={() => setZoomLevel((z) => Math.max(70, z - 15))}
-                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 transition-colors"
+                  className="p-1 rounded hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer"
                   title="Perkecil Tampilan"
                   aria-label="Perkecil Tampilan"
                 >
-                  <ZoomOut className="w-4 h-4" />
+                  <ZoomOut className="w-3.5 h-3.5" />
                 </button>
-                <span className="text-xs font-mono font-medium text-slate-300 w-11 text-center tabular-nums select-none">
-                  {zoomLevel}%
-                </span>
                 <button
                   onClick={() => setZoomLevel((z) => Math.min(180, z + 15))}
-                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 transition-colors"
+                  className="p-1 rounded hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer"
                   title="Perbesar Tampilan"
                   aria-label="Perbesar Tampilan"
                 >
-                  <ZoomIn className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setZoomLevel(100)}
-                  className="px-2 py-1 rounded-md hover:bg-slate-800 text-slate-400 hover:text-slate-100 text-[11px] font-semibold transition-colors"
-                  title="Kembalikan ke Ukuran Normal 100%"
-                >
-                  100%
+                  <ZoomIn className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
 
             {/* Right Tools Group: Drawing Tools, Colors, and Canvas Actions */}
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
               {isAdminMode ? (
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg shadow-2xs">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Mode Pemantauan Admin (Hanya Baca) — {activeJudgeName}</span>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                  <span className="truncate max-w-[200px]">Mode Pantau Admin ({activeJudgeName.split(',')[0]})</span>
                 </div>
               ) : isFinalized ? (
-                <div className="flex items-center gap-2 text-xs font-semibold text-amber-300 bg-amber-950/80 border border-amber-800/70 px-3.5 py-1.5 rounded-lg shadow-sm">
-                  <Lock className="w-4 h-4 text-amber-400" />
-                  <span>Mode Baca Saja (Terkunci)</span>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg shadow-2xs">
+                  <Lock className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Terkunci (Final)</span>
                 </div>
               ) : (
                 <>
-                  {/* Group 3: Tool selection */}
-                  <div className="flex items-center bg-slate-900 border border-slate-800/80 rounded-lg p-1 gap-1">
+                  {/* Group 3: Tool selection - Icons only, no text labels */}
+                  <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 gap-0.5 shadow-2xs">
                     <button
                       onClick={() => setActiveTool('pen')}
-                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
+                      className={`p-1.5 rounded-md transition-all cursor-pointer ${
                         activeTool === 'pen'
-                          ? 'bg-emerald-700 text-white shadow-sm ring-1 ring-emerald-500 font-semibold'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                          ? 'bg-emerald-800 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                       }`}
                       title="Pena Koreksi Anotasi"
+                      aria-label="Pena Koreksi Anotasi"
                     >
                       <PenTool className="w-3.5 h-3.5" />
-                      <span>Pena</span>
                     </button>
                     <button
                       onClick={() => setActiveTool('marker')}
-                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
+                      className={`p-1.5 rounded-md transition-all cursor-pointer ${
                         activeTool === 'marker'
-                          ? 'bg-emerald-700 text-white shadow-sm ring-1 ring-emerald-500 font-semibold'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                          ? 'bg-emerald-800 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                       }`}
-                      title="Stabilo Transparan untuk Menandai Kalimat"
+                      title="Stabilo Transparan"
+                      aria-label="Stabilo Transparan"
                     >
                       <Highlighter className="w-3.5 h-3.5" />
-                      <span>Stabilo</span>
                     </button>
                     <button
                       onClick={() => setActiveTool('eraser')}
-                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
+                      className={`p-1.5 rounded-md transition-all cursor-pointer ${
                         activeTool === 'eraser'
-                          ? 'bg-emerald-700 text-white shadow-sm ring-1 ring-emerald-500 font-semibold'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                          ? 'bg-emerald-800 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                       }`}
-                      title="Penghapus Goresan Anotasi"
+                      title="Penghapus Anotasi"
+                      aria-label="Penghapus Anotasi"
                     >
                       <Eraser className="w-3.5 h-3.5" />
-                      <span>Penghapus</span>
                     </button>
                   </div>
 
-                  {/* Group 4: Color Presets */}
-                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800/80 rounded-lg p-1.5">
+                  {/* Group 4: Smaller Color Dots */}
+                  <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 shadow-2xs">
                     {[
                       { color: '#dc2626', label: 'Merah (Tajwid Jali / Kesalahan Berat)' },
                       { color: '#f59e0b', label: 'Kuning (Tajwid Khafi / Kesalahan Sedang)' },
@@ -582,9 +519,9 @@ export const PenilaianDualPanelView: React.FC = () => {
                           if (activeTool === 'eraser') setActiveTool('pen');
                         }}
                         style={{ backgroundColor: c.color }}
-                        className={`w-6 h-6 rounded-full transition-all flex items-center justify-center ${
+                        className={`w-4 h-4 rounded-full transition-all cursor-pointer ${
                           activeColor === c.color && activeTool !== 'eraser'
-                            ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-105'
+                            ? 'ring-2 ring-emerald-700 ring-offset-1 scale-110 shadow-2xs'
                             : 'opacity-75 hover:opacity-100 hover:scale-105'
                         }`}
                         title={c.label}
@@ -594,25 +531,25 @@ export const PenilaianDualPanelView: React.FC = () => {
                   </div>
 
                   {/* Group 5: History & Page Reset Actions */}
-                  <div className="flex items-center gap-1 bg-slate-900 border border-slate-800/80 rounded-lg p-1">
+                  <div className="flex items-center gap-0.5 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
                     <button
                       onClick={handleUndo}
                       disabled={strokes.filter((s) => s.page === currentPage).length === 0}
-                      className="p-1.5 rounded-md hover:bg-slate-800 text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                      className="p-1 rounded-md hover:bg-slate-100 text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
                       title="Undo Goresan Terakhir (Ctrl+Z)"
                       aria-label="Undo Goresan Terakhir"
                     >
-                      <Undo2 className="w-4 h-4" />
+                      <Undo2 className="w-3.5 h-3.5" />
                     </button>
 
                     <button
                       onClick={() => setIsClearPageModalOpen(true)}
                       disabled={strokes.filter((s) => s.page === currentPage).length === 0}
-                      className="p-1.5 rounded-md hover:bg-rose-950/80 text-rose-300 hover:text-rose-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                      className="p-1 rounded-md hover:bg-rose-50 text-rose-600 hover:text-rose-700 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
                       title="Bersihkan Semua Anotasi Halaman Ini"
                       aria-label="Bersihkan Semua Anotasi Halaman Ini"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </>
@@ -620,18 +557,18 @@ export const PenilaianDualPanelView: React.FC = () => {
             </div>
           </div>
 
-          {/* Mushaf Page Container (Pure White Background, 15-line scan, vertical scroll) */}
+          {/* Mushaf Page Container (Pure White, Zero Lateral/Top Margins - Directly touches borders) */}
           <div
             ref={containerRef}
-            className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 flex justify-center items-start bg-slate-800"
+            className="flex-1 overflow-y-auto overflow-x-auto p-0 m-0 bg-white relative flex justify-start items-start"
           >
             <div
               style={{
-                width: `${Math.round(620 * (zoomLevel / 100))}px`,
-                maxWidth: '100%',
+                width: zoomLevel === 100 ? '100%' : `${zoomLevel}%`,
+                minWidth: '100%',
                 backgroundColor: '#ffffff'
               }}
-              className="relative shadow-2xl rounded-sm border border-slate-300 select-none transition-all"
+              className="relative select-none transition-all"
             >
               {/* Authentic High-Res Mushaf Scan */}
               <img
@@ -665,8 +602,6 @@ export const PenilaianDualPanelView: React.FC = () => {
                 className={`absolute inset-0 w-full h-full ${
                   isAdminMode || isFinalized
                     ? 'cursor-default pointer-events-none'
-                    : activeTool === 'eraser'
-                    ? 'cursor-crosshair'
                     : 'cursor-crosshair'
                 }`}
               />
@@ -674,88 +609,75 @@ export const PenilaianDualPanelView: React.FC = () => {
           </div>
 
           {/* Bottom Bar Info */}
-          <div className="h-8 bg-slate-950 border-t border-slate-800 px-4 flex items-center justify-between text-[11px] text-slate-400">
-            <span>
-              Standar Mushaf Madinah 15 Baris (Mujamma' Malik Fahd) · {currentParticipant.assignedMaqra}
+          <div className="h-7 bg-slate-50 border-t border-slate-200 px-3 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
+            <span className="truncate">
+              Standar Mushaf Madinah 15 Baris · {currentParticipant.assignedMaqra}
             </span>
-            <span>{pageAnnotationCount} goresan anotasi di halaman ini</span>
+            <span className="shrink-0">{pageAnnotationCount} goresan anotasi</span>
           </div>
         </div>
 
-        {/* Right Panel: Scoring & Deduction Controls */}
+        {/* Right Panel: Scoring & Deduction Controls (Split-screen on tablet & desktop from md: breakpoint) */}
         <div
-          className={`w-full xl:w-[440px] 2xl:w-[480px] shrink-0 bg-white text-slate-900 border-l border-slate-200 flex flex-col justify-between overflow-y-auto ${
-            tabletActiveTab === 'mushaf' ? 'hidden xl:flex' : 'flex'
+          className={`w-full md:w-[380px] lg:w-[420px] xl:w-[450px] 2xl:w-[480px] shrink-0 bg-white text-slate-800 border-l border-slate-200 flex flex-col justify-between overflow-y-auto ${
+            tabletActiveTab === 'mushaf' ? 'hidden md:flex' : 'flex'
           }`}
         >
-          <div className="p-5 space-y-5">
-            {/* Participant Quick Info */}
-            <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-4">
-              <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px]">
+          <div className="p-3.5 sm:p-4 space-y-3.5 sm:space-y-4">
+            {/* Participant Quick Info (Green styling) */}
+            <div className="bg-gradient-to-br from-emerald-800 to-emerald-950 text-white rounded-xl shadow-xs border border-emerald-700/30 p-3.5 sm:p-4">
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="font-semibold text-emerald-200 uppercase tracking-wider text-[10px]">
                   Peserta Sedang Dinilai
                 </span>
-                <span className="font-mono font-bold text-emerald-800 bg-emerald-100/70 px-2.5 py-0.5 rounded border border-emerald-300/60 tabular-nums">
+                <span className="font-mono font-bold text-emerald-900 bg-white/90 px-2 py-0.5 rounded border border-white/40 tabular-nums text-xs">
                   {currentParticipant.participantId}
                 </span>
               </div>
-              <p className="font-bold text-base text-slate-900 leading-snug">
+              <p className="font-bold text-sm sm:text-base text-white leading-snug">
                 {currentParticipant.name}
               </p>
-              <p className="text-xs text-slate-600 mt-1 font-medium">
+              <p className="text-xs text-emerald-100/90 mt-0.5 font-medium">
                 {currentParticipant.kafilahName} · Undian #{currentParticipant.lotteryNumber}
               </p>
-              <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Paket Maqra:</span>
-                <span className="text-emerald-800 font-semibold">{currentParticipant.assignedMaqra}</span>
+              <div className="mt-2.5 pt-2 border-t border-emerald-700/50 flex items-center justify-between text-xs">
+                <span className="text-emerald-200 font-medium">Paket Maqra:</span>
+                <span className="text-white font-semibold">{currentParticipant.assignedMaqra}</span>
               </div>
             </div>
 
-            {/* Live Score Display */}
-            <div className="bg-gradient-to-br from-emerald-800 to-emerald-950 text-white p-5 rounded-2xl shadow-sm border border-emerald-700/30 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-semibold text-emerald-200 uppercase tracking-wider">
-                  Nilai Akhir Hakim
-                </p>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-4xl font-extrabold font-mono tracking-tight tabular-nums">
-                    {currentScore.toFixed(2)}
-                  </span>
-                  <span className="text-sm text-emerald-300 font-medium">/ 100</span>
-                </div>
-                <p className="text-xs text-emerald-200/90 font-mono mt-1 tabular-nums">
-                  Total Pengurangan: -{totalDeductions.toFixed(2)} poin
-                </p>
-              </div>
-
-              <div className="text-right flex flex-col items-end">
-                <span className="inline-block text-xs font-semibold px-2.5 py-1 rounded-md bg-white/15 border border-white/20 text-white">
-                  {activeJudgeName.split(',')[0]}
+            {/* Live Score Display (Gray styling, without judge name and lock status) */}
+            <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-3.5 sm:p-4 shadow-2xs">
+              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                Nilai Akhir Hakim
+              </p>
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight tabular-nums text-slate-900">
+                  {currentScore.toFixed(2)}
                 </span>
-                <span className={`inline-flex items-center gap-1 text-[11px] font-medium mt-2 px-2 py-0.5 rounded ${
-                  isFinalized ? 'bg-amber-400/20 text-amber-200' : 'bg-emerald-700/50 text-emerald-200'
-                }`}>
-                  {isFinalized ? 'Terkunci (Final)' : 'Sedang Berlangsung'}
-                </span>
+                <span className="text-xs sm:text-sm text-slate-500 font-medium">/ 100</span>
               </div>
+              <p className="text-[11px] text-slate-500 font-mono mt-0.5 tabular-nums">
+                Total Pengurangan: -{totalDeductions.toFixed(2)} poin
+              </p>
             </div>
 
             {/* Error Categories Counters */}
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between pb-1 border-b border-slate-100">
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                   Rubrik Pengurangan Kesalahan
                 </h3>
-                <span className="text-[11px] text-slate-500 font-medium">
+                <span className="text-[10px] text-slate-500 font-medium">
                   {isAdminMode
-                    ? 'Mode Pemantauan (Hanya Baca)'
+                    ? 'Mode Pantau'
                     : isFinalized
-                    ? 'Mode Baca Saja (Terkunci)'
+                    ? 'Terkunci'
                     : 'Klik + / - untuk koreksi'}
                 </span>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {errorCategories.map((cat) => {
                   const count = errorCounts[cat.id] || 0;
                   const pts = (count * cat.defaultDeduction).toFixed(2);
@@ -763,44 +685,44 @@ export const PenilaianDualPanelView: React.FC = () => {
                   return (
                     <div
                       key={cat.id}
-                      className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-xl flex items-center justify-between gap-3 hover:border-slate-300 transition-colors"
+                      className="p-3 bg-slate-50 border border-slate-200/90 rounded-xl flex items-center justify-between gap-2.5 hover:border-slate-300 transition-colors"
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5">
-                          <span className="text-xs font-bold text-slate-900 break-words leading-snug">
+                        <div className="flex items-baseline flex-wrap gap-x-1.5 gap-y-0.5">
+                          <span className="text-xs font-bold text-slate-900 break-words leading-tight">
                             {cat.name}
                           </span>
-                          <span className="text-[11px] font-mono font-medium text-slate-500 tabular-nums">
+                          <span className="text-[10px] font-mono font-medium text-slate-500 tabular-nums">
                             (-{cat.defaultDeduction.toFixed(2)}/err)
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-500 leading-normal line-clamp-2 mt-1" title={cat.scope}>
+                        <p className="text-[10px] text-slate-500 leading-normal line-clamp-1 mt-0.5" title={cat.scope}>
                           {cat.scope}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0">
-                        <div className="text-right w-12">
-                          <span className="font-mono font-bold text-base text-slate-900 block tabular-nums">
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="text-right w-11">
+                          <span className="font-mono font-bold text-sm text-slate-900 block tabular-nums">
                             {count}
                           </span>
-                          <span className="text-[11px] font-mono font-semibold text-rose-600 block tabular-nums">
+                          <span className="text-[10px] font-mono font-semibold text-rose-600 block tabular-nums">
                             -{pts}
                           </span>
                         </div>
 
                         {/* Plus / Minus Buttons (Disabled if admin mode or finalized) */}
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1">
                           <button
                             onClick={() =>
                               updateErrorCount(currentParticipant.id, activeJudgeId, cat.id, -1)
                             }
                             disabled={count <= 0 || isFinalized || isAdminMode}
-                            className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-sm transition-all shadow-xs"
+                            className="w-7 h-7 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
                             title="Kurangi 1 Kesalahan"
                             aria-label={`Kurangi kesalahan ${cat.name}`}
                           >
-                            <Minus className="w-4 h-4" />
+                            <Minus className="w-3.5 h-3.5" />
                           </button>
 
                           <button
@@ -808,11 +730,11 @@ export const PenilaianDualPanelView: React.FC = () => {
                               updateErrorCount(currentParticipant.id, activeJudgeId, cat.id, 1)
                             }
                             disabled={isFinalized || isAdminMode}
-                            className="w-8 h-8 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-sm transition-all shadow-xs"
+                            className="w-7 h-7 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
                             title="Tambah 1 Kesalahan"
                             aria-label={`Tambah kesalahan ${cat.name}`}
                           >
-                            <Plus className="w-4 h-4" />
+                            <Plus className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
@@ -824,20 +746,20 @@ export const PenilaianDualPanelView: React.FC = () => {
           </div>
 
           {/* Bottom Panel Actions */}
-          <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-2">
+          <div className="p-3.5 sm:p-4 border-t border-slate-200 bg-slate-50 space-y-2">
             {isAdminMode ? (
-              <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl text-center">
-                <ShieldCheck className="w-5 h-5 text-emerald-800 mx-auto mb-1" />
+              <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-xl text-center">
+                <ShieldCheck className="w-4 h-4 text-emerald-800 mx-auto mb-1" />
                 <p className="text-xs font-bold text-slate-900">
                   Mode Pemantauan Admin (Hanya Baca)
                 </p>
-                <p className="text-[10px] text-slate-500 mt-0.5">
-                  Lembar penilaian diampu oleh dewan hakim: {activeJudgeName}
+                <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                  Dewan hakim: {activeJudgeName}
                 </p>
               </div>
             ) : isFinalized ? (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
-                <CheckCircle className="w-5 h-5 text-emerald-700 mx-auto mb-1" />
+              <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+                <CheckCircle className="w-4 h-4 text-emerald-700 mx-auto mb-1" />
                 <p className="text-xs font-bold text-emerald-900">
                   Penilaian Berhasil Dikunci
                 </p>
@@ -848,16 +770,16 @@ export const PenilaianDualPanelView: React.FC = () => {
             ) : (
               <button
                 onClick={() => setIsConfirmModalOpen(true)}
-                className="w-full py-2.5 bg-emerald-800 hover:bg-emerald-900 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-2 bg-emerald-800 hover:bg-emerald-900 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                <Lock className="w-4 h-4" />
+                <Lock className="w-3.5 h-3.5" />
                 <span>Simpan Penilaian</span>
               </button>
             )}
 
             <button
               onClick={() => setCurrentView('rekap_nilai')}
-              className="w-full py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl transition-all"
+              className="w-full py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl transition-all cursor-pointer"
             >
               Lihat Rekap Nilai Babak Ini
             </button>
