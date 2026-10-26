@@ -22,6 +22,8 @@ export const RekapNilaiView: React.FC = () => {
     stages,
     judgeAssignments,
     kafilahs,
+    errorCategories,
+    getJudgeAssessment: getJudgeAssessmentFromContext,
     getParticipantProgress,
     setSelectedParticipantId,
     setCurrentView
@@ -94,7 +96,7 @@ export const RekapNilaiView: React.FC = () => {
       const matchesStage = selectedStage === 'Semua Babak' || p.stageName === selectedStage;
       const matchesKafilah = selectedKafilah === 'Semua Grup' || p.kafilahName === selectedKafilah;
 
-      const progress = getParticipantProgress(p.id);
+      const progress = getParticipantProgress(p.id, p.stageName);
       const matchesStatus =
         selectedStatus === 'Semua Status' ||
         progress === selectedStatus ||
@@ -104,8 +106,8 @@ export const RekapNilaiView: React.FC = () => {
     });
   }, [participants, searchQuery, selectedStage, selectedKafilah, selectedStatus, getParticipantProgress]);
 
-  const getJudgeAssessment = (participantId: string, judgeId: string) => {
-    return assessments.find((a) => a.participantId === participantId && a.judgeId === judgeId);
+  const getJudgeAssessment = (participantId: string, judgeId: string, stageName?: string) => {
+    return getJudgeAssessmentFromContext(participantId, judgeId, stageName);
   };
 
   // Export CSV dynamically based on active judges and escaped cells
@@ -122,13 +124,13 @@ export const RekapNilaiView: React.FC = () => {
     ];
 
     const rows = filteredParticipants.map((p) => {
-      const judgeScores = activeJudges.map((j) => {
-        const asm = getJudgeAssessment(p.id, j.id);
-        return asm ? asm.finalScore : null;
-      });
+      const judgeAssessments = activeJudges.map((j) => getJudgeAssessment(p.id, j.id, p.stageName));
+      const judgeScores = judgeAssessments.map((asm) => (asm ? asm.finalScore : null));
 
       const validScores = judgeScores.filter((s): s is number => s !== null);
-      const isComplete = validScores.length === activeJudges.length && activeJudges.length > 0;
+      const isComplete =
+        judgeAssessments.every((a) => a?.status === 'finalized') &&
+        activeJudges.length > 0;
 
       const avgText =
         validScores.length > 0
@@ -137,7 +139,7 @@ export const RekapNilaiView: React.FC = () => {
             }`
           : '-';
 
-      const progress = getParticipantProgress(p.id);
+      const progress = getParticipantProgress(p.id, p.stageName);
 
       return [
         `"${p.lotteryNumber}"`,
@@ -303,11 +305,11 @@ export const RekapNilaiView: React.FC = () => {
                 </tr>
               ) : (
                 filteredParticipants.map((p) => {
-                  const progress = getParticipantProgress(p.id);
+                  const progress = getParticipantProgress(p.id, p.stageName);
 
                   // Collect valid judge scores
                   const judgeAssessments = activeJudges.map((j) =>
-                    getJudgeAssessment(p.id, j.id)
+                    getJudgeAssessment(p.id, j.id, p.stageName)
                   );
 
                   const scores = judgeAssessments.map((a) => (a ? a.finalScore : null));
@@ -343,7 +345,7 @@ export const RekapNilaiView: React.FC = () => {
 
                       {/* Judge columns with border between Pengurangan and Nilai Hakim, equal width, no dots, standard text */}
                       {activeJudges.map((j) => {
-                        const asm = getJudgeAssessment(p.id, j.id);
+                        const asm = getJudgeAssessment(p.id, j.id, p.stageName);
 
                         return (
                           <React.Fragment key={j.id}>
@@ -406,7 +408,7 @@ export const RekapNilaiView: React.FC = () => {
       {/* Detail Breakdown Modal per Judge for Inspected Participant */}
       {inspectedParticipant && (() => {
         const participantAssessments = activeJudges.map((j) =>
-          getJudgeAssessment(inspectedParticipant.id, j.id)
+          getJudgeAssessment(inspectedParticipant.id, j.id, inspectedParticipant.stageName)
         );
         const finalizedJudges = participantAssessments.filter((a) => a?.status === 'finalized').length;
         const validJudgeScores = participantAssessments
@@ -484,7 +486,7 @@ export const RekapNilaiView: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {activeJudges.map((j) => {
-                        const asm = getJudgeAssessment(inspectedParticipant.id, j.id);
+                        const asm = getJudgeAssessment(inspectedParticipant.id, j.id, inspectedParticipant.stageName);
                         const isFinal = asm?.status === 'finalized';
                         const inProgress = asm?.status === 'in_progress';
                         const activeErrors = Object.entries(asm?.errorCounts || {}).filter(
@@ -514,15 +516,19 @@ export const RekapNilaiView: React.FC = () => {
                                 <div className="space-y-1">
                                   {activeErrors.map(([catId, count]) => {
                                     const deduction = asm.deductions?.[catId] || 0;
+                                    const categoryObj = errorCategories.find((c) => c.id === catId);
+                                    const categoryName = categoryObj
+                                      ? categoryObj.name
+                                      : catId.replace('cat-', '').replace(/-/g, ' ');
                                     return (
                                       <div
                                         key={catId}
                                         className="flex items-center justify-between text-[11px] gap-2"
                                       >
-                                        <span className="text-slate-700 capitalize">
-                                          {catId.replace('cat-', '').replace(/-/g, ' ')}:
+                                        <span className="text-slate-700 font-medium">
+                                          {categoryName}:
                                         </span>
-                                        <span className="font-mono text-slate-500">
+                                        <span className="font-mono text-slate-500 tabular-nums">
                                           {count}x (-{deduction.toFixed(2)})
                                         </span>
                                       </div>
@@ -568,7 +574,7 @@ export const RekapNilaiView: React.FC = () => {
               {/* Modal Footer */}
               <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
                 <span className="text-[11px] text-slate-500">
-                  Data penilaian tersinkronisasi antar dewan juri
+                  Tersimpan di browser (Lokal Prototipe)
                 </span>
                 <button
                   onClick={() => setInspectedParticipant(null)}

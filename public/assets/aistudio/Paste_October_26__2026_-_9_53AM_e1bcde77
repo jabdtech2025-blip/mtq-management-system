@@ -1,0 +1,771 @@
+# MASTER PROMPT — FINAL REFINEMENT MTQ MANAGEMENT SYSTEM
+## Perbaikan Alur Undian, Multi-Soal, Penilaian Per Babak, Monitoring, Rekap, dan UI/UX
+
+### PERAN
+
+Bertindak sebagai Senior Frontend Engineer, Software Architect, QA Engineer, dan Senior Product Designer yang berpengalaman membangun aplikasi SaaS enterprise.
+
+Kerjakan perbaikan langsung pada proyek MTQ Management System yang sedang terbuka di Google AI Studio. Gunakan source code terbaru, struktur data, komponen, konteks state, dan desain yang sudah ada.
+
+Repositori acuan:
+https://github.com/jabdtech2025-blip/mtq-management-system
+
+Target utama adalah membuat alur kerja yang konsisten, hasil penilaian yang benar, interaksi yang dapat diprediksi, dan UI yang clean, minimal, profesional, serta mudah digunakan.
+
+**Ini adalah tugas implementasi dan perbaikan, bukan sekadar audit atau pemberian rekomendasi.**
+
+---
+
+# 1. BATASAN PENGERJAAN
+
+## 1.1 Jangan membangun backend terlebih dahulu
+
+Untuk tahap ini:
+- Jangan membangun backend atau server baru.
+- Jangan menambahkan database eksternal.
+- Jangan menambahkan API backend baru.
+- Jangan membangun autentikasi produksi.
+- Jangan menambahkan layanan sinkronisasi real-time lintasperangkat.
+- Pertahankan arsitektur frontend, React, TypeScript, dan Tailwind CSS yang telah digunakan.
+- Pertahankan mock data serta penyimpanan lokal yang ada apabila masih dibutuhkan.
+- Jangan menampilkan status “tersinkronisasi antarhakim” atau “real-time server” jika sistem masih menggunakan state lokal/browser.
+
+Semua perbaikan harus dapat diuji pada prototipe menggunakan data demo. Gunakan state frontend dan persistensi lokal sesuai pola proyek yang tersedia.
+
+## 1.2 Jangan membangun ulang seluruh aplikasi
+
+Pertahankan identitas visual hijau-putih, sidebar, header, komponen tabel, dialog, navigasi, mushaf digital, anotasi, rubrik, dan perhitungan skor yang sudah ada.
+
+Lakukan perubahan pada komponen yang relevan. Jangan menghapus fitur yang berjalan atau mengganti implementasi nyata dengan handler demo baru.
+
+Sebelum mengubah suatu fungsi, periksa semua pemanggilnya, tipe datanya, ketergantungan antarhalaman, serta efeknya terhadap data yang telah tersimpan.
+
+## 1.3 Urutan prioritas
+
+Kerjakan dengan prioritas berikut:
+
+1. Ketepatan hasil undian dan penetapan soal.
+2. Dukungan multi-soal hingga workspace penilaian hakim.
+3. Konsistensi identitas penilaian berdasarkan peserta, hakim, soal, dan babak.
+4. Penanganan loading/error mushaf.
+5. Konsistensi hak akses frontend antara hakim dan admin.
+6. Ketepatan status rekap dan modal rincian penilaian.
+7. Penghapusan versi rubrik hardcoded.
+8. Penyempurnaan visual dan responsivitas.
+9. Pemeriksaan build, TypeScript, dan skenario penggunaan.
+
+Jangan mengorbankan kebenaran alur data demi penyelesaian visual yang lebih cepat.
+
+---
+
+# 2. PERBAIKI ALUR UNDIAN SOAL
+
+File utama:
+- `src/components/bankSoal/BankSoalView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+
+## 2.1 Masalah yang harus diselesaikan
+
+Pada implementasi sekarang, antarmuka membuat hasil undian untuk pratinjau. Namun, saat admin mengonfirmasi, fungsi `conductLotteryDraw` melakukan pengundian ulang.
+
+Hal ini dapat menyebabkan soal yang terlihat pada pratinjau berbeda dari soal yang akhirnya ditetapkan kepada peserta.
+
+**Hasil undian yang dikonfirmasi harus identik dengan hasil undian yang disimpan. Tidak boleh dilakukan pengundian ulang ketika admin menekan konfirmasi.**
+
+## 2.2 Alur undian yang benar
+
+Implementasikan alur berikut:
+
+1. Admin memilih babak, cakupan cabang, daftar peserta, serta jumlah soal per peserta.
+2. Sistem memvalidasi peserta dan soal yang memenuhi syarat.
+3. Sistem menghasilkan satu set hasil undian.
+4. Hasil ditampilkan kepada admin dalam bentuk tabel pratinjau.
+5. Admin dapat memeriksa ulang peserta, soal, surah, ayat, dan halaman yang diperoleh.
+6. Admin menekan tombol konfirmasi untuk menetapkan hasil.
+7. Sistem menyimpan hasil undian yang persis sama dengan pratinjau.
+8. Hasil tetap dapat dilihat setelah modal ditutup dan dibuka kembali, serta setelah refresh apabila penyimpanan lokal digunakan.
+
+Gunakan satu objek hasil undian sebagai sumber data untuk pratinjau dan penyimpanan.
+
+Refactor `conductLotteryDraw` agar bisa menerima hasil undian yang sudah ditentukan atau menyediakan satu fungsi yang menghasilkan dan menyimpan hasil secara atomik di level state frontend. Pilih pendekatan yang paling aman dan sederhana bagi arsitektur saat ini.
+
+Jangan memanggil random generator kembali pada langkah konfirmasi.
+
+Jika penyimpanan gagal atau validasi tidak terpenuhi, jangan menutup modal seolah-olah proses berhasil.
+
+## 2.3 Aturan kelayakan soal
+
+Sebelum undian:
+- Pastikan soal berstatus aktif.
+- Pastikan soal sesuai babak yang dipilih.
+- Pastikan soal sesuai cabang dan jenjang peserta.
+- Pastikan peserta benar-benar termasuk dalam cakupan undian.
+- Jangan menetapkan soal dari cabang atau jenjang berbeda hanya karena opsi filter dipilih “Semua Cabang”.
+- Jika terdapat peserta dari beberapa cabang, tentukan soal yang memenuhi syarat untuk setiap peserta secara individual.
+- Jika relasi cabang atau jenjang tidak dapat dipastikan dari data yang tersedia, jangan menetapkan soal secara diam-diam. Tampilkan pesan yang jelas agar cakupan diperbaiki.
+
+Periksa struktur data proyek untuk menentukan cara pencocokan cabang dan jenjang yang paling konsisten. Hindari pencocokan string yang terlalu longgar apabila tersedia ID atau relasi data yang lebih tepat.
+
+## 2.4 Hindari penetapan ganda dan hasil yang tidak valid
+
+Tetapkan perilaku undian secara eksplisit.
+
+Default yang disarankan:
+- Soal tidak boleh terulang pada peserta yang sama dalam satu babak.
+- Dalam satu batch undian untuk babak dan ruang lingkup yang sama, soal tidak boleh digunakan ulang antar peserta jika tersedia cukup soal.
+- Jika jumlah soal yang tersedia tidak mencukupi untuk memenuhi seluruh kebutuhan, jangan diam-diam menggunakan modulo untuk mengulang soal.
+- Tampilkan jumlah peserta, kebutuhan total soal, jumlah soal yang tersedia, dan alasan undian tidak dapat dilanjutkan.
+- Jangan mengubah penetapan yang sudah ada sebelum admin menyetujui penggantian.
+- Jika pengundian ulang atas penetapan yang sudah ada didukung, tampilkan peringatan yang jelas dan minta konfirmasi eksplisit.
+
+Apabila kebutuhan kompetisi memungkinkan soal digunakan berulang, sediakan opsi kebijakan yang jelas. Jangan membuat soal berulang tanpa memberi tahu pengguna.
+
+Pastikan jumlah soal yang dipilih tidak melebihi jumlah soal unik yang memenuhi syarat dalam ruang lingkup undian.
+
+## 2.5 Hasil undian harus tersimpan dan bisa ditelusuri
+
+Untuk setiap peserta, catat pada state frontend:
+- ID peserta.
+- ID babak.
+- ID soal yang terpilih.
+- Waktu penetapan.
+- Sumber penetapan, misalnya undian atau manual.
+- Informasi lain yang sudah tersedia pada struktur data, tanpa mengarang metadata.
+
+Jangan hanya menyimpan judul soal; gunakan ID soal sebagai referensi utama.
+
+Setelah penetapan:
+- Perbarui daftar Penetapan Soal.
+- Perbarui detail peserta dan penetapan babaknya.
+- Pastikan daftar soal pada halaman hakim dapat membacanya.
+- Pastikan penghitungan jumlah soal per peserta sesuai.
+- Pastikan pratinjau soal tetap dapat dibuka.
+
+Gunakan struktur kompatibel dengan data lama. Jangan menghapus field `questionId`, `assignedMaqra`, atau `pageNumber` yang masih dibutuhkan fitur legacy tanpa migrasi yang tepat.
+
+---
+
+# 3. LENGKAPI DUKUNGAN MULTI-SOAL SAMPAI KE PENILAIAN HAKIM
+
+File utama:
+- `src/components/bankSoal/BankSoalView.tsx`
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/components/penilaian/PenilaianHakimListView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+
+## 3.1 Masalah yang harus diselesaikan
+
+Model `Participant` dan `StageParticipation` sudah memiliki dukungan untuk beberapa maqra melalui `assignedQuestions`.
+
+Namun, workspace penilaian masih menggunakan field seperti `currentParticipant.assignedMaqra` dan `currentParticipant.pageNumber` sebagai referensi utama soal aktif.
+
+Artinya, penetapan beberapa soal di sisi administrasi belum otomatis menghasilkan pengalaman penilaian yang lengkap.
+
+## 3.2 Tambahkan pemilih soal aktif
+
+Ketika seorang peserta memiliki beberapa soal pada babak yang sama, tampilkan pemilih soal pada workspace hakim.
+
+Kontrol tersebut harus:
+- Menampilkan daftar seluruh soal yang ditetapkan untuk peserta pada babak aktif.
+- Menampilkan judul/kode soal, surah, rentang ayat, dan rentang halaman secara ringkas.
+- Menandai soal yang sedang dipilih.
+- Memungkinkan hakim berpindah soal tanpa keluar dari workspace.
+- Memperbarui mushaf sesuai soal yang dipilih.
+- Menampilkan halaman awal yang sesuai dengan soal aktif.
+- Mempertahankan navigasi halaman dan zoom.
+- Tidak menghapus penilaian atau anotasi ketika hakim berpindah soal.
+
+Jika hanya ada satu soal, pemilih tidak perlu mendominasi tampilan. Gunakan tampilan ringkas yang konsisten.
+
+## 3.3 Nilai dan anotasi harus terpisah per soal
+
+Satu penilaian harus memiliki identitas yang cukup untuk membedakan:
+- Tenant.
+- Peserta.
+- Hakim.
+- Babak/partisipasi.
+- Soal atau maqra.
+
+Periksa apakah `JudgeAssessment` perlu memiliki `questionId` atau referensi soal yang tepat. Jika diperlukan, tambahkan secara backward-compatible.
+
+Penilaian untuk Soal A tidak boleh menggunakan:
+- Jumlah kesalahan dari Soal B.
+- Nilai dari Soal B.
+- Anotasi mushaf dari Soal B.
+- Status finalisasi dari Soal B.
+
+Pastikan seluruh operasi berikut bekerja dengan identitas penilaian yang benar:
+- `updateErrorCount`
+- `saveAnnotations`
+- `finalizeAssessment`
+- Pembacaan nilai sementara.
+- Pembacaan anotasi.
+- Status penilaian.
+- Rekap nilai.
+
+Jika satu assessment saat ini menggunakan satu `stageParticipationId` tetapi tidak memiliki referensi soal, tentukan cara migrasi minimal yang paling aman. Untuk data lama, gunakan referensi yang sudah ada bila valid; jangan menggabungkan data dari beberapa soal menjadi satu penilaian tanpa dasar.
+
+## 3.4 Perpindahan soal dan pemulihan state
+
+Uji skenario berikut:
+1. Hakim membuka peserta dengan tiga soal.
+2. Hakim memilih soal pertama dan menambah kesalahan.
+3. Hakim memberi anotasi mushaf.
+4. Hakim berpindah ke soal kedua.
+5. Hakim menambah kesalahan dan membuat anotasi berbeda.
+6. Hakim kembali ke soal pertama.
+
+Hasil yang diharapkan:
+- Nilai dan coretan soal pertama tetap seperti semula.
+- Nilai dan coretan soal kedua tetap terpisah.
+- Halaman dan anotasi tidak berpindah ke soal yang salah.
+- Tidak ada kehilangan state ketika berganti tab Mushaf/Penilaian.
+- Setelah refresh, state pulih sesuai kemampuan persistensi lokal saat ini.
+
+## 3.5 Konsistensi penghapusan soal
+
+Audit `removeQuestionFromParticipant`.
+
+Penghapusan satu soal dari peserta pada babak tertentu tidak boleh secara tidak sengaja menghapus penetapan soal dari babak lain.
+
+Perbarui:
+- Daftar soal peserta.
+- Daftar soal `StageParticipation`.
+- Referensi penilaian yang berkaitan, sesuai aturan data yang aman.
+- Daftar soal yang dapat dipilih oleh hakim.
+
+Jika soal yang sedang dinilai dihapus atau diganti, tampilkan perilaku yang jelas. Jangan merusak penilaian yang telah difinalisasi.
+
+---
+
+# 4. PASTIKAN IDENTITAS PENILAIAN TIDAK TERTUKAR ANTARBABAK
+
+File utama:
+- `src/context/MtqContext.tsx`
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/components/penilaian/PenilaianHakimListView.tsx`
+- `src/components/rekap/RekapNilaiView.tsx`
+- `src/types/mtq.ts`
+
+## 4.1 Masalah yang harus diselesaikan
+
+Beberapa pencarian assessment pada kode masih menggunakan `participantId` dan `judgeId` tanpa membatasi babak atau `stageParticipationId`.
+
+Peserta yang sama dapat mengikuti beberapa babak. Karena itu, pencarian penilaian hanya berdasarkan peserta dan hakim berisiko mengambil data dari babak sebelumnya.
+
+## 4.2 Perbaikan identitas assessment
+
+Gunakan kombinasi identitas yang tepat agar setiap penilaian memiliki ruang lingkup yang jelas.
+
+Prioritaskan:
+- `stageParticipationId` yang benar.
+- `stageId` dan `stageName` yang relevan.
+- `participantId`.
+- `judgeId`.
+- `questionId` ketika penilaian dipisahkan per soal.
+
+Lakukan audit pada semua `assessments.find(...)`, `assessments.some(...)`, dan filter assessment terkait. Jangan mengganti hanya satu pencarian apabila pencarian lain masih dapat menarik data dari babak berbeda.
+
+Pastikan halaman hakim, monitoring admin, dashboard, dan rekap menggunakan aturan pencocokan yang sama.
+
+## 4.3 Konsistensi ketika peserta maju babak
+
+Ketika peserta lolos dari Penyisihan ke babak berikutnya:
+- Penilaian lama tetap berada pada babak lama.
+- Penilaian babak baru dibuat dengan referensi baru.
+- Status final dari babak lama tidak otomatis membuat penilaian babak baru menjadi final.
+- Soal/maqra babak lama tidak otomatis menjadi satu-satunya soal babak baru.
+- Rekap menampilkan nilai sesuai babak yang dipilih.
+- Data riwayat tidak tertukar dengan hasil babak aktif.
+
+Jangan menggunakan `participantId` saja sebagai pengenal unik untuk semua penilaian sepanjang kompetisi.
+
+## 4.4 Pengujian wajib
+
+Gunakan skenario:
+- Peserta A memiliki assessment Penyisihan dengan Hakim 1.
+- Peserta A kemudian maju ke Final.
+- Hakim 1 kembali menilai peserta A di Final.
+
+Pastikan membuka Final tidak menampilkan nilai Penyisihan sebagai nilai aktif, tidak memuat anotasi lama, dan tidak menganggap penilaian Final telah selesai sebelum benar-benar difinalisasi.
+
+---
+
+# 5. PERBAIKI KONDISI LOADING DAN ERROR MUSHAF
+
+File utama:
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- Komponen preview mushaf pada `src/components/bankSoal/BankSoalView.tsx`.
+
+## 5.1 Masalah yang harus diselesaikan
+
+`imageLoadError` sudah tersedia pada state workspace penilaian tetapi belum ditampilkan sebagai state UI yang memadai.
+
+Pada screen recording, ada frame yang menampilkan area mushaf kosong. Belum dapat dipastikan apakah hal itu hanya kondisi sesaat, tetapi UI harus menangani kegagalan pemuatan gambar secara jelas.
+
+## 5.2 Implementasikan empat keadaan
+
+### Loading
+Tampilkan loading state ringan di tengah viewport mushaf selama gambar dimuat.
+
+### Berhasil
+Tampilkan mushaf dengan rasio aspek yang benar dan ukuran optimal berdasarkan frame yang tersedia.
+
+### Error
+Jika seluruh sumber gambar gagal, tampilkan pesan:
+- Mushaf tidak dapat dimuat.
+- Nomor halaman yang sedang dibuka.
+- Tombol Coba Lagi.
+
+Jangan membiarkan viewport kosong tanpa penjelasan.
+
+### Coba lagi
+Ketika pengguna mencoba lagi:
+- Reset state loading/error secara benar.
+- Coba ulang sumber gambar sesuai strategi yang sudah digunakan.
+- Jangan menggandakan event atau membuat loop retry tanpa batas.
+
+## 5.3 Jaga sinkronisasi canvas
+
+Canvas anotasi harus tetap tepat menempel pada gambar mushaf.
+
+Jangan mengubah proporsi gambar atau posisi canvas ketika:
+- Gambar selesai dimuat.
+- Zoom berubah.
+- Halaman berganti.
+- Panel berubah ukuran.
+- Layout tablet berubah dari split view ke tab.
+
+Gunakan ukuran viewport dan pengamatan layout yang sesuai apabila diperlukan. Pertahankan koordinat anotasi yang sudah dinormalisasi.
+
+---
+
+# 6. PERBAIKI MODE MONITORING ADMIN DAN HAKIM
+
+File utama:
+- `src/components/penilaian/PenilaianHakimListView.tsx`
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/components/rekap/RekapNilaiView.tsx`
+- `src/context/MtqContext.tsx`
+
+## 6.1 Mode hakim dan admin harus jelas
+
+### Mode Hakim
+
+Hakim dapat:
+- Melihat peserta dan soal yang ditugaskan.
+- Memilih soal aktif.
+- Memperbarui jumlah kesalahan.
+- Membuat serta menghapus anotasi.
+- Menggunakan undo.
+- Memfinalisasi penilaiannya sendiri sesuai alur yang ada.
+
+Penilaian yang sudah final harus tetap read-only dalam alur normal.
+
+### Mode Admin
+
+Admin dapat:
+- Melihat daftar tugas hakim.
+- Memilih hakim yang ingin dimonitor.
+- Membuka detail penilaian hakim yang dipilih.
+- Melihat mushaf dan anotasi.
+- Melihat kategori kesalahan, jumlah, pengurangan, nilai, dan status.
+- Melihat nilai sementara maupun final.
+
+Admin tidak boleh:
+- Mengubah jumlah kesalahan.
+- Membuat atau menghapus anotasi.
+- Menjalankan undo terhadap anotasi hakim.
+- Memfinalisasi penilaian atas nama hakim.
+- Mengubah assessment hanya melalui akses monitoring.
+
+Batasan ini adalah perilaku frontend prototipe, bukan pengganti otorisasi server produksi.
+
+## 6.2 Jangan hanya menyembunyikan tombol
+
+Ketika mode admin aktif:
+- Hilangkan kontrol mutasi dari UI.
+- Jadikan canvas read-only.
+- Pastikan handler yang melakukan mutasi juga menolak tindakan admin.
+- Tombol finalisasi tidak boleh muncul.
+- Berikan indikator “Mode Pemantauan — Hanya Baca”.
+- Kontrol zoom dan navigasi halaman tetap dapat digunakan.
+
+Jangan membuat role baru apabila sistem sudah mempunyai `currentUser.role`.
+
+## 6.3 Hakim yang dipantau harus benar
+
+Periksa `monitoringJudgeId`, `adminSelectedJudgeId`, pemilihan hakim, dan pembacaan assessment.
+
+Pastikan halaman tidak menggunakan ID hakim default secara diam-diam ketika pengguna belum memilih hakim.
+
+Jika tidak ada hakim yang dapat dipantau, tampilkan empty state. Jika hakim dipilih, semua nilai dan anotasi pada halaman harus berasal dari assessment hakim tersebut, bukan dari hakim sebelumnya.
+
+Perbarui tampilan ketika pengguna mengganti hakim.
+
+## 6.4 Rekap berdasarkan peran
+
+Gunakan prinsip hak akses minimum pada UI:
+- Admin dapat melihat rekap lengkap sesuai cakupan tenant dan babak.
+- Hakim melihat peserta serta penilaian yang relevan dengan penugasannya.
+- Jangan otomatis memberikan tampilan seluruh penilaian hakim kepada akun hakim jika kebutuhan produk tidak secara eksplisit menetapkan akses tersebut.
+
+Pertahankan seluruh fungsi administrasi yang memang diperlukan. Jika ada kebijakan akses yang belum dapat ditentukan dari source code, pertahankan perilaku paling terbatas dan laporkan asumsi tersebut, jangan memperluas akses diam-diam.
+
+---
+
+# 7. PERBAIKI STATUS REKAP DAN MODAL RINCIAN PENILAIAN JURI
+
+File utama:
+- `src/components/rekap/RekapNilaiView.tsx`
+
+## 7.1 Perbaiki logika status rata-rata
+
+Saat ini, rata-rata dapat menggunakan semua assessment yang telah memiliki skor, termasuk assessment yang belum difinalisasi.
+
+Ini membuat rata-rata dapat terlihat seperti hasil final padahal belum semua hakim menyelesaikan penilaian.
+
+Pisahkan secara eksplisit:
+- Jumlah hakim yang ditugaskan.
+- Jumlah hakim yang sudah mulai menilai.
+- Jumlah hakim yang sudah final.
+- Rata-rata nilai dari assessment yang sudah tersedia.
+- Status rata-rata: sementara atau final.
+
+Gunakan jumlah assessment yang sudah final untuk menentukan apakah hasil dapat diberi label final, bukan sekadar apakah semua hakim sudah memiliki angka.
+
+Jika beberapa hakim belum final:
+- Tampilkan label “Sementara”.
+- Jelaskan status kelengkapan dengan singkat.
+- Jangan menyajikan rata-rata sebagai nilai resmi.
+
+Jika hasil seluruh hakim yang diwajibkan telah final:
+- Tampilkan status final.
+- Jangan memakai penanda sementara.
+
+Pastikan jumlah hakim yang digunakan sesuai dengan penugasan pada babak yang dipilih, bukan semua akun hakim pada tenant apabila cakupan babak berbeda.
+
+## 7.2 Hilangkan klaim sinkronisasi yang tidak sesuai
+
+Ganti teks seperti “Data penilaian tersinkronisasi antar dewan juri” apabila belum ada backend/server real-time.
+
+Gunakan status yang sesuai, misalnya:
+- “Data demo”
+- “Tersimpan di browser”
+- Atau jangan tampilkan klaim sinkronisasi jika tidak menambah informasi penting.
+
+Jangan menampilkan informasi waktu sinkronisasi palsu.
+
+## 7.3 Sempurnakan modal rincian juri
+
+Pertahankan modal yang sudah ada, tetapi rapikan bagian berikut:
+
+### Header
+- Judul ringkas “Rincian Penilaian Juri”.
+- Nama, nomor, dan ID peserta tanpa pengulangan.
+- Babak dan cabang yang relevan.
+- Tombol tutup yang mudah ditemukan.
+
+### Ringkasan
+Tampilkan maksimal beberapa informasi utama:
+- Jumlah hakim yang ditugaskan.
+- Jumlah penilaian final.
+- Rata-rata sementara/final sesuai status yang benar.
+
+Jangan menambah kartu statistik yang tidak memberi informasi baru.
+
+### Tabel rincian
+Pastikan:
+- Nama hakim dan bidang ditampilkan dengan rapi.
+- Nama kategori kesalahan ditampilkan menggunakan nama kategori yang benar dari master data, bukan kode internal seperti `cat-...`.
+- Jumlah kesalahan tidak dicampur dengan jumlah poin pengurangan.
+- Total pengurangan menggunakan format angka konsisten.
+- Nilai akhir sejajar dan menggunakan tabular numerals.
+- Status final, berlangsung, dan menunggu mudah dibedakan.
+- Anotasi mushaf ditampilkan sebagai informasi tambahan tanpa memenuhi tabel.
+
+Jangan mengarang komponen nilai yang tidak tersedia.
+
+### Responsivitas
+- Gunakan ukuran modal yang masuk akal pada desktop.
+- Modal tidak boleh keluar dari viewport.
+- Header dan footer tidak boleh menutupi isi.
+- Body modal dapat di-scroll jika tabel atau rincian panjang.
+- Pada layar kecil, lakukan layout adaptif daripada memaksa semua kolom menjadi sempit.
+
+## 7.4 Rapikan tabel utama rekap
+
+Audit tabel utama dan perbaiki:
+- Posisi sticky pada kolom identitas peserta.
+- Offset sticky pada header dua tingkat.
+- Alignment header grup hakim dan subkolomnya.
+- Lebar kolom angka.
+- Format desimal.
+- Tinggi baris.
+- Penanganan nama panjang.
+
+Pastikan header tidak terpotong dan seluruh kolom tetap sejajar ketika tabel digeser horizontal.
+
+Pertahankan warna latar yang lembut dan kurangi dekorasi yang tidak membantu pemindaian data.
+
+---
+
+# 8. HAPUS VERSI RUBRIK HARDCODED
+
+File utama:
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+- `src/components/masterData/MasterDataView.tsx`
+- Komponen penilaian lain yang menggunakan versi rubrik.
+
+Periksa seluruh pemakaian `rubricVersion`, termasuk nilai seperti `v2.4-lptq-2024`.
+
+Jika versi rubrik tidak menjadi kebutuhan pada tahap ini:
+- Hapus assignment versi yang ditetapkan permanen pada assessment baru.
+- Hapus badge versi hardcoded dari UI.
+- Hapus ketergantungan yang tidak diperlukan pada versi tersebut.
+- Pertahankan definisi dan bobot kategori kesalahan.
+- Jangan mengubah formula penilaian yang sudah ada.
+- Jangan mengganti versi lama dengan versi tetap yang baru.
+
+Jika field masih diperlukan untuk menjaga kompatibilitas dengan data lama, jadikan opsional dan jangan menanamkan nilai baru secara permanen tanpa keputusan produk.
+
+Pastikan semua jalur pembuatan assessment telah diperiksa, termasuk perubahan jumlah kesalahan dan penyimpanan anotasi.
+
+---
+
+# 9. FINAL UI/UX REFINEMENT
+
+Pertahankan tema hijau-putih, gaya admin yang bersih, serta workspace mushaf yang kontras. Jangan melakukan redesign besar.
+
+## 9.1 Penyederhanaan visual global
+
+- Kurangi gradient dekoratif.
+- Kurangi shadow berlebihan.
+- Hindari kartu bersarang yang tidak diperlukan.
+- Hindari badge berwarna pada setiap elemen.
+- Gunakan satu warna utama untuk tombol aksi utama.
+- Gunakan warna status secara semantik.
+- Hilangkan teks penjelasan yang mengulangi label atau informasi yang sudah jelas.
+- Pertahankan peringatan penting dan pesan validasi.
+
+Gunakan skala tipografi konsisten:
+- Judul halaman: sekitar 24–30 px.
+- Judul bagian: sekitar 16–20 px.
+- Konten utama: 14–16 px.
+- Teks sekunder: umumnya 12–13 px dan masih nyaman dibaca.
+
+Gunakan spacing yang konsisten berbasis kelipatan 4 px, radius seragam, border tipis, dan whitespace yang proporsional.
+
+## 9.2 Bank Soal
+
+Pastikan:
+- Tab Daftar Soal dan Penetapan Soal memiliki pola yang seragam.
+- Form penetapan beberapa soal mudah dipahami.
+- Hasil undian dapat dipindai per peserta.
+- Preview dapat menampilkan satu atau beberapa halaman.
+- Navigasi halaman, zoom, dan tampilan galeri bekerja.
+- Tidak ada pemotongan nama soal, surah, ayat, atau halaman yang mengganggu.
+- Empty state, validasi, dan error state terlihat profesional.
+
+## 9.3 Workspace penilaian
+
+- Header hanya menampilkan informasi yang benar-benar dibutuhkan.
+- Hindari nama hakim berulang kali di bagian yang sama.
+- Tombol finalisasi berada pada area tindakan panel nilai, bukan mendominasi header.
+- Mushaf memenuhi viewport dengan proporsi benar.
+- Toolbar dikelompokkan menurut navigasi, zoom, alat gambar, warna, dan undo/hapus.
+- Jangan membiarkan label alat terpecah menjadi baris yang tidak rapi.
+- Nama kategori kesalahan harus terbaca lengkap.
+- Tombol plus/minus sejajar.
+- Nilai utama dan total pengurangan mudah ditemukan.
+- Admin hanya melihat informasi tanpa kontrol edit.
+- Gunakan tab Mushaf dan Penilaian ketika ruang layar tidak cukup untuk split view.
+
+Pada desktop dan tablet landscape, gunakan split view selama kedua panel masih cukup lebar. Pada tablet portrait atau layar sempit, tampilkan navigasi panel yang jelas.
+
+## 9.4 Monitoring penilaian
+
+- Samakan informasi dan struktur visual dengan workspace hakim jika menampilkan assessment yang sama.
+- Hindari implementasi visual duplikat yang akan mudah tidak konsisten.
+- Gunakan dropdown filter langsung tanpa judul filter tambahan.
+- Sejajarkan pencarian dan dropdown dalam satu toolbar.
+- Pertahankan indikator mode hanya baca.
+- Atur tinggi tabel dan wrapping teks agar nama peserta, cabang, babak, dan maqra tetap mudah dibaca.
+
+## 9.5 Rekap nilai
+
+- Kurangi warna dan border pada sel tabel.
+- Gunakan latar netral untuk data biasa.
+- Gunakan satu aksen lembut untuk nilai akhir.
+- Selaraskan angka menggunakan tabular numerals.
+- Jangan memaksa seluruh tabel lebar masuk ke viewport.
+- Pertahankan scroll horizontal.
+- Jika struktur memungkinkan, pertahankan kolom identitas peserta saat tabel digeser.
+- Pastikan header kelompok hakim dan subkolom tetap sejajar.
+- Modal rincian menggunakan hierarki sederhana, tidak penuh kartu atau label dekoratif.
+
+## 9.6 Halaman master data
+
+- Pertahankan fitur hapus Jenjang dan Cabang.
+- Jika data masih digunakan, jangan menghapus referensi terkait.
+- Tampilkan peringatan ringkas.
+- Berikan opsi nonaktifkan jika sesuai alur data yang ada.
+- Jangan membuat modal terlalu besar atau penuh penjelasan.
+- Pastikan tombol edit, hapus, konfirmasi, dan batal menggunakan gaya yang konsisten.
+
+---
+
+# 10. PERSISTENSI LOKAL DAN MIGRASI DATA
+
+Karena proyek masih menggunakan localStorage, berhati-hatilah ketika mengubah tipe data.
+
+Jangan menghapus seluruh isi localStorage untuk membuat model baru bekerja.
+
+Jika perlu melakukan migrasi:
+- Lakukan normalisasi saat data dimuat.
+- Pertahankan field legacy yang masih diperlukan.
+- Isi field baru hanya berdasarkan informasi lama yang memang valid.
+- Jangan menciptakan soal, skor, atau anotasi palsu.
+- Pastikan fungsi penyimpanan menggunakan struktur data baru secara konsisten.
+- Pastikan data hasil undian dan penetapan soal dapat dipulihkan.
+- Periksa apakah perubahan format pada data lama dapat menyebabkan crash saat parsing atau rendering.
+
+Buat migrasi yang backward-compatible dan jangan mengandalkan refresh saja untuk memperbaiki data.
+
+---
+
+# 11. VALIDASI WAJIB
+
+Jangan menyatakan tugas selesai hanya karena source code berhasil diubah.
+
+## 11.1 Bank Soal dan Undian
+
+Uji:
+1. Satu peserta diberi tiga soal secara manual.
+2. Penetapan ketiga soal muncul di daftar Penetapan Soal.
+3. Preview setiap soal menampilkan halaman yang benar.
+4. Undian untuk beberapa peserta menampilkan hasil sebelum konfirmasi.
+5. Hasil yang dikonfirmasi identik dengan hasil yang ditampilkan.
+6. Jika soal tidak cukup, undian dicegah dan pesan yang jelas ditampilkan.
+7. Soal tidak salah cabang atau jenjang.
+8. Menghapus satu soal tidak menghapus soal lain.
+9. Refresh tidak menyebabkan soal terduplikasi atau hilang jika persistensi lokal digunakan.
+
+## 11.2 Penilaian multi-soal
+
+Uji:
+1. Peserta mempunyai setidaknya dua soal pada babak aktif.
+2. Hakim memilih Soal A dan mencatat beberapa kesalahan.
+3. Hakim menambahkan anotasi.
+4. Hakim berpindah ke Soal B.
+5. Nilai Soal B dimulai dari assessment yang sesuai.
+6. Anotasi Soal A tidak muncul sebagai anotasi Soal B.
+7. Kembali ke Soal A memulihkan nilai dan coretan Soal A.
+8. Finalisasi Soal A tidak otomatis memfinalisasi Soal B.
+
+## 11.3 Penilaian per babak
+
+Uji:
+1. Peserta memiliki hasil Penyisihan.
+2. Peserta maju ke Final.
+3. Hakim mulai menilai peserta yang sama di Final.
+4. Workspace Final tidak menggunakan nilai Penyisihan.
+5. Rekap Penyisihan dan Final menunjukkan nilai masing-masing.
+6. Status final dan anotasi tidak berpindah babak.
+
+## 11.4 Monitoring dan hak akses UI
+
+Uji:
+- Hakim dapat mengedit penilaiannya sendiri sesuai aturan.
+- Admin tidak dapat mengubah jumlah kesalahan.
+- Admin tidak dapat menambahkan atau menghapus anotasi.
+- Admin tidak dapat memfinalisasi nilai dari halaman monitoring.
+- Pemilihan hakim memperbarui detail yang tampil.
+- Tidak ada fallback diam-diam ke hakim lain ketika hakim belum dipilih.
+- Tampilan dan nilai yang dibaca admin cocok dengan assessment hakim yang dipilih.
+
+## 11.5 Rekap
+
+Uji:
+- Status sementara dan final benar.
+- Rata-rata tidak dianggap final apabila penilaian wajib belum selesai.
+- Babak yang dipilih membatasi data secara benar.
+- Nama kategori diambil dari master data.
+- Header kolom tetap sejajar saat scroll horizontal.
+- Hakim dan admin melihat cakupan data yang sesuai peran.
+- Tidak ada teks yang mengklaim sinkronisasi server yang belum tersedia.
+
+## 11.6 Mushaf
+
+Uji:
+- Gambar berhasil dimuat.
+- Gambar gagal dimuat.
+- Pengguna mencoba memuat ulang.
+- Halaman mushaf berubah.
+- Zoom berubah.
+- Layout berganti dari split view ke tab.
+- Canvas anotasi tetap tepat berada di atas gambar.
+- Tidak ada anotasi yang bergeser atau tercampur.
+
+## 11.7 Pemeriksaan teknis
+
+Jalankan skrip yang tersedia pada proyek:
+- `npm run lint`
+- `npm run build`
+
+Perbaiki error TypeScript atau build yang timbul dari perubahan ini.
+
+Jika tersedia browser preview atau automated browser test, jalankan skenario utama menggunakan data demo. Jangan mengaku telah menguji interaksi yang belum benar-benar dilakukan.
+
+Periksa console dan network jika ada gejala gambar mushaf gagal dimuat atau komponen frontend error.
+
+---
+
+# 12. LAPORAN AKHIR
+
+Setelah semua perubahan selesai, berikan laporan dalam bahasa Indonesia dengan struktur:
+
+### A. Perbaikan yang berhasil
+Kelompokkan berdasarkan:
+- Bank Soal dan undian.
+- Penetapan multi-soal.
+- Workspace penilaian.
+- Pemisahan data antar babak.
+- Monitoring dan hak akses UI.
+- Rekap nilai.
+- Master Data dan rubrik.
+- Penyempurnaan visual.
+
+### B. File yang diubah
+Sebutkan file utama beserta ringkasan perubahan dan alasan perubahan.
+
+### C. Hasil pengujian
+Tampilkan status lint/build dan skenario yang benar-benar sudah diuji.
+
+### D. Sisa masalah
+Cantumkan bug atau keputusan produk yang belum selesai. Jangan menutupi kegagalan pengujian.
+
+### E. Batasan prototipe
+Jelaskan bahwa penyimpanan masih menggunakan mekanisme frontend/localStorage dan belum menggantikan kebutuhan backend, database bersama, sinkronisasi lintasperangkat, serta otorisasi server di masa depan.
+
+---
+
+## KRITERIA SELESAI
+
+Pekerjaan dinyatakan selesai hanya apabila:
+
+1. Undian tidak mengubah hasil ketika dikonfirmasi.
+2. Penetapan beberapa soal konsisten dari Bank Soal sampai workspace hakim.
+3. Nilai dan anotasi terpisah per soal dan babak.
+4. Monitoring admin bersifat baca-saja dalam frontend.
+5. Status rata-rata sementara/final dihitung dengan benar.
+6. Halaman mushaf mempunyai loading, error, dan retry state.
+7. Rubric version tidak lagi di-hardcode untuk assessment baru jika tidak diperlukan.
+8. UI lebih konsisten, minim dekorasi yang berlebihan, dan nyaman dipakai pada desktop serta tablet.
+9. Fitur lama yang relevan tetap bekerja.
+10. Pemeriksaan teknis telah dilakukan dan hasilnya dilaporkan secara jujur.
+
+Laksanakan perubahan dengan pendekatan bertahap, menjaga kompatibilitas data, dan memprioritaskan kebenaran proses penilaian. Jangan menambah fitur dekoratif atau membangun ulang arsitektur yang tidak diperlukan.

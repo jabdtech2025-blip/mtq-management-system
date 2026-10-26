@@ -33,6 +33,7 @@ export const BankSoalView: React.FC = () => {
     addQuestionToParticipant,
     removeQuestionFromParticipant,
     conductLotteryDraw,
+    commitLotteryDrawResults,
     stages
   } = useMtq();
 
@@ -250,23 +251,38 @@ export const BankSoalView: React.FC = () => {
     );
   };
 
-  // Run draw simulation then generate mappings
+  // Run draw simulation then generate mappings atomically
   const handleExecuteDraw = () => {
     if (selectedParticipantIds.length === 0) {
       setLotteryFeedback('Pilih setidaknya 1 peserta untuk diundi.');
       return;
     }
-    if (eligibleLotteryQuestions.length === 0) {
-      setLotteryFeedback('Tidak ada soal/maqra yang memenuhi kriteria babak dan cabang ini.');
-      return;
+
+    const selectedParts = participants.filter((p) => selectedParticipantIds.includes(p.id));
+
+    // Validate each participant's branch & level pool
+    for (const part of selectedParts) {
+      const partQuestions = questions.filter((q) => {
+        if (q.status !== 'Aktif') return false;
+        const matchesStage = !q.stageName || q.stageName === lotteryStage || lotteryStage === 'Semua Babak';
+        const matchesBranch = lotteryBranch === 'Semua Cabang'
+          ? (!q.branchAndLevel || q.branchAndLevel.includes(part.branchName) || part.branchName.includes(q.branchAndLevel))
+          : q.branchAndLevel.includes(lotteryBranch);
+        return matchesStage && matchesBranch;
+      });
+
+      if (partQuestions.length < lotteryQuestionsPerParticipant) {
+        setLotteryFeedback(
+          `Tidak dapat melanjutkan: Peserta ${part.name} (${part.branchName}) membutuhkan ${lotteryQuestionsPerParticipant} soal unik, namun hanya tersedia ${partQuestions.length} soal aktif yang sesuai di Babak ${lotteryStage}.`
+        );
+        return;
+      }
     }
 
     setIsDrawingAnimation(true);
     setLotteryFeedback('');
 
     setTimeout(() => {
-      // Simulate drawing
-      const shuffled = [...eligibleLotteryQuestions].sort(() => Math.random() - 0.5);
       const results: {
         participantId: string;
         participantName: string;
@@ -274,43 +290,57 @@ export const BankSoalView: React.FC = () => {
         questionTitles: string[];
       }[] = [];
 
-      selectedParticipantIds.forEach((pId, idx) => {
-        const participant = participants.find((p) => p.id === pId);
-        const assignedQIds: string[] = [];
-        const assignedQTitles: string[] = [];
+      const batchUsed = new Set<string>();
 
-        for (let i = 0; i < lotteryQuestionsPerParticipant; i++) {
-          const qIndex = (idx * lotteryQuestionsPerParticipant + i) % shuffled.length;
-          const chosenQ = shuffled[qIndex];
-          if (chosenQ) {
-            assignedQIds.push(chosenQ.id);
-            assignedQTitles.push(chosenQ.title);
-          }
+      selectedParts.forEach((part) => {
+        const partQuestions = questions.filter((q) => {
+          if (q.status !== 'Aktif') return false;
+          const matchesStage = !q.stageName || q.stageName === lotteryStage || lotteryStage === 'Semua Babak';
+          const matchesBranch = lotteryBranch === 'Semua Cabang'
+            ? (!q.branchAndLevel || q.branchAndLevel.includes(part.branchName) || part.branchName.includes(q.branchAndLevel))
+            : q.branchAndLevel.includes(lotteryBranch);
+          return matchesStage && matchesBranch;
+        });
+
+        // Filter out questions this participant already has in this stage
+        const existingQIds = new Set(
+          (part.assignedQuestions || [])
+            .filter((aq) => !aq.stageName || aq.stageName === lotteryStage)
+            .map((aq) => aq.questionId)
+        );
+
+        let candidatePool = partQuestions.filter((q) => !existingQIds.has(q.id));
+        if (candidatePool.length < lotteryQuestionsPerParticipant) {
+          candidatePool = partQuestions;
         }
 
+        // Prioritize questions not yet used in this batch
+        const unusedInBatch = candidatePool.filter((q) => !batchUsed.has(q.id));
+        const pool = unusedInBatch.length >= lotteryQuestionsPerParticipant ? unusedInBatch : candidatePool;
+
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        const picked = shuffled.slice(0, lotteryQuestionsPerParticipant);
+
+        picked.forEach((q) => batchUsed.add(q.id));
+
         results.push({
-          participantId: pId,
-          participantName: participant?.name || 'Peserta',
-          questionIds: assignedQIds,
-          questionTitles: assignedQTitles
+          participantId: part.id,
+          participantName: part.name,
+          questionIds: picked.map((q) => q.id),
+          questionTitles: picked.map((q) => `${q.code} - ${q.title}`)
         });
       });
 
       setLotteryDrawResults(results);
       setIsDrawingAnimation(false);
-    }, 450);
+    }, 400);
   };
 
-  // Confirm and persist draw to MTQ Context
+  // Confirm and persist draw to MTQ Context — 100% IDENTICAL to preview, NO re-randomization!
   const handleConfirmPersistDraw = () => {
-    if (!lotteryDrawResults) return;
+    if (!lotteryDrawResults || lotteryDrawResults.length === 0) return;
 
-    const res = conductLotteryDraw({
-      stageName: lotteryStage,
-      branchName: lotteryBranch === 'Semua Cabang' ? undefined : lotteryBranch,
-      participantIds: selectedParticipantIds,
-      questionsPerParticipant: lotteryQuestionsPerParticipant
-    });
+    const res = commitLotteryDrawResults(lotteryDrawResults, lotteryStage);
 
     if (res.success) {
       setIsLotteryModalOpen(false);

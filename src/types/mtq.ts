@@ -199,6 +199,7 @@ export interface JudgeAssessment {
   judgeId: string;
   judgeName: string;
   judgeField: string;
+  questionId?: string; // Optional question identifier for multi-question assessments
   status: 'not_started' | 'in_progress' | 'finalized';
   errorCounts: Record<string, number>; // { [categoryId]: count }
   deductions: Record<string, number>;  // { [categoryId]: totalPoints }

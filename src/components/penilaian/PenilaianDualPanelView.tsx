@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   ArrowLeft,
   ChevronLeft,
@@ -21,10 +21,11 @@ import {
   RotateCcw,
   Menu,
   ShieldCheck,
-  Check
+  Check,
+  RefreshCw
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
-import { CanvasStroke, NormalizedPoint } from '../../types/mtq';
+import { CanvasStroke, NormalizedPoint, AssignedMaqraItem } from '../../types/mtq';
 
 export const PenilaianDualPanelView: React.FC = () => {
   const {
@@ -41,6 +42,7 @@ export const PenilaianDualPanelView: React.FC = () => {
     updateErrorCount,
     saveAnnotations,
     finalizeAssessment,
+    getJudgeAssessment,
     syncStatus,
     lastSyncTime,
     toggleSidebar
@@ -50,20 +52,65 @@ export const PenilaianDualPanelView: React.FC = () => {
   const currentParticipant =
     participants.find((p) => p.id === selectedParticipantId) || participants[0] || null;
 
+  const activeStageName = currentParticipant?.stageName || 'Penyisihan';
+
+  // Multi-Question support: list of questions assigned to this participant in active stage
+  const participantAssignedQuestions = useMemo<AssignedMaqraItem[]>(() => {
+    if (!currentParticipant) return [];
+    if (currentParticipant.assignedQuestions && currentParticipant.assignedQuestions.length > 0) {
+      const stageSpecific = currentParticipant.assignedQuestions.filter(
+        (aq: AssignedMaqraItem) => !aq.stageName || aq.stageName === activeStageName
+      );
+      return stageSpecific.length > 0 ? stageSpecific : currentParticipant.assignedQuestions;
+    }
+    if (currentParticipant.questionId) {
+      return [{
+        questionId: currentParticipant.questionId,
+        code: 'MQ-01',
+        title: currentParticipant.assignedMaqra || 'Maqra Tilawah',
+        pageNumber: currentParticipant.pageNumber || 305,
+        stageName: activeStageName
+      }];
+    }
+    return [];
+  }, [currentParticipant, activeStageName]);
+
+  const [activeQuestionId, setActiveQuestionId] = useState<string>('');
+
+  // Synchronize activeQuestionId when participant changes
+  useEffect(() => {
+    if (participantAssignedQuestions.length > 0) {
+      if (!participantAssignedQuestions.some((q: AssignedMaqraItem) => q.questionId === activeQuestionId)) {
+        const first = participantAssignedQuestions[0];
+        setActiveQuestionId(first.questionId);
+        const startP = first.pageStart || first.pageNumber || 305;
+        setCurrentPage(startP);
+      }
+    } else {
+      setActiveQuestionId('');
+    }
+  }, [participantAssignedQuestions, activeQuestionId]);
+
+  // Active question object
+  const activeQuestionObj = useMemo(() => {
+    return (
+      participantAssignedQuestions.find((q: AssignedMaqraItem) => q.questionId === activeQuestionId) ||
+      participantAssignedQuestions[0]
+    );
+  }, [participantAssignedQuestions, activeQuestionId]);
+
   // Active judge ID & Name with Admin Monitoring support
   const isAdminMode = currentUser.role !== 'judge';
   const activeJudgeId = isAdminMode
-    ? (monitoringJudgeId || 'judge-1')
+    ? (monitoringJudgeId || users.find((u) => u.role === 'judge' && u.tenantId === currentTenant.id)?.id || '')
     : currentUser.id;
   const inspectedJudge = users.find((u) => u.id === activeJudgeId);
   const activeJudgeName =
-    inspectedJudge?.name || (currentUser.role === 'judge' ? currentUser.name : 'KH. Ahmad Dahlan, M.Ag');
+    inspectedJudge?.name || (currentUser.role === 'judge' ? currentUser.name : 'Dewan Hakim');
 
-  // Find active assessment for this participant & judge
+  // Find active assessment scoped strictly by participant, judge, stage, and activeQuestionId
   const currentAssessment = currentParticipant
-    ? assessments.find(
-        (a) => a.participantId === currentParticipant.id && a.judgeId === activeJudgeId
-      )
+    ? getJudgeAssessment(currentParticipant.id, activeJudgeId, activeStageName, activeQuestionId)
     : undefined;
 
   const isFinalized = currentAssessment?.status === 'finalized';
@@ -73,7 +120,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [currentPage, setCurrentPage] = useState<number>(
-    currentParticipant?.pageNumber || 305
+    activeQuestionObj?.pageStart || activeQuestionObj?.pageNumber || currentParticipant?.pageNumber || 305
   );
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
@@ -105,25 +152,37 @@ export const PenilaianDualPanelView: React.FC = () => {
   const [imageSourceIndex, setImageSourceIndex] = useState<number>(0);
   const currentImageUrl = imageSources[imageSourceIndex] || imageSources[0];
 
-  // Load participant's assessment and page when switching participants
+  // Load participant's assessment and page when switching participants, questions, or judges
   useEffect(() => {
     if (currentParticipant) {
-      setCurrentPage(currentParticipant.pageNumber);
       setImageLoaded(false);
       setImageLoadError(false);
       setImageSourceIndex(0);
       setIsDrawing(false);
       setCurrentStroke([]);
 
-      // Load participant's strokes for active judge
-      const asm = assessments.find(
-        (a) => a.participantId === currentParticipant.id && a.judgeId === activeJudgeId
+      // Load strokes strictly for active question, judge, and stage
+      const asm = getJudgeAssessment(
+        currentParticipant.id,
+        activeJudgeId,
+        activeStageName,
+        activeQuestionId
       );
       setStrokes(asm?.annotations || []);
     } else {
       setStrokes([]);
     }
-  }, [currentParticipant?.id, activeJudgeId]);
+  }, [currentParticipant?.id, activeJudgeId, activeStageName, activeQuestionId, assessments]);
+
+  // Handler to switch question
+  const handleSelectQuestion = (qId: string) => {
+    setActiveQuestionId(qId);
+    const q = participantAssignedQuestions.find((item: AssignedMaqraItem) => item.questionId === qId);
+    if (q) {
+      const targetPage = q.pageStart || q.pageNumber || 305;
+      setCurrentPage(targetPage);
+    }
+  };
 
   // Reset image state on page change
   useEffect(() => {
@@ -217,7 +276,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
     if (remainingStrokes.length !== strokes.length) {
       setStrokes(remainingStrokes);
-      saveAnnotations(currentParticipant.id, activeJudgeId, remainingStrokes);
+      saveAnnotations(currentParticipant.id, activeJudgeId, remainingStrokes, activeStageName, activeQuestionId);
     }
   };
 
@@ -270,7 +329,7 @@ export const PenilaianDualPanelView: React.FC = () => {
       };
       const updated = [...strokes, newStroke];
       setStrokes(updated);
-      saveAnnotations(currentParticipant.id, activeJudgeId, updated);
+      saveAnnotations(currentParticipant.id, activeJudgeId, updated, activeStageName, activeQuestionId);
     }
     setCurrentStroke([]);
   };
@@ -284,7 +343,7 @@ export const PenilaianDualPanelView: React.FC = () => {
     const lastStroke = pageStrokes[pageStrokes.length - 1];
     const updated = strokes.filter((s) => s.id !== lastStroke.id);
     setStrokes(updated);
-    saveAnnotations(currentParticipant.id, activeJudgeId, updated);
+    saveAnnotations(currentParticipant.id, activeJudgeId, updated, activeStageName, activeQuestionId);
   };
 
   // Clear current page strokes only
@@ -292,14 +351,14 @@ export const PenilaianDualPanelView: React.FC = () => {
     if (!currentParticipant || isFinalized || isAdminMode) return;
     const updated = strokes.filter((s) => s.page !== currentPage);
     setStrokes(updated);
-    saveAnnotations(currentParticipant.id, activeJudgeId, updated);
+    saveAnnotations(currentParticipant.id, activeJudgeId, updated, activeStageName, activeQuestionId);
     setIsClearPageModalOpen(false);
   };
 
   // Finalize action
   const handleConfirmFinalize = () => {
     if (!currentParticipant) return;
-    finalizeAssessment(currentParticipant.id, activeJudgeId);
+    finalizeAssessment(currentParticipant.id, activeJudgeId, activeStageName, activeQuestionId);
     setIsConfirmModalOpen(false);
   };
 
@@ -570,7 +629,43 @@ export const PenilaianDualPanelView: React.FC = () => {
               }}
               className="relative select-none transition-all"
             >
-              {/* Authentic High-Res Mushaf Scan */}
+              {/* 1. Loading State */}
+              {!imageLoaded && !imageLoadError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/95 z-20 min-h-[420px]">
+                  <RefreshCw className="w-8 h-8 text-emerald-800 animate-spin mb-2" />
+                  <p className="text-xs font-semibold text-slate-700">
+                    Memuat Halaman Mushaf {currentPage}...
+                  </p>
+                </div>
+              )}
+
+              {/* 2. Error & Retry State */}
+              {imageLoadError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 z-20 p-6 text-center min-h-[420px]">
+                  <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 mb-3">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-900 mb-1">
+                    Mushaf Halaman {currentPage} Tidak Dapat Dimuat
+                  </h4>
+                  <p className="text-xs text-slate-500 max-w-sm mb-4">
+                    Gagal memuat berkas gambar mushaf. Silakan periksa koneksi internet Anda atau tekan tombol coba lagi.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setImageLoadError(false);
+                      setImageLoaded(false);
+                      setImageSourceIndex(0);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-lg shadow-2xs cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Coba Lagi</span>
+                  </button>
+                </div>
+              )}
+
+              {/* 3. Authentic High-Res Mushaf Scan */}
               <img
                 src={currentImageUrl}
                 alt={`Mushaf Madinah Halaman ${currentPage}`}
@@ -585,11 +680,12 @@ export const PenilaianDualPanelView: React.FC = () => {
                     setImageSourceIndex((idx) => idx + 1);
                   } else {
                     setImageLoadError(true);
+                    setImageLoaded(false);
                   }
                 }}
               />
 
-              {/* Transparent Canvas Overlay for Annotations */}
+              {/* 4. Transparent Canvas Overlay for Annotations */}
               <canvas
                 ref={canvasRef}
                 width={1260}
@@ -611,7 +707,7 @@ export const PenilaianDualPanelView: React.FC = () => {
           {/* Bottom Bar Info */}
           <div className="h-7 bg-slate-50 border-t border-slate-200 px-3 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
             <span className="truncate">
-              Standar Mushaf Madinah 15 Baris · {currentParticipant.assignedMaqra}
+              Standar Mushaf Madinah 15 Baris · {activeQuestionObj?.title || currentParticipant.assignedMaqra}
             </span>
             <span className="shrink-0">{pageAnnotationCount} goresan anotasi</span>
           </div>
@@ -624,6 +720,45 @@ export const PenilaianDualPanelView: React.FC = () => {
           }`}
         >
           <div className="p-3.5 sm:p-4 space-y-3.5 sm:space-y-4">
+            {/* Multi-Question Selector Toolbar (when participant has >1 assigned maqra in this stage) */}
+            {participantAssignedQuestions.length > 1 && (
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Pilih Soal yang Sedang Dinilai:
+                </span>
+                <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200">
+                  {participantAssignedQuestions.map((q: AssignedMaqraItem, idx: number) => {
+                    const isActive = q.questionId === activeQuestionId;
+                    const qLabel = q.code || `Soal ${idx + 1}`;
+                    return (
+                      <button
+                        key={q.questionId}
+                        type="button"
+                        onClick={() => handleSelectQuestion(q.questionId)}
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all text-center cursor-pointer truncate ${
+                          isActive
+                            ? 'bg-emerald-800 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                        }`}
+                        title={`${qLabel}: ${q.title}`}
+                      >
+                        <span>{qLabel}</span>
+                        {q.surahName && (
+                          <span
+                            className={`block text-[10px] font-normal truncate ${
+                              isActive ? 'text-emerald-100' : 'text-slate-500'
+                            }`}
+                          >
+                            {q.surahName}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Participant Quick Info (Green styling) */}
             <div className="bg-gradient-to-br from-emerald-800 to-emerald-950 text-white rounded-xl shadow-xs border border-emerald-700/30 p-3.5 sm:p-4">
               <div className="flex items-center justify-between text-xs mb-1">
@@ -638,11 +773,13 @@ export const PenilaianDualPanelView: React.FC = () => {
                 {currentParticipant.name}
               </p>
               <p className="text-xs text-emerald-100/90 mt-0.5 font-medium">
-                {currentParticipant.kafilahName} · Undian #{currentParticipant.lotteryNumber}
+                {currentParticipant.kafilahName} · Undian #{currentParticipant.lotteryNumber} · Babak {activeStageName}
               </p>
               <div className="mt-2.5 pt-2 border-t border-emerald-700/50 flex items-center justify-between text-xs">
                 <span className="text-emerald-200 font-medium">Paket Maqra:</span>
-                <span className="text-white font-semibold">{currentParticipant.assignedMaqra}</span>
+                <span className="text-white font-semibold truncate max-w-[210px] text-right">
+                  {activeQuestionObj?.title || currentParticipant.assignedMaqra}
+                </span>
               </div>
             </div>
 
@@ -715,7 +852,14 @@ export const PenilaianDualPanelView: React.FC = () => {
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() =>
-                              updateErrorCount(currentParticipant.id, activeJudgeId, cat.id, -1)
+                              updateErrorCount(
+                                currentParticipant.id,
+                                activeJudgeId,
+                                cat.id,
+                                -1,
+                                activeStageName,
+                                activeQuestionId
+                              )
                             }
                             disabled={count <= 0 || isFinalized || isAdminMode}
                             className="w-7 h-7 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
@@ -727,7 +871,14 @@ export const PenilaianDualPanelView: React.FC = () => {
 
                           <button
                             onClick={() =>
-                              updateErrorCount(currentParticipant.id, activeJudgeId, cat.id, 1)
+                              updateErrorCount(
+                                currentParticipant.id,
+                                activeJudgeId,
+                                cat.id,
+                                1,
+                                activeStageName,
+                                activeQuestionId
+                              )
                             }
                             disabled={isFinalized || isAdminMode}
                             className="w-7 h-7 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"

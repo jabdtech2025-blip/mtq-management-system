@@ -111,19 +111,28 @@ interface MtqContextType {
     judgeId: string,
     categoryId: string,
     delta: number,
-    stageName?: string
+    stageName?: string,
+    questionId?: string
   ) => void;
   saveAnnotations: (
     participantId: string,
     judgeId: string,
     annotations: CanvasStroke[],
-    stageName?: string
+    stageName?: string,
+    questionId?: string
   ) => void;
   finalizeAssessment: (
     participantId: string,
     judgeId: string,
-    stageName?: string
+    stageName?: string,
+    questionId?: string
   ) => void;
+  getJudgeAssessment: (
+    participantId: string,
+    judgeId: string,
+    stageName?: string,
+    questionId?: string
+  ) => JudgeAssessment | undefined;
   getParticipantProgress: (
     participantId: string,
     stageName?: string
@@ -160,6 +169,12 @@ interface MtqContextType {
     branchName?: string;
     participantIds: string[];
     questionsPerParticipant: number;
+    predefinedResults?: {
+      participantId: string;
+      participantName: string;
+      questionIds: string[];
+      questionTitles: string[];
+    }[];
   }) => {
     success: boolean;
     message: string;
@@ -170,6 +185,15 @@ interface MtqContextType {
       questionTitles: string[];
     }[];
   };
+  commitLotteryDrawResults: (
+    results: {
+      participantId: string;
+      participantName: string;
+      questionIds: string[];
+      questionTitles: string[];
+    }[],
+    stageName: string
+  ) => { success: boolean; message: string };
   updateCategoryDeduction: (categoryId: string, deduction: number) => void;
   addErrorCategory: (cat: Omit<ErrorCategory, 'id' | 'tenantId'>) => void;
   updateErrorCategory: (id: string, updated: Partial<ErrorCategory>) => void;
@@ -507,6 +531,30 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   /**
+   * Helper to retrieve assessment matching participant, judge, stage, and questionId
+   */
+  const getJudgeAssessment = (
+    participantId: string,
+    judgeId: string,
+    stageName?: string,
+    questionId?: string
+  ): JudgeAssessment | undefined => {
+    const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
+    const targetStage = stageName || part?.stageName || selectedStageName;
+
+    return assessments.find((a) => {
+      if (a.tenantId !== currentTenantId) return false;
+      if (a.participantId !== participantId) return false;
+      if (a.judgeId !== judgeId) return false;
+      if (a.stageName && targetStage && a.stageName !== targetStage) return false;
+      if (questionId) {
+        if (a.questionId && a.questionId !== questionId) return false;
+      }
+      return true;
+    });
+  };
+
+  /**
    * Helper to retrieve stage participation for a participant and stage
    */
   const getStageParticipation = (
@@ -593,11 +641,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     judgeId: string,
     categoryId: string,
     delta: number,
-    stageName?: string
+    stageName?: string,
+    questionId?: string
   ) => {
+    // Role check: Only judges can modify error counts (Admin mode is strictly read-only)
+    if (currentUser.role !== 'judge') {
+      console.warn('Mode Pemantauan Admin bersifat baca-saja. Perubahan nilai ditolak.');
+      return;
+    }
+
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!part) return;
     const targetStage = stageName || part.stageName || selectedStageName;
+    const targetQuestionId = questionId || part.questionId;
 
     // Get or create stage participation
     let sp = stageParticipations.find(
@@ -619,7 +675,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stageName: targetStage,
         branchName: part.branchName,
         lotteryNumber: part.lotteryNumber,
-        questionId: part.questionId,
+        questionId: targetQuestionId,
         assignedMaqra: part.assignedMaqra,
         pageNumber: part.pageNumber,
         status: 'Berlangsung'
@@ -631,8 +687,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (a) =>
         a.tenantId === currentTenantId &&
         a.judgeId === judgeId &&
-        ((sp && a.stageParticipationId === sp.id) ||
-          (a.participantId === participantId && a.stageName === targetStage))
+        a.participantId === participantId &&
+        (!a.stageName || a.stageName === targetStage) &&
+        (!targetQuestionId || !a.questionId || a.questionId === targetQuestionId)
     );
 
     if (existing?.status === 'finalized') {
@@ -661,6 +718,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           stageParticipationId: sp.id,
           stageId,
           stageName: targetStage,
+          questionId: targetQuestionId || existing.questionId,
           errorCounts: currentCounts,
           deductions,
           totalDeductions,
@@ -678,13 +736,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           judgeId,
           judgeName: targetJudge.name,
           judgeField: targetJudge.judgeField || 'Dewan Hakim',
+          questionId: targetQuestionId,
           status: 'in_progress',
           errorCounts: currentCounts,
           deductions,
           totalDeductions,
           finalScore,
           annotations: [],
-          rubricVersion: 'v2.4-lptq-2024',
           lastUpdated: nowTime
         };
 
@@ -738,11 +796,18 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     participantId: string,
     judgeId: string,
     annotations: CanvasStroke[],
-    stageName?: string
+    stageName?: string,
+    questionId?: string
   ) => {
+    // Role check: Admin cannot mutate annotations
+    if (currentUser.role !== 'judge') {
+      return;
+    }
+
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!part) return;
     const targetStage = stageName || part.stageName || selectedStageName;
+    const targetQuestionId = questionId || part.questionId;
 
     let sp = stageParticipations.find(
       (item) =>
@@ -763,7 +828,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stageName: targetStage,
         branchName: part.branchName,
         lotteryNumber: part.lotteryNumber,
-        questionId: part.questionId,
+        questionId: targetQuestionId,
         assignedMaqra: part.assignedMaqra,
         pageNumber: part.pageNumber,
         status: 'Berlangsung'
@@ -775,8 +840,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (a) =>
         a.tenantId === currentTenantId &&
         a.judgeId === judgeId &&
-        ((sp && a.stageParticipationId === sp.id) ||
-          (a.participantId === participantId && a.stageName === targetStage))
+        a.participantId === participantId &&
+        (!a.stageName || a.stageName === targetStage) &&
+        (!targetQuestionId || !a.questionId || a.questionId === targetQuestionId)
     );
 
     if (existing?.status === 'finalized') {
@@ -806,13 +872,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         judgeId,
         judgeName: targetJudge.name,
         judgeField: targetJudge.judgeField || 'Dewan Hakim',
+        questionId: targetQuestionId,
         status: 'in_progress',
         errorCounts: {},
         deductions: {},
         totalDeductions: 0,
         finalScore: 100.0,
         annotations,
-        rubricVersion: 'v2.4-lptq-2024',
         lastUpdated: nowTime
       };
       setAssessments((prev) => [...prev, newAsm]);
@@ -828,11 +894,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const finalizeAssessment = (
     participantId: string,
     judgeId: string,
-    stageName?: string
+    stageName?: string,
+    questionId?: string
   ) => {
+    // Role check: Admin cannot finalize on behalf of judge
+    if (currentUser.role !== 'judge') {
+      console.warn('Mode Pemantauan Admin: Hanya dewan hakim yang dapat mengunci dan memfinalisasi nilai.');
+      return;
+    }
+
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!part) return;
     const targetStage = stageName || part.stageName || selectedStageName;
+    const targetQuestionId = questionId || part.questionId;
     const nowTime = getWibTime();
 
     let sp = stageParticipations.find(
@@ -854,11 +928,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stageName: targetStage,
         branchName: part.branchName,
         lotteryNumber: part.lotteryNumber,
-        questionId: part.questionId,
+        questionId: targetQuestionId,
         assignedMaqra: part.assignedMaqra,
         pageNumber: part.pageNumber,
         status: 'Berlangsung'
       };
+      setStageParticipations((prev) => [...prev, sp!]);
     }
 
     const targetJudge = users.find((u) => u.id === judgeId) || currentUser;
@@ -867,14 +942,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (a) =>
         a.tenantId === currentTenantId &&
         a.judgeId === judgeId &&
-        ((sp && a.stageParticipationId === sp.id) ||
-          (a.participantId === participantId && a.stageName === targetStage))
+        a.participantId === participantId &&
+        (!a.stageName || a.stageName === targetStage) &&
+        (!targetQuestionId || !a.questionId || a.questionId === targetQuestionId)
     );
 
-    let finalizedScore = 100.0;
+    const finalizedScore = existing ? existing.finalScore : 100.0;
 
     if (existing) {
-      finalizedScore = existing.finalScore;
       setAssessments((prev) =>
         prev.map((a) =>
           a.id === existing.id
@@ -893,6 +968,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         judgeId,
         judgeName: targetJudge.name,
         judgeField: targetJudge.judgeField || 'Dewan Hakim',
+        questionId: targetQuestionId,
         status: 'finalized',
         errorCounts: {},
         deductions: {},
@@ -924,9 +1000,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             (a) =>
               a.tenantId === currentTenantId &&
               a.judgeId === jId &&
-              a.status === 'finalized' &&
-              ((sp && a.stageParticipationId === sp.id) ||
-                (a.participantId === participantId && a.stageName === targetStage))
+              a.participantId === participantId &&
+              a.stageName === targetStage &&
+              a.status === 'finalized'
           )
       );
 
@@ -959,18 +1035,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // Update Participant state
-    setParticipants((prev) =>
-      prev.map((p) => {
-        if (p.id === participantId && p.tenantId === currentTenantId) {
-          return {
-            ...p,
-            status: allFinalized ? 'Final' : 'Berlangsung'
-          };
-        }
-        return p;
-      })
-    );
+    if (allFinalized) {
+      setParticipants((prev) =>
+        prev.map((p) =>
+          p.id === participantId && p.tenantId === currentTenantId
+            ? { ...p, status: 'Final' }
+            : p
+        )
+      );
+    }
 
     // Activity Log
     const newLog: ActivityLogItem = {
@@ -1266,8 +1339,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setParticipants((prev) =>
       prev.map((p) => {
         if (p.id === participantId && p.tenantId === currentTenantId) {
-          const remaining = (p.assignedQuestions || []).filter((item) => item.questionId !== questionId);
-          const remainingIds = (p.questionIds || []).filter((id) => id !== questionId);
+          // Only remove question that matches questionId AND stageName (if specified)
+          const remaining = (p.assignedQuestions || []).filter(
+            (item) => !(item.questionId === questionId && (!item.stageName || item.stageName === targetStage))
+          );
+          const remainingIds = remaining.map((r) => r.questionId);
           const fallback = remaining[0];
           return {
             ...p,
@@ -1315,26 +1391,59 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
+  const commitLotteryDrawResults = (
+    results: {
+      participantId: string;
+      participantName: string;
+      questionIds: string[];
+      questionTitles: string[];
+    }[],
+    stageName: string
+  ) => {
+    if (!results || results.length === 0) {
+      return { success: false, message: 'Tidak ada hasil undian untuk ditetapkan.' };
+    }
+
+    results.forEach((r) => {
+      r.questionIds.forEach((qId) => {
+        addQuestionToParticipant(r.participantId, qId, stageName);
+      });
+    });
+
+    const newLog: ActivityLogItem = {
+      id: 'act-' + Date.now(),
+      tenantId: currentTenantId,
+      type: 'config',
+      title: 'Penetapan Hasil Undian',
+      description: `Penetapan hasil undian maqra untuk ${results.length} peserta pada Babak ${stageName}.`,
+      timestamp: getWibTime(),
+      actorName: currentUser.name
+    };
+    setActivityLogs((prev) => [newLog, ...prev.slice(0, 20)]);
+
+    return {
+      success: true,
+      message: `Berhasil menetapkan maqra untuk ${results.length} peserta.`
+    };
+  };
+
   const conductLotteryDraw = (options: {
     stageName: string;
     branchName?: string;
     participantIds: string[];
     questionsPerParticipant: number;
+    predefinedResults?: {
+      participantId: string;
+      participantName: string;
+      questionIds: string[];
+      questionTitles: string[];
+    }[];
   }) => {
-    const { stageName, branchName, participantIds, questionsPerParticipant } = options;
+    const { stageName, branchName, participantIds, questionsPerParticipant, predefinedResults } = options;
 
-    const eligibleQuestions = questions.filter((q) => {
-      if (q.tenantId !== currentTenantId || q.status !== 'Aktif') return false;
-      const matchesStage = !q.stageName || q.stageName === stageName || stageName === 'Semua Babak';
-      const matchesBranch = !branchName || branchName === 'Semua Cabang' || q.branchAndLevel.includes(branchName);
-      return matchesStage && matchesBranch;
-    });
-
-    if (eligibleQuestions.length === 0) {
-      return {
-        success: false,
-        message: `Tidak ada soal/maqra aktif yang memenuhi kriteria Babak "${stageName}" dan Cabang "${branchName || 'Semua'}". Silakan tambahkan soal terlebih dahulu.`
-      };
+    // If predefined results are provided, commit them directly without re-randomizing!
+    if (predefinedResults && predefinedResults.length > 0) {
+      return commitLotteryDrawResults(predefinedResults, stageName);
     }
 
     const targetParticipants = participants.filter((p) =>
@@ -1348,6 +1457,25 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
+    // Validate per-participant eligibility and ensure sufficient active questions
+    for (const part of targetParticipants) {
+      const partEligibleQuestions = questions.filter((q) => {
+        if (q.tenantId !== currentTenantId || q.status !== 'Aktif') return false;
+        const matchesStage = !q.stageName || q.stageName === stageName || stageName === 'Semua Babak';
+        const matchesBranch = !branchName || branchName === 'Semua Cabang'
+          ? (!q.branchAndLevel || q.branchAndLevel.includes(part.branchName) || part.branchName.includes(q.branchAndLevel))
+          : q.branchAndLevel.includes(branchName);
+        return matchesStage && matchesBranch;
+      });
+
+      if (partEligibleQuestions.length < questionsPerParticipant) {
+        return {
+          success: false,
+          message: `Soal aktif tidak mencukupi untuk peserta ${part.name} (${part.branchName}). Dibutuhkan ${questionsPerParticipant} soal unik, namun hanya tersedia ${partEligibleQuestions.length} soal aktif.`
+        };
+      }
+    }
+
     const results: {
       participantId: string;
       participantName: string;
@@ -1355,10 +1483,39 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       questionTitles: string[];
     }[] = [];
 
-    targetParticipants.forEach((part) => {
-      const shuffled = [...eligibleQuestions].sort(() => Math.random() - 0.5);
-      const count = Math.min(questionsPerParticipant, shuffled.length);
-      const picked = shuffled.slice(0, count);
+    // Track assigned questions in this batch to prevent duplicates across participants if possible
+    const batchUsedQuestionIds = new Set<string>();
+
+    for (const part of targetParticipants) {
+      const partEligibleQuestions = questions.filter((q) => {
+        if (q.tenantId !== currentTenantId || q.status !== 'Aktif') return false;
+        const matchesStage = !q.stageName || q.stageName === stageName || stageName === 'Semua Babak';
+        const matchesBranch = !branchName || branchName === 'Semua Cabang'
+          ? (!q.branchAndLevel || q.branchAndLevel.includes(part.branchName) || part.branchName.includes(q.branchAndLevel))
+          : q.branchAndLevel.includes(branchName);
+        return matchesStage && matchesBranch;
+      });
+
+      // Filter questions not yet picked for this participant
+      const existingPartQIds = new Set(
+        (part.assignedQuestions || [])
+          .filter((aq) => !aq.stageName || aq.stageName === stageName)
+          .map((aq) => aq.questionId)
+      );
+
+      // Prioritize questions not yet used in this batch
+      let candidatePool = partEligibleQuestions.filter((q) => !existingPartQIds.has(q.id));
+      if (candidatePool.length < questionsPerParticipant) {
+        candidatePool = partEligibleQuestions;
+      }
+
+      const unusedInBatch = candidatePool.filter((q) => !batchUsedQuestionIds.has(q.id));
+      const pool = unusedInBatch.length >= questionsPerParticipant ? unusedInBatch : candidatePool;
+
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      const picked = shuffled.slice(0, questionsPerParticipant);
+
+      picked.forEach((q) => batchUsedQuestionIds.add(q.id));
 
       const pickedIds = picked.map((q) => q.id);
       const pickedTitles = picked.map((q) => q.title);
@@ -1373,7 +1530,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       picked.forEach((q) => {
         addQuestionToParticipant(part.id, q.id, stageName);
       });
-    });
+    }
 
     return {
       success: true,
@@ -1824,6 +1981,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateErrorCount,
         saveAnnotations,
         finalizeAssessment,
+        getJudgeAssessment,
         getParticipantProgress,
         getStageParticipation,
         addKafilah,
@@ -1836,6 +1994,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addQuestionToParticipant,
         removeQuestionFromParticipant,
         conductLotteryDraw,
+        commitLotteryDrawResults,
         updateCategoryDeduction,
         addErrorCategory,
         updateErrorCategory,
