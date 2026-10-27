@@ -7,7 +7,9 @@ import {
   StageParticipation,
   JudgeAssessment,
   JudgeAssignment,
-  AssignedMaqraItem
+  AssignedMaqraItem,
+  RubricVersion,
+  CompetitionRuleConfig
 } from '../types/mtq';
 
 /**
@@ -505,6 +507,284 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     '14. Pemetaan Bidang Independen: Kesalahan Fashahah tidak mengurangi bidang Tajwid',
     fashOnlyCalc.fieldScores['Fashahah'] === 27.0 && fashOnlyCalc.fieldScores['Tajwid'] === 30.0,
     `Fashahah: ${fashOnlyCalc.fieldScores['Fashahah']}, Tajwid: ${fashOnlyCalc.fieldScores['Tajwid']}`
+  );
+
+  // 15. Konfigurasi Dinamis: Admin mengubah batas skor maksimal bidang (Tajwid 40, Fashahah 20) tanpa merusak mesin
+  const customDynamicRubric: RubricVersion = {
+    id: 'rubric-custom-dynamic-1',
+    tenantId: 'tenant-test',
+    code: 'RUBRIC-CUSTOM-2026',
+    name: 'Rubrik Khusus Pengujian Dinamis',
+    branchCode: 'TLW-DWS',
+    branchName: 'Tilawah Dewasa Putra',
+    version: '1.0',
+    description: 'Rubrik dinamis dengan batas bidang kustom',
+    status: 'Aktif',
+    startingScore: 100,
+    fields: [
+      { id: 'f-tjw', code: 'TJW', name: 'Tajwid', maxScore: 40, minScore: 0, order: 1 },
+      { id: 'f-fsh', code: 'FSH', name: 'Fashahah', maxScore: 20, minScore: 0, order: 2 },
+      { id: 'f-lag', code: 'LAG', name: 'Lagu', maxScore: 25, minScore: 0, order: 3 },
+      { id: 'f-sua', code: 'SUA', name: 'Suara', maxScore: 15, minScore: 0, order: 4 }
+    ],
+    createdAt: new Date().toISOString()
+  };
+  const dynamicCategories: ErrorCategory[] = [
+    {
+      ...sampleCategories[0],
+      fieldId: 'f-tjw' // Pemetaan relasional eksplisit ke field Tajwid rubrik dinamis
+    }
+  ];
+  const dynamicCalc = calculateAssessmentScore(
+    { 'cat-mkh': 2 }, // 2 * 1.0 = 2 deduction on Tajwid
+    dynamicCategories,
+    customDynamicRubric
+  );
+  // Tajwid should be 40 - 2 = 38. Fashahah = 20, Lagu = 25, Suara = 15. Total = 38 + 20 + 25 + 15 = 98.
+  assert(
+    '15. Konfigurasi Dinamis Bidang: Perubahan maxScore bidang oleh admin dihitung akurat tanpa fallback hardcoded',
+    dynamicCalc.fieldScores['Tajwid'] === 38.0 && dynamicCalc.fieldScores['Fashahah'] === 20.0 && dynamicCalc.finalScore === 98.0,
+    `Tajwid: ${dynamicCalc.fieldScores['Tajwid']}, Fashahah: ${dynamicCalc.fieldScores['Fashahah']}, Final: ${dynamicCalc.finalScore}`
+  );
+
+  // 16. Integritas Relasional: Penolakan kategori tak terpetakan tanpa fallback diam-diam ke Tajwid
+  const unmappedCategory: ErrorCategory = {
+    id: 'cat-unknown-custom',
+    tenantId: 'tenant-test',
+    code: 'UNK',
+    name: 'Kesalahan Tanpa Bidang',
+    scope: 'Eksperimental',
+    defaultDeduction: 2.0,
+    methodType: 'Pengurangan tetap',
+    status: 'Aktif',
+    order: 99
+  };
+  const unmappedCalc = calculateAssessmentScore(
+    { 'cat-unknown-custom': 2 },
+    [unmappedCategory],
+    OFFICIAL_SENI_BACA_RUBRIC
+  );
+  assert(
+    '16. Eliminasi Fallback Diam-diam: Kategori tanpa pemetaan valid menghasilkan validation error dan tidak memotong Tajwid',
+    unmappedCalc.validationErrors.length > 0 && unmappedCalc.fieldScores['Tajwid'] === 30.0 && unmappedCalc.totalDeductions === 0,
+    `Errors: ${unmappedCalc.validationErrors.join('; ')}, Tajwid: ${unmappedCalc.fieldScores['Tajwid']}`
+  );
+
+  // 17. Konfigurasi Tie-Break Dinamis: Perubahan urutan kriteria tie-break (Lagu > Tajwid)
+  const tieBreakPartA: Participant = {
+    id: 'p-tb-a',
+    tenantId: 't-tb',
+    participantId: 'TLW-A',
+    lotteryNumber: '01',
+    name: 'Qari A (Lagu Unggul)',
+    gender: 'Putra',
+    kafilahId: 'k-1',
+    kafilahName: 'Kafilah 1',
+    branchName: 'Tilawah Dewasa Putra',
+    levelName: 'Ulya',
+    stageName: 'Penyisihan',
+    questionId: 'q-1',
+    assignedMaqra: 'Maqra 1',
+    pageNumber: 300,
+    status: 'Berlangsung'
+  };
+  const tieBreakPartB: Participant = {
+    id: 'p-tb-b',
+    tenantId: 't-tb',
+    participantId: 'TLW-B',
+    lotteryNumber: '02',
+    name: 'Qari B (Tajwid Unggul)',
+    gender: 'Putra',
+    kafilahId: 'k-2',
+    kafilahName: 'Kafilah 2',
+    branchName: 'Tilawah Dewasa Putra',
+    levelName: 'Ulya',
+    stageName: 'Penyisihan',
+    questionId: 'q-1',
+    assignedMaqra: 'Maqra 1',
+    pageNumber: 300,
+    status: 'Berlangsung'
+  };
+  const tieBreakParts: StageParticipation[] = [
+    {
+      id: 'sp-tb-a',
+      tenantId: 't-tb',
+      participantId: 'p-tb-a',
+      stageId: 'stg-1',
+      stageName: 'Penyisihan',
+      branchName: 'Tilawah Dewasa Putra',
+      lotteryNumber: '01',
+      questionId: 'q-1',
+      assignedMaqra: 'Maqra 1',
+      pageNumber: 300,
+      status: 'Lengkap'
+    },
+    {
+      id: 'sp-tb-b',
+      tenantId: 't-tb',
+      participantId: 'p-tb-b',
+      stageId: 'stg-1',
+      stageName: 'Penyisihan',
+      branchName: 'Tilawah Dewasa Putra',
+      lotteryNumber: '02',
+      questionId: 'q-1',
+      assignedMaqra: 'Maqra 1',
+      pageNumber: 300,
+      status: 'Lengkap'
+    }
+  ];
+  // Both have total = 90.0
+  // Part A: Tajwid = 25, Lagu = 25, Fashahah = 25, Suara = 15 -> Total = 90
+  // Part B: Tajwid = 28, Lagu = 22, Fashahah = 25, Suara = 15 -> Total = 90
+  const tieBreakAssessments: JudgeAssessment[] = [
+    {
+      id: 'as-tb-a',
+      tenantId: 't-tb',
+      judgeId: 'j-tb',
+      judgeName: 'Hakim TB',
+      judgeField: 'Tajwid',
+      participantId: 'p-tb-a',
+      stageParticipationId: 'sp-tb-a',
+      stageId: 'stg-1',
+      stageName: 'Penyisihan',
+      questionId: 'q-1',
+      fieldScores: { Tajwid: 25.0, Lagu: 25.0, Fashahah: 25.0, Suara: 15.0 },
+      finalScore: 90.0,
+      status: 'finalized',
+      errorCounts: {},
+      deductions: {},
+      totalDeductions: 10,
+      annotations: [],
+      lastUpdated: '10:00 WIB'
+    },
+    {
+      id: 'as-tb-b',
+      tenantId: 't-tb',
+      judgeId: 'j-tb',
+      judgeName: 'Hakim TB',
+      judgeField: 'Tajwid',
+      participantId: 'p-tb-b',
+      stageParticipationId: 'sp-tb-b',
+      stageId: 'stg-1',
+      stageName: 'Penyisihan',
+      questionId: 'q-1',
+      fieldScores: { Tajwid: 28.0, Lagu: 22.0, Fashahah: 25.0, Suara: 15.0 },
+      finalScore: 90.0,
+      status: 'finalized',
+      errorCounts: {},
+      deductions: {},
+      totalDeductions: 10,
+      annotations: [],
+      lastUpdated: '10:00 WIB'
+    }
+  ];
+  const customLaguFirstConfig: CompetitionRuleConfig[] = [
+    {
+      id: 'cfg-lagu-first',
+      tenantId: 't-tb',
+      branchName: 'Tilawah Dewasa Putra',
+      rubricVersionId: 'rubric-seni-baca-2025',
+      tieBreakOrder: ['total', 'Lagu', 'Tajwid', 'Fashahah'],
+      quotaPerStage: { 'Penyisihan': 1 }
+    }
+  ];
+  const laguFirstEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: tieBreakAssessments,
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1,
+    customRuleConfigs: customLaguFirstConfig
+  });
+  const rank1Custom = laguFirstEval.evaluatedParticipants.find((p) => p.rank === 1);
+  assert(
+    '17. Tie-Break Dinamis: Perubahan urutan kriteria ke Lagu > Tajwid menempatkan Qari A di peringkat 1',
+    Boolean(rank1Custom && rank1Custom.participant.id === 'p-tb-a' && rank1Custom.tieBreakResolvedBy?.includes('Lagu')),
+    `Rank 1: ${rank1Custom?.participant.name}, Resolved by: ${rank1Custom?.tieBreakResolvedBy}`
+  );
+
+  // 18. Pemblokiran Finalisasi Seri: Nilai identik total & semua bidang memblokir finalisasi otomatis
+  const identicalAssessments: JudgeAssessment[] = [
+    {
+      id: 'as-id-1',
+      tenantId: 't-tb',
+      judgeId: 'j-tb',
+      judgeName: 'Hakim TB',
+      judgeField: 'Tajwid',
+      participantId: 'p-tb-a',
+      stageParticipationId: 'sp-tb-a',
+      stageId: 'stg-1',
+      stageName: 'Penyisihan',
+      questionId: 'q-1',
+      fieldScores: { Tajwid: 25.0, Lagu: 25.0, Fashahah: 25.0, Suara: 15.0 },
+      finalScore: 90.0,
+      status: 'finalized',
+      errorCounts: {},
+      deductions: {},
+      totalDeductions: 10,
+      annotations: [],
+      lastUpdated: '10:00 WIB'
+    },
+    {
+      id: 'as-id-2',
+      tenantId: 't-tb',
+      judgeId: 'j-tb',
+      judgeName: 'Hakim TB',
+      judgeField: 'Tajwid',
+      participantId: 'p-tb-b',
+      stageParticipationId: 'sp-tb-b',
+      stageId: 'stg-1',
+      stageName: 'Penyisihan',
+      questionId: 'q-1',
+      fieldScores: { Tajwid: 25.0, Lagu: 25.0, Fashahah: 25.0, Suara: 15.0 },
+      finalScore: 90.0,
+      status: 'finalized',
+      errorCounts: {},
+      deductions: {},
+      totalDeductions: 10,
+      annotations: [],
+      lastUpdated: '10:00 WIB'
+    }
+  ];
+  const blockedEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: identicalAssessments,
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1
+  });
+  assert(
+    '18. Proteksi Seri Identik: Finalisasi diblokir otomatis jika terjadi seri pada batas kuota atau podium',
+    Boolean(blockedEval.canFinalize === false && blockedEval.boundaryTie === true && typeof blockedEval.blockingReason === 'string'),
+    `canFinalize: ${blockedEval.canFinalize}, boundaryTie: ${blockedEval.boundaryTie}, reason: ${blockedEval.blockingReason}`
+  );
+
+  // 19. Imutabilitas Snapshot: Snapshot hasil babak membekukan versi rubrik dan hasil resmi
+  const historicalSnapshot = RankingService.createStageResultSnapshot({
+    tenantId: 't-tb',
+    stageId: 'stg-1',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    quota: 1,
+    finalizedBy: 'Ketua Dewan Hakim',
+    evaluatedParticipants: laguFirstEval.evaluatedParticipants,
+    customRuleConfigs: customLaguFirstConfig
+  });
+  assert(
+    '19. Imutabilitas Snapshot Historis: Snapshot membekukan versi rubrik dan aturan tie-break yang dipakai saat finalisasi',
+    historicalSnapshot.rubricVersionId === 'rubric-seni-baca-2025' &&
+    historicalSnapshot.tieBreakRuleUsed.includes('Lagu ➔ Tajwid') &&
+    historicalSnapshot.rankings.length === 2 &&
+    historicalSnapshot.rankings[0].participantId === 'p-tb-a',
+    `Snapshot rubric: ${historicalSnapshot.rubricVersionId}, tieBreakRule: ${historicalSnapshot.tieBreakRuleUsed}, Rank 1: ${historicalSnapshot.rankings[0]?.participantName}`
   );
 
   return { passed, failed, results };

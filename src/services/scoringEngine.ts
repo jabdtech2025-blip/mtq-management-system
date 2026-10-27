@@ -18,26 +18,59 @@ export interface ScoreCalculationResult {
 }
 
 /**
- * Normalisasi pemetaan kategori error aplikasi ke bidang rubrik standar.
+ * Resolusi pemetaan kategori error ke bidang rubrik aktif secara relasional.
+ * Prioritas:
+ * 1. Relasi eksplisit ID bidang (category.fieldId === rubricField.id)
+ * 2. Pencocokan kode bidang (category.code === rubricField.code atau field code termaktub)
+ * 3. Pencocokan nama bidang persis
+ * 
+ * HAPUS FALLBACK KE TAJWID: Kategori yang tidak terpetakan mengembalikan null
+ * dan menghasilkan validation error agar administrator segera memperbaikinya di UI.
  */
-function mapCategoryToFieldName(category: ErrorCategory): string {
-  const name = (category.name || '').toLowerCase();
-  const scope = (category.scope || '').toLowerCase();
-  const code = (category.code || '').toLowerCase();
+export function resolveCategoryField(category: ErrorCategory, rubric: RubricVersion): string | null {
+  // 1. Relasi ID eksplisit
+  if (category.fieldId) {
+    const matchedField = rubric.fields.find((f) => f.id === category.fieldId);
+    if (matchedField) return matchedField.name;
+  }
 
-  if (name.includes('tajwid') || name.includes('makharij') || name.includes('idgham') || scope.includes('tajwid') || code === 'mkh' || code === 'idg' || code === 'tjw') {
-    return 'Tajwid';
+  // 2. Pencocokan kode bidang
+  const catCode = (category.code || '').trim().toLowerCase();
+  const matchedByCode = rubric.fields.find(
+    (f) => f.code.trim().toLowerCase() === catCode || f.id.toLowerCase().includes(catCode)
+  );
+  if (matchedByCode) return matchedByCode.name;
+
+  // 3. Pencocokan nama bidang persis
+  const catName = (category.name || '').trim().toLowerCase();
+  const matchedByName = rubric.fields.find(
+    (f) => f.name.trim().toLowerCase() === catName
+  );
+  if (matchedByName) return matchedByName.name;
+
+  // 4. Kompatibilitas cerdas untuk rubrik standar Seni Baca bila fieldId belum diset
+  if (rubric.code === 'RUBRIC-SENI-BACA-2025' || rubric.id === 'rubric-seni-baca-2025') {
+    const scope = (category.scope || '').toLowerCase();
+    if (catName.includes('tajwid') || catName.includes('makharij') || catName.includes('idgham') || scope.includes('tajwid') || catCode === 'mkh' || catCode === 'idg' || catCode === 'tjw') {
+      const f = rubric.fields.find((rf) => rf.name === 'Tajwid');
+      if (f) return f.name;
+    }
+    if (catName.includes('fasahah') || catName.includes('waqf') || catName.includes('ibtida') || scope.includes('fasahah') || catCode === 'fsh') {
+      const f = rubric.fields.find((rf) => rf.name === 'Fashahah');
+      if (f) return f.name;
+    }
+    if (catName.includes('lagu') || catName.includes('irama') || catName.includes('maqam') || scope.includes('lagu') || catCode === 'lag') {
+      const f = rubric.fields.find((rf) => rf.name === 'Lagu');
+      if (f) return f.name;
+    }
+    if (catName.includes('suara') || catName.includes('vokal') || scope.includes('suara') || catCode === 'sua') {
+      const f = rubric.fields.find((rf) => rf.name === 'Suara');
+      if (f) return f.name;
+    }
   }
-  if (name.includes('fasahah') || name.includes('waqf') || name.includes('ibtida') || scope.includes('fasahah') || code === 'fsh') {
-    return 'Fashahah';
-  }
-  if (name.includes('lagu') || name.includes('irama') || name.includes('maqam') || scope.includes('lagu') || code === 'lag') {
-    return 'Lagu';
-  }
-  if (name.includes('suara') || name.includes('vokal') || scope.includes('suara') || code === 'sua') {
-    return 'Suara';
-  }
-  return 'Tajwid'; // Default fallback
+
+  // JANGAN PERNAH FALLBACK KE TAJWID! Return null jika tidak dapat dipetakan secara sah.
+  return null;
 }
 
 /**
@@ -46,9 +79,10 @@ function mapCategoryToFieldName(category: ErrorCategory): string {
  * Satu-satunya sumber perhitungan nilai di seluruh aplikasi.
  * Menjamin:
  * 1. Filter kategori aktif (kategori non-aktif diabaikan).
- * 2. Nilai dipisahkan per bidang rubrik (Tajwid maks 30, Fashahah maks 30, Lagu maks 25, Suara maks 15).
- * 3. Nilai tiap bidang tidak bisa melebihi batas maksimum atau bernilai negatif.
+ * 2. Pemetaan relasional ke bidang rubrik yang aktif (tidak ada fallback sembarangan).
+ * 3. Nilai dipisahkan per bidang rubrik dinamis (minScore <= score <= maxScore).
  * 4. Pembulatan standar 2 tempat desimal untuk akurasi MTQ.
+ * 5. Pengembalian validasi error eksplisit bila ada kategori yang tidak terpetakan.
  */
 export function calculateAssessmentScore(
   errorCounts: Record<string, number>,
@@ -61,7 +95,7 @@ export function calculateAssessmentScore(
   const fieldDeductions: Record<string, number> = {};
   const fieldScores: Record<string, number> = {};
 
-  // Inisialisasi bidang dari rubrik
+  // Inisialisasi seluruh bidang dari rubrik aktif
   rubric.fields.forEach((field) => {
     fieldDeductions[field.name] = 0;
     fieldScores[field.name] = field.maxScore;
@@ -82,12 +116,24 @@ export function calculateAssessmentScore(
     const deductionAmount = Number((count * cat.defaultDeduction).toFixed(2));
     deductions[cat.id] = deductionAmount;
 
-    // Petakan ke bidang rubrik
-    const fieldName = mapCategoryToFieldName(cat);
+    // Petakan secara relasional ke bidang rubrik
+    const fieldName = resolveCategoryField(cat, rubric);
+
+    if (!fieldName) {
+      // P0: Kategori tanpa pemetaan valid DILARANG dialihkan ke Tajwid.
+      validationErrors.push(
+        `Kategori "${cat.name}" (${cat.code}) belum dipetakan ke bidang rubrik yang valid pada rubrik "${rubric.name}". Pemetaan wajib diperbaiki oleh Admin sebelum finalisasi.`
+      );
+      return;
+    }
+
+    if (fieldDeductions[fieldName] === undefined) {
+      fieldDeductions[fieldName] = 0;
+    }
     fieldDeductions[fieldName] = Number(((fieldDeductions[fieldName] || 0) + deductionAmount).toFixed(2));
   });
 
-  // Hitung nilai per bidang dengan batas minScore dan maxScore
+  // Hitung nilai per bidang dengan batas minScore dan maxScore dinamis
   let totalCalculatedScore = 0;
   let totalDeductions = 0;
 

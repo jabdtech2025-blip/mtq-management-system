@@ -150,6 +150,7 @@ export interface ErrorCategory {
   code: string; // "MKH", "IDG", "FSH", "TJW", "LAG"
   name: string;
   scope: string;
+  fieldId?: string; // Explicit relational link to RubricField.id (P0 Dynamic Rubric)
   defaultDeduction: number; // e.g. 0.50, 1.00
   methodType: 'Pengurangan tetap' | 'Pengurangan berbobot';
   status: 'Aktif' | 'Nonaktif';
@@ -192,7 +193,7 @@ export interface RubricCriterion {
 export interface RubricField {
   id: string;
   code: string; // e.g. "TJW", "FSH", "LAG", "SUA"
-  name: string; // e.g. "Bidang Tajwid", "Bidang Fashahah", "Bidang Lagu", "Bidang Suara"
+  name: string; // e.g. "Tajwid", "Fashahah", "Lagu", "Suara"
   maxScore: number; // e.g. 30, 30, 25, 15
   minScore: number; // e.g. 0
   weight?: number;
@@ -211,7 +212,7 @@ export interface RubricVersion {
   version: string; // e.g. "2025.1"
   description: string;
   officialSource?: string; // e.g. "Buku Pedoman MTQ 2025 LPTQ hal. 42-45"
-  status: 'Aktif' | 'Arsip';
+  status: 'Draft' | 'Validasi' | 'Aktif' | 'Arsip';
   startingScore: number; // e.g. 100
   fields: RubricField[];
   createdAt: string;
@@ -222,12 +223,15 @@ export interface CompetitionRuleConfig {
   tenantId: string;
   branchName: string;
   branchCode?: string;
+  branchId?: string;
   rubricVersionId: string;
   tieBreakOrder: string[]; // e.g. ['total', 'Tajwid', 'Lagu', 'Fashahah']
   quotaPerStage: Record<string, number>; // e.g. { 'Penyisihan': 3, 'Final': 3 }
+  qualificationMethod?: 'top_n' | 'manual';
   maqraTiming?: string; // e.g. 'sebelum_mimbar', '1_jam_sebelum'
   officialSource?: string;
   isVerifiedOfficial?: boolean;
+  status?: 'Draft' | 'Aktif' | 'Arsip';
 }
 
 export interface JudgeAssignment {

@@ -247,14 +247,81 @@ export const DEFAULT_COMPETITION_RULES: Record<string, CompetitionRuleConfig> = 
   }
 };
 
+export const OFFICIAL_TAHFIZH_RUBRIC: RubricVersion = {
+  id: 'rubric-tahfizh-default',
+  tenantId: 'system',
+  code: 'RUBRIC-TAHFIZH-2025',
+  name: "Rubrik Resmi Tahfizh Al-Qur'an (Pedoman MTQ 2025)",
+  branchCode: 'THF',
+  branchName: 'Tahfizh',
+  version: '2025.1',
+  description: 'Rubrik resmi untuk Cabang Hifzhil Qur’an (1 Juz, 5 Juz, 10 Juz, 20 Juz, 30 Juz).',
+  officialSource: 'Buku Pedoman Musabaqah 2025 (Ketentuan Khusus Tahfizh)',
+  status: 'Aktif',
+  startingScore: 100,
+  createdAt: '2025-04-25T00:00:00Z',
+  fields: [
+    {
+      id: 'field-thf-lancar',
+      code: 'THF',
+      name: 'Tahfizh',
+      maxScore: 50,
+      minScore: 0,
+      order: 1,
+      description: 'Kelancaran hafalan, tawaqquf, tarkul ayat, terbalik ayat, dan pengulangan.'
+    },
+    {
+      id: 'field-thf-tjw',
+      code: 'TJW',
+      name: 'Tajwid',
+      maxScore: 25,
+      minScore: 0,
+      order: 2,
+      description: 'Makharijul huruf, shifatul huruf, ahkamul mad wal waqf.'
+    },
+    {
+      id: 'field-thf-fsh',
+      code: 'FSH',
+      name: 'Fashahah',
+      maxScore: 25,
+      minScore: 0,
+      order: 3,
+      description: 'Fashahah kalimah, waqaf dan ibtida, suara dan adab.'
+    }
+  ]
+};
+
+export const INITIAL_RUBRIC_VERSIONS: RubricVersion[] = [
+  OFFICIAL_SENI_BACA_RUBRIC,
+  OFFICIAL_TAHFIZH_RUBRIC
+];
+
 /**
- * Mencari konfigurasi aturan kompetisi berdasarkan nama cabang.
- * Memberikan fallback yang aman dan terdokumentasi jika cabang belum terverifikasi secara khusus.
+ * Mencari konfigurasi aturan kompetisi berdasarkan nama cabang dan tenant.
+ * Prioritas:
+ * 1. Konfigurasi dinamis tenant dari database / state admin (customConfigs)
+ * 2. Pencocokan langsung kode / nama cabang di DEFAULT_COMPETITION_RULES
+ * 3. Fallback aman dan transparan bertanda unverified jika belum dikonfigurasi admin
  */
-export function getBranchRuleConfig(branchName: string, tenantId?: string): CompetitionRuleConfig {
+export function getBranchRuleConfig(
+  branchName: string,
+  tenantId?: string,
+  customConfigs?: CompetitionRuleConfig[]
+): CompetitionRuleConfig {
+  // 1. Periksa konfigurasi dinamis yang dikelola oleh Administrator
+  if (customConfigs && customConfigs.length > 0) {
+    const directMatch = customConfigs.find(
+      (c) =>
+        (!tenantId || c.tenantId === tenantId || c.tenantId === 'system') &&
+        (c.branchName.toLowerCase() === branchName.toLowerCase() ||
+          branchName.toLowerCase().startsWith(c.branchName.toLowerCase()))
+    );
+    if (directMatch) return directMatch;
+  }
+
   const normalized = branchName.toLowerCase();
 
-  // Prioritaskan Tahfizh/Hifzh terlebih dahulu karena terdapat cabang gabungan seperti "Tahfizh 5 Juz dan Tilawah"
+  // 2. Pencocokan ke template standar
   if (normalized.includes('tahfizh') || normalized.includes('hifzh') || normalized.includes('juz')) {
     return {
       ...DEFAULT_COMPETITION_RULES['Tahfizh'],
@@ -279,13 +346,13 @@ export function getBranchRuleConfig(branchName: string, tenantId?: string): Comp
     };
   }
 
-  // Fallback konfigurasi transparan untuk cabang lain (Khat, KTIQ, Syarhil)
+  // 3. Fallback konfigurasi transparan untuk cabang lain (Khat, KTIQ, Syarhil)
   return {
     id: `rule-cfg-${branchName.replace(/\s+/g, '-').toLowerCase()}`,
     tenantId: tenantId || 'system',
     branchName,
     branchCode: 'GEN',
-    rubricVersionId: 'rubric-general-default',
+    rubricVersionId: 'rubric-seni-baca-2025',
     tieBreakOrder: ['total', 'Tajwid', 'Fashahah'],
     quotaPerStage: {
       'Penyisihan': 3,

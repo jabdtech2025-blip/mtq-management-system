@@ -26,6 +26,7 @@ export const HasilKelulusanView: React.FC = () => {
     assessments,
     stages,
     judgeAssignments,
+    competitionRules,
     users,
     getParticipantProgress,
     getParticipantStageQuestions,
@@ -79,7 +80,9 @@ export const HasilKelulusanView: React.FC = () => {
     incompleteCount,
     podiumTies,
     boundaryTie: hasBoundaryTie,
-    unresolvedTiesCount
+    unresolvedTiesCount,
+    canFinalize,
+    blockingReason
   } = useMemo(() => {
     return RankingService.evaluateStageParticipants({
       tenantId: currentTenant.id,
@@ -92,7 +95,8 @@ export const HasilKelulusanView: React.FC = () => {
       stageQuestionsGetter: getParticipantStageQuestions,
       quota,
       manualOverrides,
-      overrideReasons
+      overrideReasons,
+      customRuleConfigs: competitionRules
     });
   }, [
     currentTenant.id,
@@ -105,7 +109,8 @@ export const HasilKelulusanView: React.FC = () => {
     getParticipantStageQuestions,
     quota,
     manualOverrides,
-    overrideReasons
+    overrideReasons,
+    competitionRules
   ]);
 
   const incompleteParticipants = useMemo(() => {
@@ -457,18 +462,32 @@ export const HasilKelulusanView: React.FC = () => {
                   Belum dapat disahkan ({incompleteParticipants.length} peserta belum lengkap)
                 </span>
               </div>
-            ) : hasBoundaryTie ? (
+            ) : !canFinalize ? (
               <div className="flex flex-col items-end gap-1">
                 <button
                   disabled
                   className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
-                  title="Ada nilai kembar pada batas kuota Top-N"
+                  title={blockingReason || 'Belum memenuhi syarat pengesahan'}
                 >
                   <Lock className="w-4 h-4" />
                   <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
                 </button>
-                <span className="text-[10px] text-rose-700 font-medium">
-                  Selesaikan nilai seri di batas Top-{quota} terlebih dahulu
+                <span className="text-[10px] text-rose-700 font-medium max-w-[280px] text-right">
+                  {blockingReason || 'Selesaikan nilai seri atau kelengkapan juri terlebih dahulu'}
+                </span>
+              </div>
+            ) : selectedBranch === 'Semua Cabang' && branchOptions.length > 2 ? (
+              <div className="flex flex-col items-end gap-1">
+                <button
+                  disabled
+                  className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
+                  title="Pilih cabang spesifik sebelum finalisasi"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
+                </button>
+                <span className="text-[10px] text-amber-700 font-medium">
+                  Pilih cabang spesifik pada dropdown sebelum pengesahan
                 </span>
               </div>
             ) : (

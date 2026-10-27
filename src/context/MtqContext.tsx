@@ -16,7 +16,9 @@ import {
   ParticipantProgressStatus,
   GenericMasterItem,
   AssignedMaqraItem,
-  StageResultSnapshot
+  StageResultSnapshot,
+  RubricVersion,
+  CompetitionRuleConfig
 } from '../types/mtq';
 import {
   INITIAL_TENANTS,
@@ -37,7 +39,12 @@ import {
 } from '../data/mockData';
 import { calculateAssessmentScore } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
-import { OFFICIAL_SENI_BACA_RUBRIC } from '../services/competitionRules';
+import {
+  OFFICIAL_SENI_BACA_RUBRIC,
+  INITIAL_RUBRIC_VERSIONS,
+  DEFAULT_COMPETITION_RULES,
+  getBranchRuleConfig
+} from '../services/competitionRules';
 
 export type ViewType =
   // Admin MTQ
@@ -91,6 +98,18 @@ interface MtqContextType {
   addCabang: (item: Omit<GenericMasterItem, 'id' | 'tenantId'>) => void;
   updateCabang: (id: string, updated: Partial<GenericMasterItem>) => void;
   deleteCabang: (id: string) => { success: boolean; message: string; activeCount?: number };
+
+  // Dynamic Competition Rules & Rubric Versions (P0)
+  rubricVersions: RubricVersion[];
+  competitionRules: CompetitionRuleConfig[];
+  addRubricVersion: (rubric: Omit<RubricVersion, 'id' | 'tenantId' | 'createdAt'>) => void;
+  updateRubricVersion: (id: string, updated: Partial<RubricVersion>) => void;
+  activateRubricVersion: (id: string) => { success: boolean; message: string };
+  archiveRubricVersion: (id: string) => void;
+  addCompetitionRule: (rule: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => void;
+  updateCompetitionRule: (id: string, updated: Partial<CompetitionRuleConfig>) => void;
+  getActiveRubricForBranch: (branchName: string) => RubricVersion;
+  getBranchRuleConfigByBranch: (branchName: string) => CompetitionRuleConfig;
 
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
@@ -490,6 +509,34 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  // Dynamic Competition Rules & Rubric Versions (P0)
+  const [rubricVersions, setRubricVersions] = useState<RubricVersion[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'rubric_versions');
+      return saved ? JSON.parse(saved) : INITIAL_RUBRIC_VERSIONS;
+    } catch {
+      return INITIAL_RUBRIC_VERSIONS;
+    }
+  });
+
+  const [competitionRules, setCompetitionRules] = useState<CompetitionRuleConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'competition_rules');
+      if (saved) return JSON.parse(saved);
+      return Object.values(DEFAULT_COMPETITION_RULES).map((r) => ({
+        ...r,
+        tenantId: 'tenant-jabar',
+        status: 'Aktif' as const
+      }));
+    } catch {
+      return Object.values(DEFAULT_COMPETITION_RULES).map((r) => ({
+        ...r,
+        tenantId: 'tenant-jabar',
+        status: 'Aktif' as const
+      }));
+    }
+  });
+
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const toggleSidebar = () => setIsSidebarOpen((prev) => !prev);
@@ -613,6 +660,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(STORAGE_PREFIX + 'stage_snapshots', JSON.stringify(stageSnapshots));
     } catch {}
   }, [stageSnapshots]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + 'rubric_versions', JSON.stringify(rubricVersions));
+    } catch (e) {
+      console.warn('Storage error: rubric_versions', e);
+    }
+  }, [rubricVersions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + 'competition_rules', JSON.stringify(competitionRules));
+    } catch (e) {
+      console.warn('Storage error: competition_rules', e);
+    }
+  }, [competitionRules]);
 
   const currentTenant = tenants.find((t) => t.id === currentTenantId) || tenants[0];
   const currentUser = users.find((u) => u.id === currentUserId) || users[0];
@@ -840,6 +903,84 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'Belum Dimulai';
   };
 
+  // Dynamic Rubric & Competition Rule Resolvers (P0 Dynamic Architecture)
+  const getBranchRuleConfigByBranch = (branchName: string): CompetitionRuleConfig => {
+    return getBranchRuleConfig(branchName, currentTenantId, competitionRules);
+  };
+
+  const getActiveRubricForBranch = (branchName: string): RubricVersion => {
+    const ruleCfg = getBranchRuleConfigByBranch(branchName);
+    const matched = rubricVersions.find(
+      (r) => r.id === ruleCfg.rubricVersionId && (r.status === 'Aktif' || !r.status)
+    );
+    if (matched) return matched;
+    const fallbackActive =
+      rubricVersions.find((r) => r.status === 'Aktif') ||
+      rubricVersions[0] ||
+      OFFICIAL_SENI_BACA_RUBRIC;
+    return fallbackActive;
+  };
+
+  const addRubricVersion = (rubricData: Omit<RubricVersion, 'id' | 'tenantId' | 'createdAt'>) => {
+    const newRubric: RubricVersion = {
+      ...rubricData,
+      id: 'rubric-' + Date.now(),
+      tenantId: currentTenantId,
+      createdAt: new Date().toISOString()
+    };
+    setRubricVersions((prev) => [...prev, newRubric]);
+  };
+
+  const updateRubricVersion = (id: string, updated: Partial<RubricVersion>) => {
+    setRubricVersions((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, ...updated } : r))
+    );
+  };
+
+  const activateRubricVersion = (id: string): { success: boolean; message: string } => {
+    const target = rubricVersions.find((r) => r.id === id);
+    if (!target) return { success: false, message: 'Rubrik tidak ditemukan.' };
+
+    const totalMax = target.fields.reduce((sum, f) => sum + Number(f.maxScore || 0), 0);
+    if (totalMax <= 0) {
+      return { success: false, message: 'Rubrik harus memiliki minimal 1 bidang dengan batas skor valid.' };
+    }
+
+    setRubricVersions((prev) =>
+      prev.map((r) => {
+        if (r.id === id) {
+          return { ...r, status: 'Aktif' as const };
+        }
+        if (r.branchCode === target.branchCode && r.status === 'Aktif') {
+          return { ...r, status: 'Arsip' as const };
+        }
+        return r;
+      })
+    );
+    return { success: true, message: `Versi rubrik "${target.name}" (${target.version}) berhasil diaktifkan.` };
+  };
+
+  const archiveRubricVersion = (id: string) => {
+    setRubricVersions((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, status: 'Arsip' as const } : r))
+    );
+  };
+
+  const addCompetitionRule = (ruleData: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => {
+    const newRule: CompetitionRuleConfig = {
+      ...ruleData,
+      id: 'rule-' + Date.now(),
+      tenantId: currentTenantId
+    };
+    setCompetitionRules((prev) => [...prev, newRule]);
+  };
+
+  const updateCompetitionRule = (id: string, updated: Partial<CompetitionRuleConfig>) => {
+    setCompetitionRules((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, ...updated } : r))
+    );
+  };
+
   /**
    * Update error count with centralized calculation helper and strict read-only lock for finalized
    * Identity: participantId + judgeId + targetStage + targetQuestionId
@@ -920,11 +1061,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newCount = Math.max(0, oldCount + delta);
     currentCounts[categoryId] = newCount;
 
+    // Resolusi rubrik aktif dinamis sesuai cabang lomba peserta (P0)
+    const activeRubric = getActiveRubricForBranch(part.branchName);
     const scoreResult = calculateAssessmentScore(
       currentCounts,
       errorCategories,
-      OFFICIAL_SENI_BACA_RUBRIC,
-      100.0
+      activeRubric,
+      activeRubric.startingScore
     );
 
     const updatedAssessment: JudgeAssessment = existing
@@ -940,8 +1083,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           fieldDeductions: scoreResult.fieldDeductions,
           totalDeductions: scoreResult.totalDeductions,
           finalScore: scoreResult.finalScore,
-          rubricVersion: OFFICIAL_SENI_BACA_RUBRIC.code,
-          rubricVersionId: scoreResult.rubricVersionId,
+          rubricVersion: activeRubric.code,
+          rubricVersionId: activeRubric.id,
           status: 'in_progress',
           lastUpdated: nowTime
         }
@@ -963,8 +1106,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           fieldDeductions: scoreResult.fieldDeductions,
           totalDeductions: scoreResult.totalDeductions,
           finalScore: scoreResult.finalScore,
-          rubricVersion: OFFICIAL_SENI_BACA_RUBRIC.code,
-          rubricVersionId: scoreResult.rubricVersionId,
+          rubricVersion: activeRubric.code,
+          rubricVersionId: activeRubric.id,
           annotations: [],
           lastUpdated: nowTime
         };
@@ -1181,13 +1324,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         a.questionId === targetQuestionId
     );
 
+    const activeRubric = getActiveRubricForBranch(part.branchName);
     const currentCounts = existing ? existing.errorCounts : {};
     const scoreResult = calculateAssessmentScore(
       currentCounts,
       errorCategories,
-      OFFICIAL_SENI_BACA_RUBRIC,
-      100.0
+      activeRubric,
+      activeRubric.startingScore
     );
+
+    if (scoreResult.validationErrors.length > 0) {
+      console.warn('Finalisasi lembar penilaian diblokir karena validasi rubrik gagal:', scoreResult.validationErrors);
+      return;
+    }
+
     const finalizedScore = scoreResult.finalScore;
 
     let updatedAssessments: JudgeAssessment[];
@@ -1203,8 +1353,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               fieldDeductions: scoreResult.fieldDeductions,
               totalDeductions: scoreResult.totalDeductions,
               finalScore: scoreResult.finalScore,
-              rubricVersion: OFFICIAL_SENI_BACA_RUBRIC.code,
-              rubricVersionId: scoreResult.rubricVersionId,
+              rubricVersion: activeRubric.code,
+              rubricVersionId: activeRubric.id,
               finalizedAt: nowTime,
               lastUpdated: nowTime
             }
@@ -1230,8 +1380,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fieldDeductions: scoreResult.fieldDeductions,
         totalDeductions: 0,
         finalScore: scoreResult.finalScore,
-        rubricVersion: OFFICIAL_SENI_BACA_RUBRIC.code,
-        rubricVersionId: scoreResult.rubricVersionId,
+        rubricVersion: activeRubric.code,
+        rubricVersionId: activeRubric.id,
         annotations: [],
         lastUpdated: nowTime,
         finalizedAt: nowTime
@@ -1307,11 +1457,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    if (allFinalized) {
+    // P0: Penyelesaian penilaian babak tidak mengubah status kompetisi peserta menjadi 'Final'
+    // Status 'Final' hanya diberikan setelah pengesahan kejuaraan babak akhir (advanceQualifiers)
+    if (part.status === 'Menunggu') {
       setParticipants((prev) =>
         prev.map((p) =>
           p.id === participantId && p.tenantId === currentTenantId
-            ? { ...p, status: 'Final' }
+            ? { ...p, status: 'Berlangsung' }
             : p
         )
       );
@@ -2445,8 +2597,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stageQuestionsGetter: getParticipantStageQuestions,
       quota: currentStg.qualificationQuota,
       manualOverrides: manualOverridesMap,
-      overrideReasons
+      overrideReasons,
+      customRuleConfigs: competitionRules
     });
+
+    // P0: Validasi integritas dan pencegahan finalisasi jika ada nilai seri tak terpecahkan
+    if (!evalResult.canFinalize) {
+      return {
+        success: false,
+        message: `Finalisasi Babak Ditolak: ${evalResult.blockingReason || 'Terdapat kondisi kompetisi yang belum memenuhi syarat pengesahan.'}`
+      };
+    }
 
     const scoreMap: Record<string, { score: number; rank: number; tieBreakResolvedBy?: string }> = {};
     evalResult.evaluatedParticipants.forEach((item) => {
@@ -2465,7 +2626,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       branchName: currentStg.branchName || 'Cabang Terpadu',
       quota: currentStg.qualificationQuota,
       finalizedBy: `${currentUser.name} (${currentUser.role})`,
-      evaluatedParticipants: evalResult.evaluatedParticipants
+      evaluatedParticipants: evalResult.evaluatedParticipants,
+      customRuleConfigs: competitionRules
     });
     setStageSnapshots((prev) => [...prev.filter((s) => s.id !== stageSnapshot.id), stageSnapshot]);
 
@@ -2790,6 +2952,16 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addCabang,
         updateCabang,
         deleteCabang,
+        rubricVersions: rubricVersions.filter((r) => r.tenantId === currentTenantId || r.tenantId === 'system'),
+        competitionRules: competitionRules.filter((r) => r.tenantId === currentTenantId || r.tenantId === 'system'),
+        addRubricVersion,
+        updateRubricVersion,
+        activateRubricVersion,
+        archiveRubricVersion,
+        addCompetitionRule,
+        updateCompetitionRule,
+        getActiveRubricForBranch,
+        getBranchRuleConfigByBranch,
         currentView,
         setCurrentView,
         isSidebarOpen,

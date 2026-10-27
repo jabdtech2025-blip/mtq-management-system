@@ -5,7 +5,8 @@ import {
   JudgeAssignment,
   ParticipantRankingItem,
   StageResultSnapshot,
-  AssignedMaqraItem
+  AssignedMaqraItem,
+  CompetitionRuleConfig
 } from '../types/mtq';
 import { getBranchRuleConfig } from './competitionRules';
 import { aggregateParticipantScores } from './scoringEngine';
@@ -27,6 +28,7 @@ export interface EvaluatedParticipantStage {
   overrideReason: string;
   tieBreakResolvedBy?: string;
   hasUnresolvedTieWithNext?: boolean;
+  hasUnresolvedTie?: boolean;
 }
 
 /**
@@ -34,9 +36,10 @@ export interface EvaluatedParticipantStage {
  * 
  * Menjamin:
  * 1. Isolasi Cabang: Peserta antar-cabang tidak pernah dicampur dalam ranking.
- * 2. Penegakan Tie-Break Resmi: Mengikuti aturan per cabang (contoh Seni Baca: Total -> Tajwid -> Lagu -> Fashahah).
+ * 2. Penegakan Tie-Break Resmi & Dinamis: Berasal dari konfigurasi aktif per cabang.
  * 3. Deteksi Nilai Seri Menyeluruh: Memeriksa podium Juara 1, 2, 3 serta batas kuota kelulusan.
  * 4. Konsistensi Pengesahan: Perhitungan di UI preview dan penyimpanan snapshot identik 100%.
+ * 5. Pemblokiran Finalisasi Seri: Jika semua kriteria sama persis, wajib sidang pleno dewan hakim.
  */
 export class RankingService {
   /**
@@ -54,6 +57,7 @@ export class RankingService {
     quota: number;
     manualOverrides?: Record<string, boolean>;
     overrideReasons?: Record<string, string>;
+    customRuleConfigs?: CompetitionRuleConfig[];
   }): {
     evaluatedParticipants: EvaluatedParticipantStage[];
     allFinalized: boolean;
@@ -61,6 +65,8 @@ export class RankingService {
     podiumTies: Array<{ rank: number; participantIds: string[]; score: number }>;
     boundaryTie: boolean;
     unresolvedTiesCount: number;
+    canFinalize: boolean;
+    blockingReason?: string;
   } {
     const {
       tenantId,
@@ -73,7 +79,8 @@ export class RankingService {
       stageQuestionsGetter,
       quota,
       manualOverrides = {},
-      overrideReasons = {}
+      overrideReasons = {},
+      customRuleConfigs
     } = params;
 
     // 1. Filter partisipasi babak dengan isolasi tenant dan cabang
@@ -93,7 +100,9 @@ export class RankingService {
         incompleteCount: 0,
         podiumTies: [],
         boundaryTie: false,
-        unresolvedTiesCount: 0
+        unresolvedTiesCount: 0,
+        canFinalize: false,
+        blockingReason: 'Tidak ada peserta terdaftar pada babak ini.'
       };
     }
 
@@ -159,8 +168,8 @@ export class RankingService {
       };
     });
 
-    // 4. Pengurutan & Tie-Break resmi
-    const ruleConfig = getBranchRuleConfig(targetBranch, tenantId);
+    // 4. Pengurutan & Tie-Break resmi (Dinamis dari Konfigurasi Admin / Regulasi Terverifikasi)
+    const ruleConfig = getBranchRuleConfig(targetBranch, tenantId, customRuleConfigs);
     const tieBreakOrder = ruleConfig.tieBreakOrder; // e.g. ['total', 'Tajwid', 'Lagu', 'Fashahah']
 
     const tieBreakLogMap: Record<string, string> = {};
@@ -174,7 +183,7 @@ export class RankingService {
         return scoreB - scoreA;
       }
 
-      // Skor total sama -> terapkan urutan tie-break resmi
+      // Skor total sama -> terapkan urutan tie-break resmi dinamis
       for (const criterion of tieBreakOrder) {
         if (criterion === 'total') continue;
 
@@ -188,15 +197,16 @@ export class RankingService {
         }
       }
 
-      // Jika seluruh kriteria bidang tetap seri identik
+      // P0: Jika seluruh kriteria bidang tetap seri identik, tandai sebagai belum terselesaikan.
+      // DILARANG memutus juara secara sewenang-wenang lewat nomor undian!
       if (scoreA > 0) {
         unresolvedMap[a.participant.id] = true;
         unresolvedMap[b.participant.id] = true;
-        tieBreakLogMap[a.participant.id] = 'Nilai seri identik pada semua bidang (Perlu Sidang Pleno / Penampilan Ulang)';
-        tieBreakLogMap[b.participant.id] = 'Nilai seri identik pada semua bidang (Perlu Sidang Pleno / Penampilan Ulang)';
+        tieBreakLogMap[a.participant.id] = 'Nilai seri identik pada seluruh kriteria bidang (Perlu Keputusan Sidang Pleno / Penampilan Ulang)';
+        tieBreakLogMap[b.participant.id] = 'Nilai seri identik pada seluruh kriteria bidang (Perlu Keputusan Sidang Pleno / Penampilan Ulang)';
       }
 
-      // Pertahankan stabilitas nomor undian bila terpaksa
+      // Stabilitas tampilan visual (hanya untuk rendering sementara, bukan penentuan keabsahan juara)
       return a.participant.lotteryNumber.localeCompare(b.participant.lotteryNumber);
     });
 
@@ -222,7 +232,8 @@ export class RankingService {
         isOverridden,
         overrideReason: overrideReasons[item.participant.id] || '',
         tieBreakResolvedBy: tieBreakLogMap[item.participant.id],
-        hasUnresolvedTieWithNext: unresolvedMap[item.participant.id] && index < evaluatedItems.length - 1
+        hasUnresolvedTieWithNext: unresolvedMap[item.participant.id] && index < evaluatedItems.length - 1,
+        hasUnresolvedTie: !!unresolvedMap[item.participant.id]
       };
     });
 
@@ -272,13 +283,36 @@ export class RankingService {
 
     const unresolvedTiesCount = Object.keys(unresolvedMap).length;
 
+    // Evaluasi kelayakan finalisasi (canFinalize)
+    let canFinalize = allFinalized;
+    let blockingReason: string | undefined;
+
+    if (!allFinalized) {
+      canFinalize = false;
+      blockingReason = `Terdapat ${incompleteCount} peserta yang penilaiannya belum lengkap dari seluruh dewan hakim.`;
+    } else if (boundaryTie) {
+      canFinalize = false;
+      blockingReason = 'Terdapat nilai seri pada batas kuota kelulusan. Wajib diselesaikan melalui sidang pleno atau override manual berizin sebelum babak disahkan.';
+    } else {
+      // Periksa apakah ada nilai seri tak terpecahkan di posisi podium tanpa override
+      const podiumUnresolved = evaluatedParticipants.some(
+        (ep) => ep.rank <= 3 && ep.hasUnresolvedTie && !ep.isOverridden
+      );
+      if (podiumUnresolved) {
+        canFinalize = false;
+        blockingReason = 'Terdapat nilai seri identik pada posisi Podium Juara (1/2/3). Wajib diputuskan dalam sidang pleno dewan hakim atau melalui override manual.';
+      }
+    }
+
     return {
       evaluatedParticipants,
       allFinalized,
       incompleteCount,
       podiumTies,
       boundaryTie,
-      unresolvedTiesCount
+      unresolvedTiesCount,
+      canFinalize,
+      blockingReason
     };
   }
 
@@ -293,6 +327,7 @@ export class RankingService {
     quota: number;
     finalizedBy: string;
     evaluatedParticipants: EvaluatedParticipantStage[];
+    customRuleConfigs?: CompetitionRuleConfig[];
   }): StageResultSnapshot {
     const {
       tenantId,
@@ -301,10 +336,11 @@ export class RankingService {
       branchName,
       quota,
       finalizedBy,
-      evaluatedParticipants
+      evaluatedParticipants,
+      customRuleConfigs
     } = params;
 
-    const ruleConfig = getBranchRuleConfig(branchName, tenantId);
+    const ruleConfig = getBranchRuleConfig(branchName, tenantId, customRuleConfigs);
 
     const rankings: ParticipantRankingItem[] = evaluatedParticipants.map((item) => ({
       participantId: item.participant.id,
