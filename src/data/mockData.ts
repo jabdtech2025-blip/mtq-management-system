@@ -13,9 +13,11 @@ import {
   AuditLogItem
 } from '../types/mtq';
 
+import { calculateAssessmentScore } from '../services/scoringEngine';
+
 /**
- * Helper terpusat untuk kalkulasi skor prototype MTQ.
- * Menjamin presisi desimal, proteksi minus, dan konsistensi pengurangan.
+ * Helper terpusat untuk kalkulasi skor MTQ.
+ * Menjamin pembagian bidang rubrik, presisi desimal, proteksi minus, dan konsistensi pengurangan.
  */
 export function calculateScore(
   errorCounts: Record<string, number>,
@@ -23,23 +25,19 @@ export function calculateScore(
   startingScore: number = 100.0
 ): {
   deductions: Record<string, number>;
+  fieldScores?: Record<string, number>;
+  fieldDeductions?: Record<string, number>;
   totalDeductions: number;
   finalScore: number;
 } {
-  const deductions: Record<string, number> = {};
-  let totalDeductions = 0;
-
-  errorCategories.forEach((cat) => {
-    const count = Math.max(0, Math.floor(errorCounts[cat.id] || 0));
-    const deductionAmount = Number((count * cat.defaultDeduction).toFixed(2));
-    deductions[cat.id] = deductionAmount;
-    totalDeductions += deductionAmount;
-  });
-
-  totalDeductions = Number(totalDeductions.toFixed(2));
-  const finalScore = Number(Math.max(0, startingScore - totalDeductions).toFixed(2));
-
-  return { deductions, totalDeductions, finalScore };
+  const result = calculateAssessmentScore(errorCounts, errorCategories, undefined, startingScore);
+  return {
+    deductions: result.deductions,
+    fieldScores: result.fieldScores,
+    fieldDeductions: result.fieldDeductions,
+    totalDeductions: result.totalDeductions,
+    finalScore: result.finalScore
+  };
 }
 
 

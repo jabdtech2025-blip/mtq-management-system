@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Participant } from '../../types/mtq';
+import { RankingService } from '../../services/rankingService';
 
 export const HasilKelulusanView: React.FC = () => {
   const {
@@ -61,162 +62,57 @@ export const HasilKelulusanView: React.FC = () => {
     );
   }, [stageParticipations, currentTenant.id, selectedStageName]);
 
-  // Active judges assigned for this stage in this tenant
-  const stageJudges = useMemo(() => {
-    const assigned = judgeAssignments.filter(
-      (ja) => ja.tenantId === currentTenant.id && ja.stageName === selectedStageName
-    );
-    if (assigned.length > 0) {
-      return assigned.map((ja) => ja.judgeId);
-    }
-    return users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id).map((u) => u.id);
-  }, [judgeAssignments, selectedStageName, users, currentTenant.id]);
-
-  // Compute ranking, completion, and provisional vs valid scores with full multi-maqra support
-  const rankedParticipants = useMemo(() => {
-    return currentStageParticipations
-      .map((sp) => {
-        const participantObj = participants.find((p) => p.id === sp.participantId && p.tenantId === currentTenant.id);
-        const stageQuestions = getParticipantStageQuestions(sp.participantId, selectedStageName);
-        const progress = getParticipantProgress(sp.participantId, selectedStageName);
-
-        // Gather assessments for all assigned questions and judges
-        const allAssessmentUnits: NonNullable<(typeof assessments)[0]>[] = [];
-
-        stageQuestions.forEach((q) => {
-          stageJudges.forEach((jId) => {
-            const match = assessments.find(
-              (a) =>
-                a.tenantId === currentTenant.id &&
-                a.participantId === sp.participantId &&
-                a.judgeId === jId &&
-                a.stageName === selectedStageName &&
-                a.questionId === q.questionId
-            );
-            if (match) {
-              allAssessmentUnits.push(match);
-            }
-          });
-        });
-
-        const validFinalizedScores = allAssessmentUnits
-          .filter((a) => a.status === 'finalized')
-          .map((a) => a.finalScore);
-
-        const allAvailableScores = allAssessmentUnits.map((a) => a.finalScore);
-
-        const totalRequiredUnits = stageJudges.length * stageQuestions.length;
-        const isFullyFinalized =
-          progress === 'Lengkap' &&
-          totalRequiredUnits > 0 &&
-          validFinalizedScores.length === totalRequiredUnits;
-
-        // Valid score only if fully finalized; otherwise provisional score for preview
-        const averageFinalScore =
-          isFullyFinalized && validFinalizedScores.length > 0
-            ? Number((validFinalizedScores.reduce((a, b) => a + b, 0) / validFinalizedScores.length).toFixed(2))
-            : null;
-
-        const provisionalAverageScore =
-          allAvailableScores.length > 0
-            ? Number((allAvailableScores.reduce((a, b) => a + b, 0) / allAvailableScores.length).toFixed(2))
-            : null;
-
-        return {
-          participation: sp,
-          participant: participantObj || {
-            id: sp.participantId,
-            tenantId: currentTenant.id,
-            participantId: sp.participantId,
-            name: 'Peserta',
-            kafilahId: '',
-            kafilahName: '-',
-            branchName: sp.branchName,
-            level: 'Mutawassit',
-            levelName: 'Mutawassit',
-            gender: 'Putra' as const,
-            lotteryNumber: sp.lotteryNumber,
-            questionId: sp.questionId || '',
-            assignedMaqra: sp.assignedMaqra || '-',
-            pageNumber: sp.pageNumber || 1,
-            stageName: selectedStageName,
-            status: 'Menunggu' as const,
-            progressStatus: 'Belum Dimulai' as const
-          },
-          stageQuestions,
-          averageFinalScore,
-          provisionalAverageScore,
-          displayScore: averageFinalScore !== null ? averageFinalScore : provisionalAverageScore,
-          isFullyFinalized,
-          progress,
-          finalizedJudgeCount: validFinalizedScores.length,
-          totalAssignedJudges: totalRequiredUnits > 0 ? totalRequiredUnits : stageJudges.length
-        };
-      })
-      .sort((a, b) => {
-        const scoreA = a.displayScore ?? -1;
-        const scoreB = b.displayScore ?? -1;
-        return scoreB - scoreA;
-      });
-  }, [currentStageParticipations, stageJudges, assessments, participants, currentTenant.id, selectedStageName, getParticipantProgress, getParticipantStageQuestions]);
-
   // Quota configuration
   const quota = currentStage?.qualificationQuota || 3;
 
-  // Check if all stage participants have completed evaluations
-  const allAssessmentsFinalized = useMemo(() => {
-    if (currentStageParticipations.length === 0) return false;
-    return rankedParticipants.every((item) => item.isFullyFinalized);
-  }, [currentStageParticipations.length, rankedParticipants]);
+  // Selected branch filter for multi-branch isolation
+  const [selectedBranch, setSelectedBranch] = useState<string>('Semua Cabang');
+  const branchOptions = useMemo(() => {
+    const branches = Array.from(new Set(currentStageParticipations.map((sp) => sp.branchName).filter(Boolean)));
+    return ['Semua Cabang', ...branches];
+  }, [currentStageParticipations]);
 
-  // Incomplete participants for quick action
-  const incompleteParticipants = useMemo(() => {
-    return rankedParticipants.filter((item) => !item.isFullyFinalized);
-  }, [rankedParticipants]);
-
-  // Determine qualification status (Top-N + manual overrides)
-  const evaluatedParticipants = useMemo(() => {
-    return rankedParticipants.map((item, index) => {
-      const rank = index + 1;
-      const isOverridden = manualOverrides[item.participant.id] !== undefined;
-
-      // Only qualify if fully finalized or explicitly overridden by jury board
-      let qualified = false;
-      if (isOverridden) {
-        qualified = manualOverrides[item.participant.id];
-      } else if (allAssessmentsFinalized && item.isFullyFinalized) {
-        qualified = rank <= quota;
-      }
-
-      return {
-        ...item,
-        rank,
-        isQualified: qualified,
-        isOverridden,
-        overrideReason: overrideReasons[item.participant.id] || ''
-      };
+  // Use centralized RankingService for scoring, multi-maqra aggregation, and official tie-break resolution
+  const {
+    evaluatedParticipants,
+    allFinalized: allAssessmentsFinalized,
+    incompleteCount,
+    podiumTies,
+    boundaryTie: hasBoundaryTie,
+    unresolvedTiesCount
+  } = useMemo(() => {
+    return RankingService.evaluateStageParticipants({
+      tenantId: currentTenant.id,
+      stageName: selectedStageName,
+      branchName: selectedBranch !== 'Semua Cabang' ? selectedBranch : undefined,
+      participations: stageParticipations,
+      participants,
+      assessments,
+      judgeAssignments,
+      stageQuestionsGetter: getParticipantStageQuestions,
+      quota,
+      manualOverrides,
+      overrideReasons
     });
-  }, [rankedParticipants, quota, manualOverrides, overrideReasons, allAssessmentsFinalized]);
+  }, [
+    currentTenant.id,
+    selectedStageName,
+    selectedBranch,
+    stageParticipations,
+    participants,
+    assessments,
+    judgeAssignments,
+    getParticipantStageQuestions,
+    quota,
+    manualOverrides,
+    overrideReasons
+  ]);
 
-  // Check if any tie exists on the boundary of quota among finalized participants
-  const hasBoundaryTie = useMemo(() => {
-    if (rankedParticipants.length <= quota) return false;
-    const boundaryScore = rankedParticipants[quota - 1]?.averageFinalScore;
-    const nextScore = rankedParticipants[quota]?.averageFinalScore;
-    const isBoundaryOverridden =
-      manualOverrides[rankedParticipants[quota - 1]?.participant.id] !== undefined ||
-      manualOverrides[rankedParticipants[quota]?.participant.id] !== undefined;
+  const incompleteParticipants = useMemo(() => {
+    return evaluatedParticipants.filter((item) => !item.isFullyFinalized);
+  }, [evaluatedParticipants]);
 
-    return (
-      !isBoundaryOverridden &&
-      boundaryScore !== null &&
-      nextScore !== null &&
-      boundaryScore !== undefined &&
-      nextScore !== undefined &&
-      boundaryScore === nextScore &&
-      boundaryScore > 0
-    );
-  }, [rankedParticipants, quota, manualOverrides]);
+  const rankedParticipants = evaluatedParticipants;
 
   // Stage overall progress status
   const stageStatusBadge = useMemo(() => {
@@ -315,8 +211,21 @@ export const HasilKelulusanView: React.FC = () => {
           </p>
         </div>
 
-        {/* Stage Selector (No label) */}
-        <div className="flex items-center gap-2">
+        {/* Stage & Branch Selector Controls */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedBranch}
+            onChange={(e) => setSelectedBranch(e.target.value)}
+            aria-label="Pilih Cabang Lomba"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 bg-white shadow-xs outline-none"
+          >
+            {branchOptions.map((br) => (
+              <option key={br} value={br}>
+                {br}
+              </option>
+            ))}
+          </select>
+
           <select
             value={selectedStageName}
             onChange={(e) => {
@@ -631,6 +540,17 @@ export const HasilKelulusanView: React.FC = () => {
                         <p className="text-[11px] text-slate-500 mt-0.5">
                           {p.participantId} · {p.kafilahName}
                         </p>
+                        {item.tieBreakResolvedBy && (
+                          <p className="text-[10px] text-indigo-700 font-semibold mt-0.5 flex items-center gap-1">
+                            <span>⚖️</span>
+                            <span>{item.tieBreakResolvedBy}</span>
+                          </p>
+                        )}
+                        {item.hasUnresolvedTieWithNext && (
+                          <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">
+                            ⚠️ Nilai Seri Identik
+                          </span>
+                        )}
                         {item.isOverridden && (
                           <p className="text-[10px] text-slate-500 mt-0.5 italic">
                             Catatan Override: {item.overrideReason}
@@ -650,8 +570,8 @@ export const HasilKelulusanView: React.FC = () => {
                         ) : (
                           <div>
                             <span className="text-slate-600 font-bold text-xs">
-                              {item.provisionalAverageScore !== null
-                                ? item.provisionalAverageScore.toFixed(2)
+                              {item.provisionalScore !== null
+                                ? item.provisionalScore.toFixed(2)
                                 : '—'}
                             </span>
                             <span className="block text-[9px] font-medium text-slate-400">

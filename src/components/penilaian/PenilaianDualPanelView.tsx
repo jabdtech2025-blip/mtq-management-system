@@ -815,6 +815,16 @@ export const PenilaianDualPanelView: React.FC = () => {
               <p className="text-[11px] text-slate-500 font-mono mt-0.5 tabular-nums">
                 Total Pengurangan: -{totalDeductions.toFixed(2)} poin
               </p>
+              {currentAssessment?.fieldScores && Object.keys(currentAssessment.fieldScores).length > 0 && (
+                <div className="grid grid-cols-2 gap-1.5 mt-2.5 pt-2 border-t border-slate-200/80">
+                  {Object.entries(currentAssessment.fieldScores).map(([field, score]) => (
+                    <div key={field} className="flex justify-between items-center text-[10px] bg-white px-2 py-0.5 rounded border border-slate-200">
+                      <span className="text-slate-600 font-medium">{field}</span>
+                      <span className="font-mono font-bold text-slate-900">{score.toFixed(1)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Error Categories Counters */}

@@ -170,6 +170,66 @@ export interface CanvasStroke {
   points: NormalizedPoint[];
 }
 
+export interface DeductionRule {
+  id: string;
+  criterionId: string;
+  name: string;
+  errorGrade: 'Jali' | 'Khafi' | 'Umum' | 'Kecil' | 'Sedang' | 'Besar';
+  deductionPoints: number;
+  methodType: 'Pengurangan tetap' | 'Pengurangan berbobot';
+}
+
+export interface RubricCriterion {
+  id: string;
+  fieldId: string;
+  code: string;
+  name: string;
+  description?: string;
+  deductionRules: DeductionRule[];
+  maxDeduction?: number;
+}
+
+export interface RubricField {
+  id: string;
+  code: string; // e.g. "TJW", "FSH", "LAG", "SUA"
+  name: string; // e.g. "Bidang Tajwid", "Bidang Fashahah", "Bidang Lagu", "Bidang Suara"
+  maxScore: number; // e.g. 30, 30, 25, 15
+  minScore: number; // e.g. 0
+  weight?: number;
+  order: number;
+  description?: string;
+  criteria?: RubricCriterion[];
+}
+
+export interface RubricVersion {
+  id: string;
+  tenantId: string;
+  code: string; // e.g. "RUBRIC-SENI-BACA-2025"
+  name: string; // e.g. "Rubrik Resmi Seni Baca Al-Qur'an Pedoman 2025"
+  branchCode: string;
+  branchName: string;
+  version: string; // e.g. "2025.1"
+  description: string;
+  officialSource?: string; // e.g. "Buku Pedoman MTQ 2025 LPTQ hal. 42-45"
+  status: 'Aktif' | 'Arsip';
+  startingScore: number; // e.g. 100
+  fields: RubricField[];
+  createdAt: string;
+}
+
+export interface CompetitionRuleConfig {
+  id: string;
+  tenantId: string;
+  branchName: string;
+  branchCode?: string;
+  rubricVersionId: string;
+  tieBreakOrder: string[]; // e.g. ['total', 'Tajwid', 'Lagu', 'Fashahah']
+  quotaPerStage: Record<string, number>; // e.g. { 'Penyisihan': 3, 'Final': 3 }
+  maqraTiming?: string; // e.g. 'sebelum_mimbar', '1_jam_sebelum'
+  officialSource?: string;
+  isVerifiedOfficial?: boolean;
+}
+
 export interface JudgeAssignment {
   id: string;
   tenantId: string;
@@ -178,7 +238,10 @@ export interface JudgeAssignment {
   stageId?: string;
   stageName: string;
   branchName: string;
+  branchId?: string;
   judgeField: string;
+  rubricFieldId?: string;
+  rubricFieldName?: string;
 }
 
 export interface CompetitionStage {
@@ -205,17 +268,53 @@ export interface JudgeAssessment {
   judgeId: string;
   judgeName: string;
   judgeField: string;
-  questionId?: string; // Optional question identifier for multi-question assessments
+  questionId?: string; // Question identifier for multi-question assessments
   status: 'not_started' | 'in_progress' | 'finalized';
   errorCounts: Record<string, number>; // { [categoryId]: count }
   deductions: Record<string, number>;  // { [categoryId]: totalPoints }
   totalDeductions: number;
   finalScore: number;
+  fieldScores?: Record<string, number>;      // { "Tajwid": 28.5, "Lagu": 24.0, ... }
+  fieldDeductions?: Record<string, number>;  // { "Tajwid": 1.5, ... }
   annotations: CanvasStroke[];
   note?: string;
   rubricVersion?: string;
+  rubricVersionId?: string;
+  isLocked?: boolean;
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenReason?: string;
   lastUpdated: string;
   finalizedAt?: string;
+}
+
+export interface ParticipantRankingItem {
+  participantId: string;
+  participantName: string;
+  lotteryNumber: string;
+  kafilahName: string;
+  branchName: string;
+  stageName: string;
+  totalScore: number;
+  fieldScores: Record<string, number>;
+  rank: number;
+  isQualified: boolean;
+  reason: string;
+  tieBreakResolvedBy?: string;
+}
+
+export interface StageResultSnapshot {
+  id: string;
+  tenantId: string;
+  stageId: string;
+  stageName: string;
+  branchName: string;
+  quota: number;
+  finalizedAt: string;
+  finalizedBy: string;
+  rubricVersionId: string;
+  tieBreakRuleUsed: string;
+  rankings: ParticipantRankingItem[];
 }
 
 export interface ActivityLogItem {
@@ -239,3 +338,4 @@ export interface AuditLogItem {
   reason?: string;
   outcome: 'Success' | 'Failed' | 'Warning';
 }
+

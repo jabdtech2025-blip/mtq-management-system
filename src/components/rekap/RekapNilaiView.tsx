@@ -23,6 +23,8 @@ export const RekapNilaiView: React.FC = () => {
     judgeAssignments,
     kafilahs,
     errorCategories,
+    currentUser,
+    reopenAssessment,
     getJudgeAssessment: getJudgeAssessmentFromContext,
     getParticipantProgress,
     getParticipantStageQuestions,
@@ -36,6 +38,35 @@ export const RekapNilaiView: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState('Semua Status');
   const [inspectedParticipant, setInspectedParticipant] = useState<Participant | null>(null);
   const [modalSelectedQuestionId, setModalSelectedQuestionId] = useState<string>('');
+
+  // Reopen Assessment Modal State (Audit Correction Policy)
+  const [reopenTarget, setReopenTarget] = useState<{
+    participantId: string;
+    judgeId: string;
+    judgeName: string;
+    stageName: string;
+    questionId?: string;
+  } | null>(null);
+  const [reopenReason, setReopenReason] = useState<string>('');
+  const [reopenAlert, setReopenAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleConfirmReopen = () => {
+    if (!reopenTarget || !reopenReason.trim()) return;
+    const res = reopenAssessment(
+      reopenTarget.participantId,
+      reopenTarget.judgeId,
+      reopenReason.trim(),
+      reopenTarget.stageName,
+      reopenTarget.questionId
+    );
+    if (res.success) {
+      setReopenAlert({ type: 'success', message: res.message });
+      setReopenTarget(null);
+      setReopenReason('');
+    } else {
+      setReopenAlert({ type: 'error', message: res.message });
+    }
+  };
 
   // Available stages from configured stages
   const stageOptions = useMemo(() => {
@@ -947,10 +978,29 @@ export const RekapNilaiView: React.FC = () => {
 
                             <td className="px-4 py-3 align-top text-center">
                               {isFinal ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                  <span>Terkunci</span>
-                                </span>
+                                <div>
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                    <span>Terkunci</span>
+                                  </span>
+                                  {currentUser.role !== 'judge' && (
+                                    <button
+                                      onClick={() =>
+                                        setReopenTarget({
+                                          participantId: inspectedParticipant.id,
+                                          judgeId: j.id,
+                                          judgeName: j.name,
+                                          stageName: inspectedParticipant.stageName,
+                                          questionId: activeQuestionId
+                                        })
+                                      }
+                                      className="mt-1.5 block mx-auto text-[9px] font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded cursor-pointer transition-colors shadow-2xs"
+                                      title="Buka kembali lembar nilai untuk koreksi dewan hakim"
+                                    >
+                                      Buka Kunci
+                                    </button>
+                                  )}
+                                </div>
                               ) : inProgress ? (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                                   <Clock className="w-3 h-3 text-amber-600" />
@@ -983,6 +1033,56 @@ export const RekapNilaiView: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {/* Reopen Assessment Confirmation Modal */}
+            {reopenTarget && (
+              <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-xl border border-slate-200">
+                  <div className="flex items-center gap-3 text-amber-800">
+                    <div className="p-2 bg-amber-100 rounded-xl">
+                      <Clock className="w-5 h-5 text-amber-700" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-sm text-slate-900">Buka Kunci Lembar Penilaian</h4>
+                      <p className="text-[11px] text-slate-500">Kebijakan Koreksi & Rekam Jejak Audit</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Anda akan membuka kembali lembar penilaian <strong>{reopenTarget.judgeName}</strong> untuk peserta ini pada Babak {reopenTarget.stageName}. Tindakan ini akan dicatat secara permanen di Audit Log.
+                  </p>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Alasan Pembukaan Kembali (Wajib untuk Audit):
+                    </label>
+                    <textarea
+                      value={reopenReason}
+                      onChange={(e) => setReopenReason(e.target.value)}
+                      placeholder="Contoh: Kesalahan input salah satu kategori, permohonan resmi dewan hakim..."
+                      rows={3}
+                      className="w-full p-2.5 text-xs border border-slate-300 rounded-xl focus:border-emerald-600 outline-none"
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      onClick={() => {
+                        setReopenTarget(null);
+                        setReopenReason('');
+                      }}
+                      className="px-3 py-1.5 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      onClick={handleConfirmReopen}
+                      disabled={reopenReason.trim().length < 5}
+                      className="px-4 py-1.5 bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold cursor-pointer transition-all"
+                    >
+                      Buka Kunci Lembar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}

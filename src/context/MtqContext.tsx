@@ -15,7 +15,8 @@ import {
   AuditLogItem,
   ParticipantProgressStatus,
   GenericMasterItem,
-  AssignedMaqraItem
+  AssignedMaqraItem,
+  StageResultSnapshot
 } from '../types/mtq';
 import {
   INITIAL_TENANTS,
@@ -34,6 +35,9 @@ import {
   INITIAL_CABANG,
   calculateScore
 } from '../data/mockData';
+import { calculateAssessmentScore } from '../services/scoringEngine';
+import { RankingService } from '../services/rankingService';
+import { OFFICIAL_SENI_BACA_RUBRIC } from '../services/competitionRules';
 
 export type ViewType =
   // Admin MTQ
@@ -127,6 +131,14 @@ interface MtqContextType {
     stageName?: string,
     questionId?: string
   ) => void;
+  reopenAssessment: (
+    participantId: string,
+    judgeId: string,
+    reason: string,
+    stageName?: string,
+    questionId?: string
+  ) => { success: boolean; message: string };
+  stageSnapshots: StageResultSnapshot[];
   getJudgeAssessment: (
     participantId: string,
     judgeId: string,
@@ -587,6 +599,21 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {}
   }, [cabangList]);
 
+  const [stageSnapshots, setStageSnapshots] = useState<StageResultSnapshot[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'stage_snapshots');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + 'stage_snapshots', JSON.stringify(stageSnapshots));
+    } catch {}
+  }, [stageSnapshots]);
+
   const currentTenant = tenants.find((t) => t.id === currentTenantId) || tenants[0];
   const currentUser = users.find((u) => u.id === currentUserId) || users[0];
 
@@ -893,9 +920,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newCount = Math.max(0, oldCount + delta);
     currentCounts[categoryId] = newCount;
 
-    const { deductions, totalDeductions, finalScore } = calculateScore(
+    const scoreResult = calculateAssessmentScore(
       currentCounts,
       errorCategories,
+      OFFICIAL_SENI_BACA_RUBRIC,
       100.0
     );
 
@@ -907,9 +935,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           stageName: targetStage,
           questionId: targetQuestionId,
           errorCounts: currentCounts,
-          deductions,
-          totalDeductions,
-          finalScore,
+          deductions: scoreResult.deductions,
+          fieldScores: scoreResult.fieldScores,
+          fieldDeductions: scoreResult.fieldDeductions,
+          totalDeductions: scoreResult.totalDeductions,
+          finalScore: scoreResult.finalScore,
+          rubricVersion: OFFICIAL_SENI_BACA_RUBRIC.code,
+          rubricVersionId: scoreResult.rubricVersionId,
           status: 'in_progress',
           lastUpdated: nowTime
         }
@@ -926,9 +958,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           questionId: targetQuestionId,
           status: 'in_progress',
           errorCounts: currentCounts,
-          deductions,
-          totalDeductions,
-          finalScore,
+          deductions: scoreResult.deductions,
+          fieldScores: scoreResult.fieldScores,
+          fieldDeductions: scoreResult.fieldDeductions,
+          totalDeductions: scoreResult.totalDeductions,
+          finalScore: scoreResult.finalScore,
+          rubricVersion: OFFICIAL_SENI_BACA_RUBRIC.code,
+          rubricVersionId: scoreResult.rubricVersionId,
           annotations: [],
           lastUpdated: nowTime
         };
@@ -1145,13 +1181,33 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         a.questionId === targetQuestionId
     );
 
-    const finalizedScore = existing ? existing.finalScore : 100.0;
+    const currentCounts = existing ? existing.errorCounts : {};
+    const scoreResult = calculateAssessmentScore(
+      currentCounts,
+      errorCategories,
+      OFFICIAL_SENI_BACA_RUBRIC,
+      100.0
+    );
+    const finalizedScore = scoreResult.finalScore;
 
     let updatedAssessments: JudgeAssessment[];
     if (existing) {
       updatedAssessments = assessments.map((a) =>
         a.id === existing.id
-          ? { ...a, status: 'finalized', finalizedAt: nowTime, lastUpdated: nowTime }
+          ? {
+              ...a,
+              status: 'finalized',
+              isLocked: true,
+              deductions: scoreResult.deductions,
+              fieldScores: scoreResult.fieldScores,
+              fieldDeductions: scoreResult.fieldDeductions,
+              totalDeductions: scoreResult.totalDeductions,
+              finalScore: scoreResult.finalScore,
+              rubricVersion: OFFICIAL_SENI_BACA_RUBRIC.code,
+              rubricVersionId: scoreResult.rubricVersionId,
+              finalizedAt: nowTime,
+              lastUpdated: nowTime
+            }
           : a
       );
     } else {
@@ -1167,10 +1223,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         judgeField: targetJudge.judgeField || 'Dewan Hakim',
         questionId: targetQuestionId,
         status: 'finalized',
+        isLocked: true,
         errorCounts: {},
-        deductions: {},
+        deductions: scoreResult.deductions,
+        fieldScores: scoreResult.fieldScores,
+        fieldDeductions: scoreResult.fieldDeductions,
         totalDeductions: 0,
-        finalScore: 100.0,
+        finalScore: scoreResult.finalScore,
+        rubricVersion: OFFICIAL_SENI_BACA_RUBRIC.code,
+        rubricVersionId: scoreResult.rubricVersionId,
         annotations: [],
         lastUpdated: nowTime,
         finalizedAt: nowTime
@@ -1256,9 +1317,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    // Activity Log
+    // Audit Log for finalization
     const currentQObj = stageQuestions.find((q) => q.questionId === targetQuestionId);
     const qLabel = currentQObj?.code || 'Maqra';
+    const auditFinalized: AuditLogItem = {
+      id: generateUniqueLogId('aud'),
+      timestamp: nowTime,
+      actor: `${currentUser.name} (${currentUser.role})`,
+      action: 'ASSESSMENT_FINALIZED',
+      target: `Peserta ${part.participantId} (${part.name}) - ${targetJudge.name}`,
+      tenantName: currentTenant.name,
+      summary: `Finalisasi lembar nilai ${targetJudge.judgeField || 'Dewan Hakim'} untuk ${qLabel} pada Babak ${targetStage} dengan nilai ${finalizedScore.toFixed(2)}.`,
+      outcome: 'Success'
+    };
+    setAuditLogs((prev) => [auditFinalized, ...prev]);
+
+    // Activity Log
     const newLog: ActivityLogItem = {
       id: generateUniqueLogId('act'),
       tenantId: currentTenantId,
@@ -1272,6 +1346,130 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setSyncStatus('Tersimpan di browser');
     setLastSyncTime(nowTime);
+  };
+
+  /**
+   * Pembukaan kembali lembar penilaian final (Correction & Reopen Policy)
+   * Hanya dapat dilakukan oleh Administrator / Superadmin dengan mencantumkan alasan wajib.
+   * Menghasilkan catatan Audit Log permanen demi integritas hasil kompetisi.
+   */
+  const reopenAssessment = (
+    participantId: string,
+    judgeId: string,
+    reason: string,
+    stageName?: string,
+    questionId?: string
+  ): { success: boolean; message: string } => {
+    if (currentUser.role === 'judge') {
+      return {
+        success: false,
+        message: 'Otorisasi ditolak: Hanya Administrator yang berwenang membuka kembali penilaian yang sudah final.'
+      };
+    }
+
+    if (!reason || reason.trim().length < 5) {
+      return {
+        success: false,
+        message: 'Alasan pembukaan kembali lembar nilai wajib diisi minimal 5 karakter untuk rekaman audit trail.'
+      };
+    }
+
+    const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
+    if (!part) {
+      return { success: false, message: 'Peserta tidak ditemukan pada tenant ini.' };
+    }
+
+    const targetStage = stageName || part.stageName || selectedStageName;
+    const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
+    const targetQuestionId = questionId || stageQuestions[0]?.questionId;
+
+    const existing = assessments.find(
+      (a) =>
+        a.tenantId === currentTenantId &&
+        a.judgeId === judgeId &&
+        a.participantId === participantId &&
+        a.stageName === targetStage &&
+        (!targetQuestionId || a.questionId === targetQuestionId)
+    );
+
+    if (!existing) {
+      return { success: false, message: 'Lembar penilaian tidak ditemukan.' };
+    }
+
+    if (existing.status !== 'finalized') {
+      return { success: false, message: 'Lembar penilaian belum berstatus final.' };
+    }
+
+    const nowTime = getWibTime();
+    const targetJudge = users.find((u) => u.id === judgeId);
+
+    // Buka kunci lembar penilaian kembali ke status in_progress
+    setAssessments((prev) =>
+      prev.map((a) =>
+        a.id === existing.id
+          ? {
+              ...a,
+              status: 'in_progress',
+              isLocked: false,
+              reopenedAt: nowTime,
+              reopenedBy: `${currentUser.name} (${currentUser.role})`,
+              reopenReason: reason,
+              lastUpdated: nowTime
+            }
+          : a
+      )
+    );
+
+    // Kembalikan status kemajuan babak peserta
+    setStageParticipations((prev) =>
+      prev.map((sp) =>
+        sp.tenantId === currentTenantId &&
+        sp.participantId === participantId &&
+        sp.stageName === targetStage &&
+        sp.status === 'Lengkap'
+          ? { ...sp, status: 'Berlangsung' }
+          : sp
+      )
+    );
+
+    // Kembalikan status peserta jika sebelumnya 'Final'
+    setParticipants((prev) =>
+      prev.map((p) =>
+        p.id === participantId && p.tenantId === currentTenantId && p.status === 'Final'
+          ? { ...p, status: 'Berlangsung' }
+          : p
+      )
+    );
+
+    // Catat Audit Log Permanen
+    const reopenAudit: AuditLogItem = {
+      id: generateUniqueLogId('aud'),
+      timestamp: nowTime,
+      actor: `${currentUser.name} (${currentUser.role})`,
+      action: 'ASSESSMENT_REOPENED',
+      target: `Peserta ${part.participantId} (${part.name}) - Hakim ${targetJudge?.name || judgeId}`,
+      tenantName: currentTenant.name,
+      summary: `Pembukaan kembali lembar penilaian final (Skor sebelum koreksi: ${existing.finalScore.toFixed(2)}) pada Babak ${targetStage}.`,
+      reason,
+      outcome: 'Success'
+    };
+    setAuditLogs((prev) => [reopenAudit, ...prev]);
+
+    const reopenActivity: ActivityLogItem = {
+      id: generateUniqueLogId('act'),
+      tenantId: currentTenantId,
+      type: 'config',
+      title: 'Penilaian Dibuka Kembali',
+      description: `Lembar penilaian ${part.name} oleh ${targetJudge?.name || 'Hakim'} dibuka kembali oleh ${currentUser.name}. Alasan: ${reason}`,
+      timestamp: nowTime,
+      actorName: currentUser.name
+    };
+    setActivityLogs((prev) => [reopenActivity, ...prev.filter((l) => l.id !== reopenActivity.id).slice(0, 20)]);
+
+    return {
+      success: true,
+      message: `Lembar penilaian berhasil dibuka kembali untuk koreksi. Hakim terkait sekarang dapat mengedit nilai.`
+    };
   };
 
   // Kafilah Actions (Tenant Scoped)
@@ -2230,42 +2428,46 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Helper to compute participant's stage score
-    const computeParticipantScore = (partId: string): number => {
-      const stageQs = getParticipantStageQuestions(partId, currentStageName);
-      const scores: number[] = [];
-      stageQs.forEach((q) => {
-        assessments.forEach((a) => {
-          if (
-            a.tenantId === currentTenantId &&
-            a.participantId === partId &&
-            a.stageName === currentStageName &&
-            a.questionId === q.questionId &&
-            a.status === 'finalized'
-          ) {
-            scores.push(a.finalScore);
-          }
-        });
-      });
-      if (scores.length === 0) return 0;
-      return Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2));
-    };
+    // Gunakan RankingService terpusat dengan penegakan tie-break resmi dan isolasi cabang
+    const manualOverridesMap = (qualifiedParticipantIds || []).reduce<Record<string, boolean>>((acc, pid) => {
+      acc[pid] = true;
+      return acc;
+    }, {});
 
-    // Calculate score and rank for every participant in current stage
-    const rankedList = stageParts
-      .map((sp) => ({
-        sp,
-        score: computeParticipantScore(sp.participantId)
-      }))
-      .sort((a, b) => b.score - a.score);
+    const evalResult = RankingService.evaluateStageParticipants({
+      tenantId: currentTenantId,
+      stageName: currentStageName,
+      branchName: currentStg.branchName,
+      participations: stageParticipations,
+      participants,
+      assessments,
+      judgeAssignments,
+      stageQuestionsGetter: getParticipantStageQuestions,
+      quota: currentStg.qualificationQuota,
+      manualOverrides: manualOverridesMap,
+      overrideReasons
+    });
 
-    const scoreMap: Record<string, { score: number; rank: number }> = {};
-    rankedList.forEach((item, index) => {
-      scoreMap[item.sp.participantId] = {
-        score: item.score,
-        rank: index + 1
+    const scoreMap: Record<string, { score: number; rank: number; tieBreakResolvedBy?: string }> = {};
+    evalResult.evaluatedParticipants.forEach((item) => {
+      scoreMap[item.participant.id] = {
+        score: item.displayScore || 0,
+        rank: item.rank,
+        tieBreakResolvedBy: item.tieBreakResolvedBy
       };
     });
+
+    // Buat snapshot permanen hasil babak
+    const stageSnapshot = RankingService.createStageResultSnapshot({
+      tenantId: currentTenantId,
+      stageId: currentStg.id,
+      stageName: currentStageName,
+      branchName: currentStg.branchName || 'Cabang Terpadu',
+      quota: currentStg.qualificationQuota,
+      finalizedBy: `${currentUser.name} (${currentUser.role})`,
+      evaluatedParticipants: evalResult.evaluatedParticipants
+    });
+    setStageSnapshots((prev) => [...prev.filter((s) => s.id !== stageSnapshot.id), stageSnapshot]);
 
     const nowTime = getWibTime();
     const quota = currentStg.qualificationQuota;
@@ -2604,6 +2806,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateErrorCount,
         saveAnnotations,
         finalizeAssessment,
+        reopenAssessment,
+        stageSnapshots,
         getJudgeAssessment,
         getParticipantProgress,
         getStageParticipation,
