@@ -1,5 +1,17 @@
-import React from 'react';
-import { X, Check, ShieldCheck, UserCheck, Gavel, User, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  X,
+  Check,
+  ShieldCheck,
+  Gavel,
+  AlertCircle,
+  Database,
+  RefreshCw,
+  LogIn,
+  LogOut,
+  CheckCircle2,
+  AlertTriangle
+} from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 
 export const DemoAccountModal: React.FC = () => {
@@ -10,10 +22,18 @@ export const DemoAccountModal: React.FC = () => {
     isDemoAccountModalOpen,
     setIsDemoAccountModalOpen,
     setCurrentView,
-    tenants,
-    currentTenant,
-    setTenantId
+    setTenantId,
+    connectionInfo,
+    authenticatedProfile,
+    refreshSupabaseConnection,
+    signInWithSupabase,
+    signOutSupabase
   } = useMtq();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authFeedback, setAuthFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   if (!isDemoAccountModalOpen) return null;
 
@@ -40,6 +60,34 @@ export const DemoAccountModal: React.FC = () => {
     setIsDemoAccountModalOpen(false);
   };
 
+  const handleSupabaseSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+    setIsLoading(true);
+    setAuthFeedback(null);
+    try {
+      const res = await signInWithSupabase(email, password);
+      setAuthFeedback({
+        type: res.success ? 'success' : 'error',
+        text: res.message
+      });
+      if (res.success) {
+        setPassword('');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRefreshCheck = async () => {
+    setIsLoading(true);
+    try {
+      await refreshSupabaseConnection();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
       <div className="bg-white text-slate-900 rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -50,10 +98,10 @@ export const DemoAccountModal: React.FC = () => {
             </div>
             <div>
               <h3 className="font-extrabold text-sm text-slate-900">
-                Pilih Akun Simulasi Prototype
+                Autentikasi Supabase & Persona Evaluasi
               </h3>
               <p className="text-[11px] text-slate-500">
-                Khusus evaluasi antarmuka — bukan autentikasi produksi
+                Status koneksi database nyata, login Supabase Auth, & simulasi peran
               </p>
             </div>
           </div>
@@ -66,11 +114,128 @@ export const DemoAccountModal: React.FC = () => {
           </button>
         </div>
 
-        <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto">
+          {/* Real Supabase Database & Schema Diagnostic Card */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span className="text-xs font-bold text-slate-900">
+                  Status Database Supabase
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleRefreshCheck}
+                disabled={isLoading}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
+              >
+                <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+                Uji Koneksi DB
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-700 space-y-1">
+              <p className="font-semibold text-slate-900">{connectionInfo.statusLabel}</p>
+              {connectionInfo.state === 'schema_missing' && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 text-[11px] text-amber-900">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Skema SQL Belum Dijalankan</p>
+                    <p>
+                      Endpoint Supabase terjangkau, tetapi tabel inti belum ditemukan. Jalankan{' '}
+                      <code className="font-mono bg-amber-100 px-1 rounded">supabase/schema.sql</code>{' '}
+                      di SQL Editor Supabase Anda, lalu klik <strong>Uji Koneksi DB</strong>.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {connectionInfo.lastError && connectionInfo.state !== 'schema_missing' && (
+                <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded-lg">
+                  Detail: {connectionInfo.lastError}
+                </p>
+              )}
+            </div>
+
+            {/* Supabase Auth Login Form when configured */}
+            {connectionInfo.isConfigured && (
+              <div className="pt-2 border-t border-slate-200/80">
+                {authenticatedProfile ? (
+                  <div className="flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-emerald-950 truncate">
+                          {authenticatedProfile.name} ({authenticatedProfile.globalRole})
+                        </p>
+                        <p className="text-[11px] text-emerald-800 truncate">
+                          {authenticatedProfile.email} · Sesi Auth Aktif
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void signOutSupabase()}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 hover:bg-emerald-100 text-[11px] font-bold shrink-0 cursor-pointer"
+                    >
+                      <LogOut className="w-3 h-3" />
+                      Keluar
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSupabaseSignIn} className="space-y-2">
+                    <p className="text-[11px] font-bold text-slate-700">
+                      Login Akun Supabase Auth (Produksi / RLS):
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="Email pengguna Supabase"
+                        className="px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      />
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Kata sandi"
+                        className="px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      {authFeedback ? (
+                        <span
+                          className={`text-[11px] font-medium ${
+                            authFeedback.type === 'success' ? 'text-emerald-700' : 'text-rose-700'
+                          }`}
+                        >
+                          {authFeedback.text}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-500">
+                          Gunakan akun yang terdaftar pada Supabase Auth.
+                        </span>
+                      )}
+                      <button
+                        type="submit"
+                        disabled={isLoading || !email.trim() || !password}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white text-xs font-bold cursor-pointer shrink-0"
+                      >
+                        <LogIn className="w-3.5 h-3.5" />
+                        Login Supabase
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              Pilih peran pengguna di bawah ini untuk menguji navigasi dan alur kerja masing-masing persona (Superadmin Platform, Admin MTQ, dan Dewan Hakim).
+              Pilih peran simulasi di bawah ini untuk menguji alur kerja antarmuka masing-masing persona (Superadmin Platform, Admin MTQ, dan Dewan Hakim).
             </p>
           </div>
 

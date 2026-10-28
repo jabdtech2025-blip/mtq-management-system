@@ -39,7 +39,9 @@ import {
 } from '../data/mockData';
 import { calculateAssessmentScore, getActiveRubricFields } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
-import { supabaseDataService } from '../services/supabaseDataService';
+import { supabaseDataService, AuthenticatedSupabaseProfile } from '../services/supabaseDataService';
+import { SupabaseConnectionInfo, supabase } from '../lib/supabaseClient';
+import { generateUuid, toDeterministicUuid, isValidUuid } from '../utils/uuid';
 import {
   OFFICIAL_SENI_BACA_RUBRIC,
   INITIAL_RUBRIC_VERSIONS,
@@ -276,6 +278,13 @@ interface MtqContextType {
   isDemoAccountModalOpen: boolean;
   setIsDemoAccountModalOpen: (open: boolean) => void;
   resetPrototypeData: () => void;
+
+  // Real Supabase Connection & Auth Integration
+  connectionInfo: SupabaseConnectionInfo;
+  authenticatedProfile: AuthenticatedSupabaseProfile | null;
+  refreshSupabaseConnection: () => Promise<SupabaseConnectionInfo>;
+  signInWithSupabase: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
+  signOutSupabase: () => Promise<void>;
 }
 
 const MtqContext = createContext<MtqContextType | undefined>(undefined);
@@ -563,6 +572,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedParticipantId, setSelectedParticipantId] = useState<string>('part-04');
   const [selectedStageName, setSelectedStageName] = useState<string>('Penyisihan');
   const [monitoringJudgeId, setMonitoringJudgeId] = useState<string>('judge-1');
+  const [connectionInfo, setConnectionInfo] = useState<SupabaseConnectionInfo>(() =>
+    supabaseDataService.getConnectionStatus()
+  );
+  const [authenticatedProfile, setAuthenticatedProfile] = useState<AuthenticatedSupabaseProfile | null>(null);
   const [syncStatus, setSyncStatus] = useState<string>(() =>
     supabaseDataService.isLive()
       ? supabaseDataService.getConnectionStatus().statusLabel
@@ -734,6 +747,115 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Reset error', e);
     }
   };
+
+  /**
+   * Pemeriksaan koneksi nyata ke Supabase, sinkronisasi profil Auth, dan hidrasi data workspace.
+   */
+  const refreshSupabaseConnection = async (): Promise<SupabaseConnectionInfo> => {
+    const info = await supabaseDataService.verifyDatabaseConnection();
+    setConnectionInfo(info);
+    setSyncStatus(info.statusLabel);
+
+    if (info.isDatabaseReady) {
+      const profile = await supabaseDataService.fetchAuthenticatedUserProfile();
+      setAuthenticatedProfile(profile);
+
+      if (profile) {
+        const primaryMembership = profile.memberships[0];
+        const effectiveRole = primaryMembership?.role || profile.globalRole;
+        const effectiveTenantId =
+          primaryMembership?.tenantId ||
+          (effectiveRole === 'superadmin' ? 'platform' : currentTenantId);
+
+        setUsers((prev) => {
+          const exists = prev.some((u) => u.id === profile.authUserId);
+          const mappedUser: User = {
+            id: profile.authUserId,
+            tenantId: effectiveTenantId,
+            username: profile.username,
+            email: profile.email,
+            name: profile.name,
+            role: effectiveRole,
+            status: 'Aktif',
+            judgeCategory: primaryMembership?.judgeCategory,
+            judgeField: primaryMembership?.judgeField
+          };
+          return exists
+            ? prev.map((u) => (u.id === profile.authUserId ? { ...u, ...mappedUser } : u))
+            : [mappedUser, ...prev];
+        });
+        setCurrentUserId(profile.authUserId);
+        if (primaryMembership?.tenantId) {
+          setCurrentTenantId(primaryMembership.tenantId);
+        }
+      }
+
+      const hydrated = await supabaseDataService.fetchTenantWorkspaceData(currentTenantId);
+      if (hydrated) {
+        if (hydrated.tenants && hydrated.tenants.length > 0) setTenants(hydrated.tenants);
+        if (hydrated.cabangList && hydrated.cabangList.length > 0) setCabangList(hydrated.cabangList);
+        if (hydrated.jenjangList && hydrated.jenjangList.length > 0) setJenjangList(hydrated.jenjangList);
+        if (hydrated.kafilahs && hydrated.kafilahs.length > 0) setKafilahs(hydrated.kafilahs);
+        if (hydrated.stages && hydrated.stages.length > 0) setStages(hydrated.stages);
+        if (hydrated.questions && hydrated.questions.length > 0) setQuestions(hydrated.questions);
+        if (hydrated.participants && hydrated.participants.length > 0) setParticipants(hydrated.participants);
+        if (hydrated.stageParticipations && hydrated.stageParticipations.length > 0) {
+          setStageParticipations(hydrated.stageParticipations);
+        }
+        if (hydrated.errorCategories && hydrated.errorCategories.length > 0) {
+          setErrorCategories(hydrated.errorCategories);
+        }
+        if (hydrated.competitionRules && hydrated.competitionRules.length > 0) {
+          setCompetitionRules(hydrated.competitionRules);
+        }
+        if (hydrated.judgeAssignments && hydrated.judgeAssignments.length > 0) {
+          setJudgeAssignments(hydrated.judgeAssignments);
+        }
+        if (hydrated.assessments && hydrated.assessments.length > 0) {
+          setAssessments(hydrated.assessments);
+        }
+        if (hydrated.stageSnapshots && hydrated.stageSnapshots.length > 0) {
+          setStageSnapshots(hydrated.stageSnapshots);
+        }
+        if (hydrated.auditLogs && hydrated.auditLogs.length > 0) {
+          setAuditLogs(hydrated.auditLogs);
+        }
+      }
+    } else {
+      setAuthenticatedProfile(null);
+    }
+
+    return info;
+  };
+
+  const signInWithSupabase = async (
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const res = await supabaseDataService.signInWithPassword(email, password);
+    await refreshSupabaseConnection();
+    return { success: res.success, message: res.message };
+  };
+
+  const signOutSupabase = async (): Promise<void> => {
+    await supabaseDataService.signOut();
+    setAuthenticatedProfile(null);
+    await refreshSupabaseConnection();
+  };
+
+  useEffect(() => {
+    if (supabaseDataService.isLive()) {
+      void refreshSupabaseConnection();
+    }
+    if (supabase) {
+      const { data: sub } = supabase.auth.onAuthStateChange(() => {
+        void refreshSupabaseConnection();
+      });
+      return () => {
+        sub.subscription.unsubscribe();
+      };
+    }
+  }, [currentTenantId]);
 
   /**
    * Helper to retrieve all questions assigned to a participant on a specific stage.
@@ -1218,7 +1340,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           lastUpdated: nowTime
         }
       : {
-          id: `asm-${participantId}-${judgeId}-${stageId}-${targetQuestionId}`,
+          id: toDeterministicUuid(`asm-${participantId}-${judgeId}-${stageId}-${targetQuestionId}`),
           tenantId: currentTenantId,
           stageParticipationId: sp.id,
           stageId,
@@ -1253,6 +1375,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : item
       )
     );
+
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      void supabaseDataService.syncAssessmentToRemote(
+        {
+          ...initializedAsm,
+          id: toDeterministicUuid(initializedAsm.id),
+          tenantId: toDeterministicUuid(currentTenantId),
+          stageParticipationId: toDeterministicUuid(sp.id),
+          judgeId: toDeterministicUuid(judgeId),
+          rubricVersionId: toDeterministicUuid(activeRubric.id)
+        },
+        toDeterministicUuid(`am-${sp.id}-${targetQuestionId}`)
+      );
+    }
 
     return {
       success: true,
@@ -1390,7 +1526,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           lastUpdated: nowTime
         }
       : {
-          id: `asm-${participantId}-${judgeId}-${stageId}-${targetQuestionId}`,
+          id: toDeterministicUuid(`asm-${participantId}-${judgeId}-${stageId}-${targetQuestionId}`),
           tenantId: currentTenantId,
           stageParticipationId: sp.id,
           stageId,
@@ -1417,6 +1553,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const others = prev.filter((a) => a.id !== updatedAssessment.id);
       return [...others, updatedAssessment];
     });
+
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      void supabaseDataService.syncAssessmentToRemote(
+        {
+          ...updatedAssessment,
+          id: toDeterministicUuid(updatedAssessment.id),
+          tenantId: toDeterministicUuid(currentTenantId),
+          stageParticipationId: toDeterministicUuid(sp.id),
+          judgeId: toDeterministicUuid(judgeId),
+          rubricVersionId: toDeterministicUuid(activeRubric.id)
+        },
+        toDeterministicUuid(`am-${sp.id}-${targetQuestionId}`)
+      );
+    }
 
     // Update stage participation status to Berlangsung
     setStageParticipations((prev) =>
@@ -1828,6 +1978,28 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     setLastSyncTime(nowTime);
 
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      const asmUuid = toDeterministicUuid(existing.id);
+      void supabaseDataService
+        .syncAssessmentToRemote(
+          {
+            ...existing,
+            id: asmUuid,
+            tenantId: toDeterministicUuid(currentTenantId),
+            stageParticipationId: toDeterministicUuid(sp.id),
+            judgeId: toDeterministicUuid(judgeId),
+            rubricVersionId: toDeterministicUuid(activeRubric.id),
+            status: 'in_progress',
+            deductions: scoreResult.deductions,
+            fieldScores: scoreResult.fieldScores,
+            totalDeductions: scoreResult.totalDeductions,
+            finalScore: scoreResult.finalScore
+          },
+          toDeterministicUuid(`am-${sp.id}-${targetQuestionId}`)
+        )
+        .then(() => supabaseDataService.finalizeJudgeAssessmentRpc(asmUuid));
+    }
+
     return {
       success: true,
       message: `Penilaian ${qLabel} untuk peserta ${part.name} (Skor: ${finalizedScore.toFixed(2)}) berhasil dikunci dan difinalisasi.`
@@ -1952,6 +2124,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setActivityLogs((prev) => [reopenActivity, ...prev.filter((l) => l.id !== reopenActivity.id).slice(0, 20)]);
 
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      void supabaseDataService.reopenJudgeAssessmentRpc(
+        toDeterministicUuid(existing.id),
+        reason
+      );
+    }
+
     return {
       success: true,
       message: `Lembar penilaian berhasil dibuka kembali untuk koreksi. Hakim terkait sekarang dapat mengedit nilai.`
@@ -1962,10 +2141,16 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addKafilah = (data: Omit<Kafilah, 'id' | 'tenantId'>) => {
     const newKafilah: Kafilah = {
       ...data,
-      id: 'kf-' + Date.now(),
+      id: generateUuid(),
       tenantId: currentTenantId
     };
     setKafilahs((prev) => [...prev, newKafilah]);
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      void supabaseDataService.upsertKafilah({
+        ...newKafilah,
+        tenantId: toDeterministicUuid(currentTenantId)
+      });
+    }
   };
 
   const updateKafilah = (id: string, updated: Partial<Kafilah>) => {
@@ -2014,12 +2199,16 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    const newPartId = 'part-' + Date.now();
+    const newPartId = generateUuid();
     const targetStage = data.stageName || 'Penyisihan';
     const targetStageObj = stages.find(
       (s) => s.tenantId === currentTenantId && s.name === targetStage
     );
-    const stageId = targetStageObj?.id || 'stage-penyisihan';
+    const stageId = targetStageObj?.id || toDeterministicUuid('stage-penyisihan');
+    const matchedBranch = cabangList.find(
+      (c) => c.name === data.branchName || data.branchName.includes(c.name)
+    );
+    const branchId = data.branchId || matchedBranch?.id || toDeterministicUuid(data.branchName);
 
     const hasQuestion = Boolean(data.questionId && data.questionId.trim() !== '');
 
@@ -2027,6 +2216,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...data,
       id: newPartId,
       tenantId: currentTenantId,
+      branchId,
       questionId: hasQuestion ? data.questionId : '',
       assignedMaqra: hasQuestion ? data.assignedMaqra : 'Belum Ditetapkan',
       pageNumber: hasQuestion ? data.pageNumber : 1,
@@ -2042,11 +2232,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const newParticipation: StageParticipation = {
-      id: `sp-${newPartId}-${stageId}-${Date.now()}`,
+      id: generateUuid(),
       tenantId: currentTenantId,
       participantId: newPartId,
       stageId,
       stageName: targetStage,
+      branchId,
       branchName: data.branchName,
       lotteryNumber: data.lotteryNumber,
       questionId: hasQuestion ? data.questionId : '',
@@ -2058,6 +2249,24 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setParticipants((prev) => [...prev, newPart]);
     setStageParticipations((prev) => [...prev, newParticipation]);
+
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      const matchedLevel = jenjangList.find((j) => j.name === data.levelName);
+      void supabaseDataService.upsertParticipantWithStage({
+        participant: {
+          ...newPart,
+          tenantId: toDeterministicUuid(currentTenantId),
+          kafilahId: toDeterministicUuid(newPart.kafilahId),
+          branchId: toDeterministicUuid(branchId)
+        },
+        stageParticipation: {
+          ...newParticipation,
+          tenantId: toDeterministicUuid(currentTenantId),
+          stageId: toDeterministicUuid(stageId)
+        },
+        levelId: matchedLevel?.id ? toDeterministicUuid(matchedLevel.id) : null
+      });
+    }
 
     setKafilahs((prev) =>
       prev.map((k) =>
@@ -2112,10 +2321,16 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addQuestion = (data: Omit<Question, 'id' | 'tenantId'>) => {
     const newQ: Question = {
       ...data,
-      id: 'mq-' + Date.now(),
+      id: generateUuid(),
       tenantId: currentTenantId
     };
     setQuestions((prev) => [...prev, newQ]);
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      void supabaseDataService.upsertQuestion({
+        ...newQ,
+        tenantId: toDeterministicUuid(currentTenantId)
+      });
+    }
   };
 
   const updateQuestion = (id: string, updated: Partial<Question>) => {
@@ -3319,6 +3534,18 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setAuditLogs((prev) => [newAudit, ...prev.filter((l) => l.id !== newAudit.id)]);
 
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      void supabaseDataService.advanceStageQualifiersRpc({
+        stageId: toDeterministicUuid(currentStg.id),
+        nextStageId: nextStg ? toDeterministicUuid(nextStg.id) : null,
+        qualifiedParticipantIds: finalQualifiedIds.map((id) => toDeterministicUuid(id)),
+        overrideReasons: Object.fromEntries(
+          Object.entries(overrideReasons || {}).map(([k, v]) => [toDeterministicUuid(k), v])
+        ),
+        rankingsSnapshot: stageSnapshot.rankings
+      });
+    }
+
     return {
       success: true,
       message: `Berhasil memfinalisasi Babak ${currentStageName} dan meloloskan ${finalQualifiedIds.length} peserta ke Babak ${nextStageName}.`
@@ -3329,10 +3556,18 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addJudgeAssignment = (asg: Omit<JudgeAssignment, 'id' | 'tenantId'>) => {
     const newAsg: JudgeAssignment = {
       ...asg,
-      id: 'asg-' + Date.now(),
+      id: generateUuid(),
       tenantId: currentTenantId
     };
     setJudgeAssignments((prev) => [...prev, newAsg]);
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      void supabaseDataService.upsertJudgeAssignment({
+        ...newAsg,
+        tenantId: toDeterministicUuid(currentTenantId),
+        stageId: toDeterministicUuid(newAsg.stageId || 'stage-penyisihan'),
+        judgeId: toDeterministicUuid(newAsg.judgeId)
+      });
+    }
   };
 
   const removeJudgeAssignment = (id: string) => {
@@ -3430,7 +3665,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         exitTenantWorkspace,
         isDemoAccountModalOpen,
         setIsDemoAccountModalOpen,
-        resetPrototypeData
+        resetPrototypeData,
+        connectionInfo,
+        authenticatedProfile,
+        refreshSupabaseConnection,
+        signInWithSupabase,
+        signOutSupabase
       }}
     >
       {children}
