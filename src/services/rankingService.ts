@@ -47,7 +47,9 @@ export class RankingService {
    */
   static evaluateStageParticipants(params: {
     tenantId: string;
+    stageId?: string;
     stageName: string;
+    branchId?: string;
     branchName?: string;
     participations: StageParticipation[];
     participants: Participant[];
@@ -70,7 +72,9 @@ export class RankingService {
   } {
     const {
       tenantId,
+      stageId,
       stageName,
+      branchId,
       branchName,
       participations,
       participants,
@@ -83,10 +87,12 @@ export class RankingService {
       customRuleConfigs
     } = params;
 
-    // 1. Filter partisipasi babak dengan isolasi tenant dan cabang
+    // 1. Filter partisipasi babak dengan isolasi tenant, stageId, dan cabang (P0-C)
     const filteredParticipations = participations.filter((sp) => {
       if (sp.tenantId !== tenantId) return false;
+      if (stageId && sp.stageId && sp.stageId !== stageId) return false;
       if (sp.stageName !== stageName) return false;
+      if (branchId && sp.branchId && sp.branchId !== branchId) return false;
       if (branchName && branchName !== 'Semua Cabang' && sp.branchName !== branchName) {
         return false;
       }
@@ -250,18 +256,23 @@ export class RankingService {
 
     Object.entries(scoresMap).forEach(([scoreStr, pIds]) => {
       if (pIds.length > 1) {
-        const firstParticipant = evaluatedParticipants.find((ep) => ep.participant.id === pIds[0]);
-        if (firstParticipant && firstParticipant.rank <= 3) {
+        const tiedPodiumParticipants = evaluatedParticipants.filter(
+          (ep) => pIds.includes(ep.participant.id) && ep.rank <= 3 && ep.hasUnresolvedTie
+        );
+        if (tiedPodiumParticipants.length > 1) {
           podiumTies.push({
-            rank: firstParticipant.rank,
-            participantIds: pIds,
+            rank: tiedPodiumParticipants[0].rank,
+            participantIds: tiedPodiumParticipants.map((ep) => ep.participant.id),
             score: Number(scoreStr)
           });
         }
       }
     });
 
-    // Cek batas kuota kelulusan
+    // P0-D: Cek batas kuota kelulusan (Boundary Tie)
+    // HANYA memblokir jika peserta pada batas kuota (quota vs quota+1) TETAP SERI IDENTIK
+    // setelah seluruh kriteria tie-break resmi dievaluasi (unresolved tie).
+    // Jika peserta sudah dibedakan oleh bidang tie-break (misal Tajwid/Lagu), TIDAK boleh diblokir!
     let boundaryTie = false;
     if (evaluatedParticipants.length > quota && quota > 0) {
       const quotaItem = evaluatedParticipants[quota - 1];
@@ -270,8 +281,13 @@ export class RankingService {
         manualOverrides[quotaItem?.participant.id] !== undefined ||
         manualOverrides[nextItem?.participant.id] !== undefined;
 
+      const hasUnresolvedBoundaryTie =
+        Boolean(quotaItem?.hasUnresolvedTie && nextItem?.hasUnresolvedTie) ||
+        Boolean(quotaItem?.hasUnresolvedTieWithNext);
+
       if (
         !isBoundaryOverridden &&
+        hasUnresolvedBoundaryTie &&
         quotaItem?.displayScore &&
         nextItem?.displayScore &&
         quotaItem.displayScore === nextItem.displayScore &&
@@ -287,12 +303,15 @@ export class RankingService {
     let canFinalize = allFinalized;
     let blockingReason: string | undefined;
 
-    if (!allFinalized) {
+    if (!ruleConfig || !ruleConfig.rubricVersionId || ruleConfig.status === 'Draft') {
+      canFinalize = false;
+      blockingReason = `Cabang "${targetBranch}" belum memiliki konfigurasi aturan kompetisi resmi atau rubrik aktif yang valid.`;
+    } else if (!allFinalized) {
       canFinalize = false;
       blockingReason = `Terdapat ${incompleteCount} peserta yang penilaiannya belum lengkap dari seluruh dewan hakim.`;
     } else if (boundaryTie) {
       canFinalize = false;
-      blockingReason = 'Terdapat nilai seri pada batas kuota kelulusan. Wajib diselesaikan melalui sidang pleno atau override manual berizin sebelum babak disahkan.';
+      blockingReason = 'Terdapat nilai seri identik tak terpecahkan pada batas kuota kelulusan. Wajib diselesaikan melalui sidang pleno atau override manual berizin sebelum babak disahkan.';
     } else {
       // Periksa apakah ada nilai seri tak terpecahkan di posisi podium tanpa override
       const podiumUnresolved = evaluatedParticipants.some(

@@ -341,11 +341,18 @@ export const PenilaianDualPanelView: React.FC = () => {
     setIsClearPageModalOpen(false);
   };
 
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+
   // Finalize action
   const handleConfirmFinalize = () => {
     if (!currentParticipant) return;
-    finalizeAssessment(currentParticipant.id, activeJudgeId, activeStageName, activeQuestionId);
-    setIsConfirmModalOpen(false);
+    const result = finalizeAssessment(currentParticipant.id, activeJudgeId, activeStageName, activeQuestionId);
+    if (!result.success) {
+      setFinalizeError(result.message);
+    } else {
+      setFinalizeError(null);
+      setIsConfirmModalOpen(false);
+    }
   };
 
   // Error counting values from active assessment
@@ -992,6 +999,12 @@ export const PenilaianDualPanelView: React.FC = () => {
                 </p>
               </div>
             </div>
+
+            {finalizeError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold mb-3">
+                {finalizeError}
+              </div>
+            )}
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 my-4 space-y-1.5 text-xs">
               <div className="flex justify-between">

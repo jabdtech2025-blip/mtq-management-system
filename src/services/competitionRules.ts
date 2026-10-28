@@ -297,22 +297,36 @@ export const INITIAL_RUBRIC_VERSIONS: RubricVersion[] = [
 ];
 
 /**
- * Mencari konfigurasi aturan kompetisi berdasarkan nama cabang dan tenant.
+/**
+ * Mencari konfigurasi aturan kompetisi berdasarkan nama cabang, tenant, dan branchId.
  * Prioritas:
- * 1. Konfigurasi dinamis tenant dari database / state admin (customConfigs)
- * 2. Pencocokan langsung kode / nama cabang di DEFAULT_COMPETITION_RULES
- * 3. Fallback aman dan transparan bertanda unverified jika belum dikonfigurasi admin
+ * 1. Konfigurasi dinamis tenant dari database / state admin (customConfigs) via branchId atau branchName
+ * 2. Pencocokan langsung cabang standar yang terverifikasi (Tahfizh, Tilawah, Fahmil)
+ * 3. HAPUS FALLBACK DIAM-DIAM KE SENI BACA: Cabang yang belum dikonfigurasi ditandai 'Draft'
+ *    dengan rubricVersionId kosong agar sistem menuntut konfigurasi sah dari Administrator.
  */
 export function getBranchRuleConfig(
   branchName: string,
   tenantId?: string,
-  customConfigs?: CompetitionRuleConfig[]
+  customConfigs?: CompetitionRuleConfig[],
+  branchId?: string
 ): CompetitionRuleConfig {
-  // 1. Periksa konfigurasi dinamis yang dikelola oleh Administrator
+  // 1. Periksa konfigurasi dinamis yang dikelola oleh Administrator via branchId atau branchName
   if (customConfigs && customConfigs.length > 0) {
+    if (branchId) {
+      const byBranchId = customConfigs.find(
+        (c) =>
+          (!tenantId || c.tenantId === tenantId || c.tenantId === 'system') &&
+          c.branchId === branchId &&
+          c.status !== 'Arsip'
+      );
+      if (byBranchId) return byBranchId;
+    }
+
     const directMatch = customConfigs.find(
       (c) =>
         (!tenantId || c.tenantId === tenantId || c.tenantId === 'system') &&
+        c.status !== 'Arsip' &&
         (c.branchName.toLowerCase() === branchName.toLowerCase() ||
           branchName.toLowerCase().startsWith(c.branchName.toLowerCase()))
     );
@@ -321,20 +335,22 @@ export function getBranchRuleConfig(
 
   const normalized = branchName.toLowerCase();
 
-  // 2. Pencocokan ke template standar
+  // 2. Pencocokan ke template standar yang diverifikasi resmi
   if (normalized.includes('tahfizh') || normalized.includes('hifzh') || normalized.includes('juz')) {
     return {
       ...DEFAULT_COMPETITION_RULES['Tahfizh'],
       tenantId: tenantId || 'system',
-      branchName
+      branchName,
+      branchId
     };
   }
 
-  if (normalized.includes('tilawah') || normalized.includes('seni baca')) {
+  if (normalized.includes('tilawah') || normalized.includes('seni baca') || normalized.includes('tartil') || normalized.includes('murattal') || normalized.includes('mujawwad')) {
     return {
       ...DEFAULT_COMPETITION_RULES['Tilawah'],
       tenantId: tenantId || 'system',
-      branchName
+      branchName,
+      branchId
     };
   }
 
@@ -342,23 +358,78 @@ export function getBranchRuleConfig(
     return {
       ...DEFAULT_COMPETITION_RULES['Fahmil'],
       tenantId: tenantId || 'system',
-      branchName
+      branchName,
+      branchId
     };
   }
 
-  // 3. Fallback konfigurasi transparan untuk cabang lain (Khat, KTIQ, Syarhil)
+  // 3. Cabang belum terverifikasi: DILARANG FALLBACK KE SENI BACA ATAU KUOTA 3!
+  // Menghasilkan konfigurasi Draft tanpa rubricVersionId agar proses menuntut penetapan admin di UI.
   return {
     id: `rule-cfg-${branchName.replace(/\s+/g, '-').toLowerCase()}`,
     tenantId: tenantId || 'system',
     branchName,
-    branchCode: 'GEN',
-    rubricVersionId: 'rubric-seni-baca-2025',
-    tieBreakOrder: ['total', 'Tajwid', 'Fashahah'],
-    quotaPerStage: {
-      'Penyisihan': 3,
-      'Final': 3
-    },
-    officialSource: 'Konfigurasi Default Standar (Perlu Konfirmasi Penyelenggara)',
-    isVerifiedOfficial: false
+    branchCode: 'UNCONFIGURED',
+    branchId,
+    rubricVersionId: '', // Sengaja dikosongkan untuk mencegah silent fallback
+    tieBreakOrder: ['total'],
+    quotaPerStage: {},
+    officialSource: 'Belum Dikonfigurasi (Wajib Ditetapkan Administrator di Master Data)',
+    isVerifiedOfficial: false,
+    status: 'Draft'
   };
+}
+
+/**
+ * Resolusi Rubrik Aktif untuk suatu cabang secara aman tanpa fallback diam-diam.
+ * Jika konfigurasi atau rubrik aktif tidak ditemukan, mengembalikan error deskriptif.
+ */
+export function resolveActiveRubricForBranch(params: {
+  branchName: string;
+  branchId?: string;
+  tenantId?: string;
+  competitionRules?: CompetitionRuleConfig[];
+  rubricVersions: RubricVersion[];
+}): { rubric: RubricVersion | null; error?: string } {
+  const { branchName, branchId, tenantId, competitionRules, rubricVersions } = params;
+
+  const ruleConfig = getBranchRuleConfig(branchName, tenantId, competitionRules, branchId);
+
+  if (!ruleConfig || !ruleConfig.rubricVersionId || ruleConfig.rubricVersionId === '') {
+    return {
+      rubric: null,
+      error: `Cabang "${branchName}" belum memiliki konfigurasi aturan kompetisi atau rubrik terkait. Harap tetapkan rubrik di Master Data Aturan Cabang.`
+    };
+  }
+
+  const activeRubric = rubricVersions.find(
+    (r) =>
+      r.id === ruleConfig.rubricVersionId &&
+      (!tenantId || r.tenantId === tenantId || r.tenantId === 'system') &&
+      r.status === 'Aktif'
+  );
+
+  if (!activeRubric) {
+    // Cari apakah ada versi rubrik aktif khusus untuk cabang ini
+    const branchSpecificActive = rubricVersions.find(
+      (r) =>
+        (!tenantId || r.tenantId === tenantId || r.tenantId === 'system') &&
+        r.status === 'Aktif' &&
+        (r.branchName.toLowerCase() === branchName.toLowerCase() ||
+          branchName.toLowerCase().includes(r.branchName.toLowerCase()) ||
+          (r.branchCode && r.branchCode.toLowerCase() === (ruleConfig.branchCode || '').toLowerCase()))
+    );
+
+    if (branchSpecificActive) {
+      return { rubric: branchSpecificActive };
+    }
+
+    // DILARANG DIAM-DIAM FALLBACK KE SENI BACA!
+    return {
+      rubric: null,
+      error: `Versi rubrik aktif dengan ID "${ruleConfig.rubricVersionId}" untuk cabang "${branchName}" tidak ditemukan atau belum berstatus "Aktif". Hubungi Administrator.`
+    };
+  }
+
+  return { rubric: activeRubric };
 }

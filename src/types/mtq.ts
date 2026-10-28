@@ -69,6 +69,7 @@ export interface StageParticipation {
   participantId: string;
   stageId: string;
   stageName: string;
+  branchId?: string;
   branchName: string;
   lotteryNumber: string;
   questionId: string; // Primary question for backward compatibility
@@ -93,6 +94,7 @@ export interface Participant {
   gender: 'Putra' | 'Putri';
   kafilahId: string;
   kafilahName: string;
+  branchId?: string;
   branchName: string; // e.g. "Tilawah Dewasa Putra"
   levelName: string;  // e.g. "Ulya"
   stageName: string;  // Current stage for compatibility
@@ -200,6 +202,7 @@ export interface RubricField {
   order: number;
   description?: string;
   criteria?: RubricCriterion[];
+  status?: 'Aktif' | 'Nonaktif' | 'Arsip';
 }
 
 export interface RubricVersion {
@@ -253,6 +256,7 @@ export interface CompetitionStage {
   tenantId: string;
   name: string;
   order: number;
+  branchId?: string;
   branchName: string;
   status: 'Menunggu' | 'Aktif' | 'Selesai';
   qualificationQuota: number;

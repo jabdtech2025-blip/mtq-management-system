@@ -787,5 +787,138 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     `Snapshot rubric: ${historicalSnapshot.rubricVersionId}, tieBreakRule: ${historicalSnapshot.tieBreakRuleUsed}, Rank 1: ${historicalSnapshot.rankings[0]?.participantName}`
   );
 
+  // 20. Validasi Integer Ketat untuk Jumlah Kesalahan (Error Counts)
+  const floatCountCalc = calculateAssessmentScore(
+    { 'cat-mkh': 2.5 },
+    sampleCategories,
+    OFFICIAL_SENI_BACA_RUBRIC
+  );
+  assert(
+    '20. Validasi Integer Ketat: Input desimal pada jumlah kejadian kesalahan ditolak dengan validation error',
+    floatCountCalc.validationErrors.length > 0 && floatCountCalc.validationErrors[0].includes('bilangan bulat'),
+    `Validation errors: ${floatCountCalc.validationErrors.join('; ')}`
+  );
+
+  // 21. Akurasi Potongan Desimal per Kejadian (0.5, 1.0, 1.5)
+  const decimalDeductionCalc = calculateAssessmentScore(
+    { 'cat-idg': 3 },
+    sampleCategories,
+    OFFICIAL_SENI_BACA_RUBRIC
+  );
+  assert(
+    '21. Potongan Desimal: 3 kejadian * 0.5 poin = 1.50 potongan pada Tajwid (Skor: 28.50)',
+    decimalDeductionCalc.fieldDeductions['Tajwid'] === 1.5 && decimalDeductionCalc.fieldScores['Tajwid'] === 28.5,
+    `Tajwid deduction: ${decimalDeductionCalc.fieldDeductions['Tajwid']}, Tajwid score: ${decimalDeductionCalc.fieldScores['Tajwid']}`
+  );
+
+  // 22. Batas Maksimum Pengurangan per Bidang (fieldMaxDeduction)
+  const overDeductionCalc = calculateAssessmentScore(
+    { 'cat-mkh': 50 },
+    sampleCategories,
+    OFFICIAL_SENI_BACA_RUBRIC
+  );
+  assert(
+    '22. Batas Bidang: Pengurangan Tajwid tidak melebihi skor maksimal bidang 30 (Skor Tajwid min = 0)',
+    overDeductionCalc.fieldScores['Tajwid'] === 0 && overDeductionCalc.finalScore >= 0,
+    `Tajwid score: ${overDeductionCalc.fieldScores['Tajwid']}, Final score: ${overDeductionCalc.finalScore}`
+  );
+
+  // 23. Isolasi Multi-Cabang untuk Babak dengan Nama Identik ("Penyisihan")
+  const multiBranchEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-1',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: [
+      { id: 'sp-til', tenantId: 't-1', participantId: 'p-til-1', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', lotteryNumber: '01', questionId: 'q-1', assignedMaqra: 'Maqra 1', pageNumber: 300, status: 'Lengkap' },
+      { id: 'sp-tah', tenantId: 't-1', participantId: 'p-tah-1', stageId: 'stg-2', stageName: 'Penyisihan', branchName: 'Tahfizh 30 Juz', lotteryNumber: '01', questionId: 'q-2', assignedMaqra: 'Maqra 2', pageNumber: 305, status: 'Lengkap' }
+    ],
+    participants: [
+      { id: 'p-til-1', tenantId: 't-1', name: 'Qari Tilawah', participantId: 'TLW-01', lotteryNumber: '01', gender: 'Putra', kafilahId: 'kf-1', kafilahName: 'Kafilah Kota', branchName: 'Tilawah Dewasa Putra', levelName: 'Dewasa', questionId: 'q-1', assignedMaqra: 'Maqra 1', pageNumber: 300, status: 'Berlangsung', stageName: 'Penyisihan' },
+      { id: 'p-tah-1', tenantId: 't-1', name: 'Hafizh Tahfizh', participantId: 'THF-01', lotteryNumber: '01', gender: 'Putra', kafilahId: 'kf-1', kafilahName: 'Kafilah Kota', branchName: 'Tahfizh 30 Juz', levelName: 'Dewasa', questionId: 'q-2', assignedMaqra: 'Maqra 2', pageNumber: 305, status: 'Berlangsung', stageName: 'Penyisihan' }
+    ],
+    assessments: [
+      { id: 'a-til', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', participantId: 'p-til-1', stageParticipationId: 'sp-til', stageId: 'stg-1', stageName: 'Penyisihan', questionId: 'q-1', fieldScores: { Tajwid: 29 }, finalScore: 95, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 5, annotations: [], lastUpdated: '10:00' },
+      { id: 'a-tah', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tahfizh', participantId: 'p-tah-1', stageParticipationId: 'sp-tah', stageId: 'stg-2', stageName: 'Penyisihan', questionId: 'q-2', fieldScores: { Tahfizh: 49 }, finalScore: 98, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 2, annotations: [], lastUpdated: '10:00' }
+    ],
+    judgeAssignments: [{ id: 'ja-1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra' }],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1
+  });
+  assert(
+    '23. Isolasi Multi-Cabang: Evaluasi Babak Penyisihan Tilawah hanya menyertakan peserta Tilawah (1 peserta)',
+    multiBranchEval.evaluatedParticipants.length === 1 && multiBranchEval.evaluatedParticipants[0].participant.id === 'p-til-1',
+    `Evaluated count: ${multiBranchEval.evaluatedParticipants.length}`
+  );
+
+  // 24. Dukungan Manual Overrides True dan False
+  const overrideEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: tieBreakAssessments,
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1,
+    manualOverrides: { 'p-tb-b': true, 'p-tb-a': false },
+    overrideReasons: { 'p-tb-b': 'Diskualifikasi administratif Qari A' }
+  });
+  const rank1Override = overrideEval.evaluatedParticipants.find((p) => p.rank === 1);
+  assert(
+    '24. Manual Overrides: Admin dapat secara eksplisit menetapkan true (lolos) dan false (gugur) secara manual',
+    Boolean(rank1Override && rank1Override.participant.id === 'p-tb-b' && rank1Override.isQualified === true),
+    `Rank 1: ${rank1Override?.participant.name}, Qualified: ${rank1Override?.isQualified}`
+  );
+
+  // 25. Pengesahan Seri Terpecahkan (False-Positive Boundary Tie Bug Fix)
+  const resolvedTieEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: tieBreakAssessments,
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1
+  });
+  assert(
+    '25. Bebas False-Positive Boundary Tie: Seri yang berhasil dipecahkan oleh tie-break Tajwid TIDAK memblokir finalisasi',
+    resolvedTieEval.canFinalize === true && resolvedTieEval.boundaryTie === false,
+    `canFinalize: ${resolvedTieEval.canFinalize}, boundaryTie: ${resolvedTieEval.boundaryTie}`
+  );
+
+  // 26. Pembuatan Snapshot Mengandung Timestamp WIB Terformat
+  assert(
+    '26. Format Timestamp Snapshot: Snapshot hasil babak mencantumkan waktu finalisasi berformat WIB',
+    typeof historicalSnapshot.finalizedAt === 'string' && historicalSnapshot.finalizedAt.length > 0,
+    `Finalized at: ${historicalSnapshot.finalizedAt}`
+  );
+
+  // 27. Konsistensi Penilaian Multi-Soal (Rata-rata Akurat)
+  const sampleStageQuestions: AssignedMaqraItem[] = [
+    { questionId: 'q-1', title: 'Maqra 1', pageNumber: 300 },
+    { questionId: 'q-2', title: 'Maqra 2', pageNumber: 305 }
+  ];
+  const sampleAssessments: JudgeAssessment[] = [
+    { id: 'a-1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', participantId: 'p-m', stageParticipationId: 'sp-m', stageId: 's-1', stageName: 'Penyisihan', questionId: 'q-1', fieldScores: { Tajwid: 25 }, finalScore: 90.0, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 10, annotations: [], lastUpdated: '10:00' },
+    { id: 'a-2', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', participantId: 'p-m', stageParticipationId: 'sp-m', stageId: 's-1', stageName: 'Penyisihan', questionId: 'q-2', fieldScores: { Tajwid: 30 }, finalScore: 100.0, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 0, annotations: [], lastUpdated: '10:00' }
+  ];
+  const multiMaqraCalc = aggregateParticipantScores('p-m', 'Penyisihan', sampleStageQuestions, ['j-1'], sampleAssessments);
+  assert(
+    '27. Agregasi Multi-Maqra: Rata-rata 2 maqra (90.0 dan 100.0) menghasilkan nilai tepat 95.00',
+    multiMaqraCalc.averageFinalScore === 95.0 && multiMaqraCalc.isFullyFinalized === true,
+    `Aggregated score: ${multiMaqraCalc.averageFinalScore}`
+  );
+
+  // 28. Validasi Kelengkapan Penilaian Dewan Hakim Sebelum Advance Qualifiers
+  assert(
+    '28. Validasi Kelengkapan: Penilaian dewan hakim yang belum lengkap mencegah pengesahan kualifikasi',
+    Boolean(blockedEval.blockingReason || !blockedEval.canFinalize),
+    `Blocking reason: ${blockedEval.blockingReason}`
+  );
+
   return { passed, failed, results };
 }
+

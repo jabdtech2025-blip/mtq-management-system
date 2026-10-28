@@ -1,0 +1,461 @@
+# MASTER PROMPT — P0 PRODUCTION HARDENING MTQ MANAGEMENT SYSTEM
+
+## 1. Peran dan tujuan
+
+Bertindak sebagai Senior Full-Stack Engineer, Software Architect, Database Security Engineer, dan QA Engineer yang bertanggung jawab memperbaiki aplikasi MTQ Management System sampai seluruh blocker kritis teratasi dan hasilnya dapat diverifikasi.
+
+**Tujuan utama:** memperbaiki integritas penilaian, isolasi data, konfigurasi rubrik, keamanan otorisasi, proses kelulusan, serta kesiapan backend Supabase.
+
+Jangan menambah fitur yang tidak berkaitan sebelum blocker prioritas P0 selesai. Pertahankan desain antarmuka yang sudah ada sejauh mungkin. Jangan melakukan redesign besar atau menghilangkan fitur yang masih berfungsi tanpa alasan teknis yang jelas.
+
+Jangan hanya memberikan rekomendasi, contoh kode, pseudocode, atau daftar pekerjaan. Implementasikan perubahan secara nyata pada repository jika akses menulis tersedia.
+
+## 2. Prosedur kerja dan keselamatan perubahan
+
+1. Periksa struktur repository, branch aktif, commit terbaru, `package.json`, tipe data, service, context, komponen UI, skema SQL, konfigurasi deployment, dan seluruh tes yang tersedia.
+2. Pastikan setiap temuan audit masih sesuai dengan kode terbaru sebelum mengubahnya.
+3. Buat branch khusus, misalnya `fix/p0-production-hardening`. Jangan langsung mengubah `main`.
+4. Buat perubahan bertahap berdasarkan kelompok pekerjaan di bawah ini.
+5. Pertahankan kompatibilitas data lama. Bila perlu mengubah struktur database atau format penyimpanan, sediakan migrasi yang aman.
+6. Jangan menghapus data, mengganti struktur database secara destruktif, atau mereset database yang sudah ada.
+7. Jangan menuliskan secret, service-role key, token, password, atau kredensial pengguna ke kode sumber, log, dokumentasi, atau commit.
+8. Jangan mengklaim berhasil jika perintah, tes, migrasi, atau integrasi belum benar-benar dijalankan.
+9. Jika akses database, credential Supabase, atau lingkungan browser tidak tersedia, implementasikan bagian yang dapat dikerjakan, buat pengujian yang sesuai, lalu jelaskan bagian yang masih membutuhkan lingkungan eksternal.
+10. Setelah semua pekerjaan selesai, buat pull request berisi perubahan, temuan, hasil tes, risiko yang tersisa, dan cara memverifikasinya. Jangan merge otomatis ke `main`.
+
+## 3. P0-A — Jadikan konfigurasi rubrik dan aturan kompetisi benar-benar dinamis
+
+Audit dan perbaiki setidaknya:
+
+- `src/services/competitionRules.ts`
+- `src/services/scoringEngine.ts`
+- `src/components/masterData/MasterDataView.tsx`
+- `src/context/MtqContext.tsx`
+- `src/types/mtq.ts`
+
+### A. Rubrik dinamis
+
+Admin harus dapat membuat dan mengatur rubrik sesuai kebutuhan setiap cabang atau golongan, tanpa dipaksa menggunakan struktur Seni Baca yang tetap.
+
+Fitur wajib:
+
+- Tambah bidang penilaian.
+- Edit nama, kode, deskripsi, urutan, nilai minimal, nilai maksimal, dan bobot jika digunakan.
+- Hapus bidang jika belum terikat pada hasil final atau data historis yang harus dipertahankan.
+- Nonaktifkan atau arsipkan bidang ketika penghapusan permanen tidak aman.
+- Tentukan total nilai awal rubrik.
+- Validasi agar batas skor setiap bidang dan total skor konsisten.
+- Izinkan struktur bidang yang berbeda untuk setiap rubrik.
+- Simpan identitas bidang melalui ID yang stabil, bukan hanya nama.
+- Tampilkan pesan validasi yang jelas jika konfigurasi tidak lengkap atau tidak valid.
+
+Contoh konfigurasi rubrik dapat berisi Tajwid, Fashahah, Itqan, dan Suara tanpa bidang Lagu/Irama. Ini hanya contoh struktur konfigurasi, bukan penetapan bobot penilaian resmi.
+
+Jangan hardcode empat bidang bawaan sebagai satu-satunya struktur yang bisa dibuat. Template rubrik boleh disediakan, tetapi hanya sebagai template yang dapat dipilih admin dan diubah sesuai kebutuhan.
+
+### B. Versi dan imutabilitas rubrik
+
+- Rubrik yang sudah digunakan untuk penilaian final harus dipertahankan sebagai versi historis.
+- Perubahan konfigurasi yang berpotensi memengaruhi penilaian harus membuat versi baru, bukan mengubah diam-diam definisi rubrik lama.
+- Setiap penilaian final harus merujuk ke versi rubrik yang benar-benar digunakan.
+- Validasi transisi status `Draft`, `Validasi`, `Aktif`, dan `Arsip`.
+- Aktivasi rubrik harus memastikan struktur dan pemetaan kategori valid.
+- Jangan mengarsipkan rubrik milik tenant atau cabang lain hanya karena mempunyai nama atau kode yang sama.
+
+Imutabilitas historis harus ditegakkan pada backend atau database, bukan hanya melalui pembatasan tombol UI.
+
+### C. Hilangkan fallback konfigurasi yang berbahaya
+
+Perbaiki `getBranchRuleConfig()` dan `getActiveRubricForBranch()`.
+
+Dilarang diam-diam menggunakan:
+
+- Rubrik Seni Baca sebagai fallback untuk cabang lain.
+- Rubrik aktif milik cabang lain.
+- Kuota default jika konfigurasi yang diwajibkan tidak ditemukan.
+- Pencocokan nama cabang sebagai pengganti relasi identitas yang sah.
+
+Resolusi konfigurasi harus menggunakan ID yang konsisten, seperti `tenantId`, `branchId`, `stageId`, dan `rubricVersionId`.
+
+Jika konfigurasi wajib tidak ditemukan atau tidak valid, hentikan proses penilaian atau finalisasi dengan pesan kesalahan yang menjelaskan masalahnya.
+
+Template default boleh dipakai pada proses pembuatan konfigurasi baru, tetapi tidak boleh menjadi fallback tersembunyi saat membaca konfigurasi yang seharusnya sudah ditetapkan.
+
+## 4. P0-B — Perbaiki mesin penilaian, deduction rules, dan nilai desimal
+
+Audit serta refaktor `src/services/scoringEngine.ts` dan seluruh komponen input penilaian.
+
+### A. Dukung pengurangan desimal
+
+Sistem harus mendukung pengurangan seperti `0.5`, `1.0`, `1.5`, dan angka lain sesuai aturan rubrik yang diizinkan.
+
+Pisahkan dua konsep:
+
+1. **Jumlah kesalahan:** jumlah kejadian yang dicatat hakim. Harus berupa bilangan bulat nonnegatif jika yang dihitung memang jumlah kejadian.
+2. **Nilai pengurangan per kejadian:** dapat berupa angka desimal yang dikonfigurasi admin.
+
+Contoh: tiga kesalahan dengan potongan 0,5 poin per kejadian harus menghasilkan total potongan 1,5 poin.
+
+Periksa input HTML, batas `step`, state, serialisasi, perhitungan, penyimpanan database, tampilan rekap, dan ekspor nilai. Jangan sampai salah satu lapisan membulatkan 0,5 menjadi 0 atau 1.
+
+Gunakan strategi aritmetika dan pembulatan yang konsisten, misalnya satuan integer berskala atau pembulatan terpusat dengan presisi yang ditentukan. Jangan membiarkan floating-point error menghasilkan skor yang tidak konsisten.
+
+### B. Integrasikan aturan potongan yang dikonfigurasi
+
+Saat ini struktur data mempunyai `DeductionRule`, `RubricCriterion`, `maxDeduction`, dan `ErrorCategory.defaultDeduction`. Audit seluruh pemakaian field tersebut.
+
+Mesin penilaian harus benar-benar menjalankan aturan yang dipilih pada konfigurasi, termasuk:
+
+- Jenis kesalahan atau kriteria.
+- Bidang rubrik yang menjadi sasaran pengurangan.
+- Nilai potongan.
+- Metode potongan yang didukung.
+- Batas potongan maksimum jika aturan tersebut digunakan.
+- Relasi kriteria ke bidang rubrik.
+- Status aktif atau nonaktif suatu aturan.
+
+Jangan membiarkan aturan yang tersimpan di database atau UI tidak berpengaruh terhadap hasil perhitungan.
+
+Dokumentasikan secara jelas rumus setiap metode pengurangan. Jangan mengarang formula baru untuk `Pengurangan berbobot` jika definisi bisnisnya belum ada. Bila perilakunya belum ditentukan, identifikasi bagian yang membutuhkan keputusan produk dan jangan mengaktifkan perhitungan yang ambigu.
+
+### C. Validasi dan konsistensi skor
+
+Wajib menguji:
+
+- Input jumlah kesalahan negatif, `NaN`, tak hingga, atau pecahan.
+- Kategori aktif yang tidak mempunyai pemetaan bidang valid.
+- Field ID yang sudah tidak ditemukan pada versi rubrik.
+- Batas minimum dan maksimum tiap bidang.
+- Total bidang yang tidak konsisten dengan nilai awal rubrik.
+- Akumulasi pengurangan melampaui batas yang diizinkan.
+- Nilai akhir negatif atau melebihi batas skor.
+- Perhitungan beberapa kategori yang mengarah ke satu bidang.
+- Skor peserta dengan lebih dari satu hakim atau maqra jika mekanisme tersebut berlaku.
+
+Pastikan nilai yang tampil per bidang, total potongan, dan nilai akhir konsisten secara matematis. Jangan menutupi ketidaksesuaian dengan memotong total saja sementara jumlah nilai setiap bidang masih menunjukkan angka yang berbeda.
+
+Jangan membuat penilaian final otomatis mendapatkan skor sempurna hanya karena seluruh jumlah kesalahan kosong.
+
+## 5. P0-C — Isolasi tenant, cabang, dan tahap berdasarkan ID
+
+Audit dan perbaiki:
+
+- `src/context/MtqContext.tsx`
+- `src/services/rankingService.ts`
+- Semua service yang memproses partisipasi, penilaian, progres, dan kelulusan.
+
+Gunakan ID sebagai sumber identitas utama. Nama tahap dan nama cabang hanya boleh digunakan untuk tampilan.
+
+Setiap operasi harus konsisten dalam scope:
+
+`tenantId` → `branchId` → `stageId` → identitas peserta/partisipasi yang sah.
+
+Periksa:
+
+- Pengambilan peserta suatu tahap.
+- Pengambilan penilaian hakim.
+- Pemeriksaan kelengkapan penilaian.
+- Perhitungan skor dan ranking.
+- Penghitungan kuota kelulusan.
+- Pembaruan status peserta.
+- Pembentukan tahap berikutnya.
+- Penyimpanan snapshot hasil.
+- Audit log dan perubahan status tahap.
+
+Perbaiki `advanceQualifiers()` agar tidak memproses semua tahap bernama sama dari cabang lain. Jangan melakukan pembaruan massal berdasarkan `tenantId + stageName` saja jika operasi seharusnya hanya memengaruhi satu `stageId`.
+
+Buat tes untuk dua cabang yang sama-sama memiliki tahap bernama “Penyisihan”. Pastikan peserta, skor, kuota, progres, ranking, dan status kelulusan masing-masing benar-benar terisolasi.
+
+Tambahkan validasi untuk relasi tenant, cabang, tahap, peserta, hakim, dan penugasan. Tolak relasi silang yang tidak sah.
+
+## 6. P0-D — Perbaiki ranking, tie-break, dan override kelulusan
+
+Refaktor `src/services/rankingService.ts` dan proses pengesahan hasil.
+
+### A. Tie-break
+
+Nilai total yang sama belum tentu berarti hasil akhir masih seri.
+
+Urutan tie-break harus dievaluasi menggunakan konfigurasi aktif yang telah divalidasi. Sistem hanya boleh memblokir pengesahan karena seri apabila peserta yang berada pada batas kuota masih tidak dapat dibedakan setelah seluruh kriteria tie-break yang sah diterapkan.
+
+Contoh wajib:
+
+- Dua peserta memiliki nilai total sama, tetapi nilai bidang pertama dalam urutan tie-break berbeda. Sistem harus menghasilkan ranking yang benar dan tidak salah memblokir finalisasi.
+- Dua peserta sama pada semua kriteria tie-break. Sistem harus menandai seri belum terselesaikan dan mencegah finalisasi otomatis jika regulasi tidak menyediakan cara sah untuk memutuskannya.
+- Tidak ada konfigurasi tie-break valid. Sistem harus menolak proses finalisasi dan menampilkan sebabnya.
+
+Jangan mengarang aturan undian atau kriteria pemecah seri baru. Ikuti konfigurasi resmi yang ditetapkan panitia.
+
+### B. Manual override
+
+Pastikan sistem dapat menyimpan keputusan admin untuk meloloskan maupun tidak meloloskan peserta, termasuk ketika keputusan manual berbeda dari hasil `top_n`.
+
+- Simpan status eksplisit `true` maupun `false`.
+- Simpan alasan override.
+- Catat pengguna dan waktu yang melakukan perubahan.
+- Tampilkan perbedaan antara hasil otomatis dan keputusan final.
+- Pastikan preview dan hasil final memakai keputusan yang sama.
+
+Jangan hanya meneruskan daftar ID peserta yang lolos karena hal itu dapat menghilangkan keputusan eksplisit untuk tidak meloloskan peserta tertentu.
+
+### C. Snapshot hasil
+
+Hasil final harus memiliki snapshot yang konsisten, meliputi sekurang-kurangnya:
+
+- Tenant, cabang, dan tahap.
+- Versi rubrik yang digunakan.
+- Aturan tie-break yang digunakan.
+- Kuota dan metode kelulusan.
+- Ranking, nilai akhir, dan nilai bidang.
+- Hasil kelulusan.
+- Waktu dan pengguna yang mengesahkan.
+
+Snapshot historis tidak boleh berubah saat admin mengedit aturan untuk tahap atau kompetisi berikutnya.
+
+## 7. P0-E — Amankan finalisasi penilaian hakim
+
+Audit `finalizeAssessment()`, `updateErrorCount()`, `reopenAssessment()`, dan seluruh proses terkait.
+
+Jangan mengandalkan pemeriksaan UI atau role saja.
+
+### Validasi finalisasi wajib
+
+Sebelum menerima finalisasi:
+
+1. Identitas pengguna aktif harus sama dengan `judgeId` yang sedang melakukan penilaian.
+2. Pengguna harus mempunyai role yang sesuai.
+3. Harus ada penugasan hakim yang sah untuk tenant, cabang, tahap, bidang, dan partisipasi yang sedang dinilai.
+4. Partisipasi peserta dan maqra harus valid serta berada dalam scope yang benar.
+5. Rubrik aktif untuk penilaian tersebut harus ditemukan secara eksplisit.
+6. Semua input harus tervalidasi.
+7. Pemetaan kategori kesalahan ke bidang rubrik harus valid.
+8. Penilaian harus mempunyai status yang memungkinkan finalisasi.
+9. Setelah final, nilai harus terkunci sesuai aturan bisnis.
+10. Setiap percobaan tidak sah harus ditolak oleh backend, bukan hanya ditampilkan sebagai peringatan.
+
+Jangan mengizinkan fungsi membuat penilaian baru dalam kondisi kosong lalu langsung mengesahkannya sehingga memperoleh skor awal sempurna.
+
+Jika penilaian memang boleh memiliki nol kesalahan, prosesnya harus melalui alur input dan finalisasi yang valid, dengan identitas hakim, penugasan, rubrik, serta konteks penilaian yang sah.
+
+Proses membuka kembali penilaian final harus dibatasi pada role yang berwenang, memerlukan alasan, dan mencatat audit trail. Hakim tidak boleh dapat membuka kembali penilaiannya sendiri hanya dengan mengubah state aplikasi.
+
+## 8. P0-F — Lengkapi RLS dan keamanan skema Supabase
+
+Audit seluruh `supabase/schema.sql` terhadap model aplikasi aktual.
+
+Temuan audit sebelumnya mengidentifikasi 19 tabel dengan RLS aktif, tetapi policy hanya tersedia pada sebagian tabel. Verifikasi ulang kondisi terkini dan perbaiki seluruh tabel yang memerlukan akses aplikasi.
+
+Jangan menyelesaikan masalah dengan membuat policy generik yang memberi semua pengguna akses baca/tulis.
+
+Setiap tabel harus memiliki kebijakan least privilege sesuai peran dan tenant, dengan mempertimbangkan operasi `SELECT`, `INSERT`, `UPDATE`, dan `DELETE`.
+
+Pastikan:
+
+- Data hanya dapat diakses dalam tenant yang sah.
+- Admin hanya bisa mengelola data sesuai cakupan wewenangnya.
+- Hakim hanya bisa membaca dan mengubah penilaian yang ditugaskan kepadanya.
+- Penilaian terkunci tidak dapat diubah melalui API langsung.
+- Relasi antarentitas diperiksa di server/database.
+- Perubahan status finalisasi dan reopen dilakukan melalui operasi yang terkontrol.
+- Tidak ada policy yang memungkinkan pengguna mengganti tenant atau identitas hakim melalui payload.
+- Setiap tabel yang tidak boleh diakses langsung tetap tertutup untuk akses langsung.
+
+Untuk setiap tabel yang membutuhkan policy tetapi belum memilikinya, buat policy berdasarkan role, keanggotaan tenant, dan relasi penugasan yang benar. Jika akses langsung tidak dibutuhkan, pertahankan penolakan akses dan gunakan operasi backend yang aman.
+
+### Lifecycle dan integritas skema
+
+Samakan constraint status SQL dengan tipe data aplikasi, khususnya lifecycle rubrik `Draft`, `Validasi`, `Aktif`, dan `Arsip`.
+
+Audit foreign key, unique constraint, indeks, dan integritas relasi antar-tenant. Gunakan constraint komposit atau validasi database yang tepat bila foreign key sederhana belum mencegah relasi silang tenant.
+
+Buat migrasi baru yang aman dan dapat ditinjau. Jangan hanya mengganti satu file SQL bootstrap jika lingkungan yang ada mungkin sudah mempunyai tabel dan data.
+
+## 9. P0-G — Amankan RPC pengesahan kelulusan dan snapshot
+
+Perbaiki `advance_stage_qualifiers()` serta RPC terkait di Supabase.
+
+Fungsi harus memvalidasi di sisi database:
+
+- Pengguna pemanggil terautentikasi dan berwenang mengesahkan tahap.
+- Tahap sumber dan tahap tujuan berada dalam tenant serta jalur kompetisi yang benar.
+- Peserta benar-benar terdaftar pada tahap sumber dan masih berada dalam scope cabang yang sama.
+- Semua penilaian wajib telah selesai dan difinalisasi oleh hakim yang sah.
+- Tidak terdapat penilaian final yang tidak valid, duplikat, atau belum selesai.
+- Ranking, skor, kuota, tie-break, dan manual override telah divalidasi.
+- Tidak ada seri yang belum terselesaikan pada batas kelulusan.
+- Tidak ada partisipasi ganda atau perpindahan peserta yang melanggar aturan.
+- Snapshot hasil dibuat secara konsisten.
+
+Operasi pengesahan, pembuatan snapshot, penetapan ranking, dan pembentukan partisipasi tahap berikutnya harus berjalan atomik dalam transaksi yang benar. Jika ada validasi yang gagal, seluruh operasi harus dibatalkan.
+
+Jangan mempercayai ranking atau daftar peserta lolos yang dikirim klien tanpa validasi ulang sesuai aturan yang tersimpan dan berlaku.
+
+Terapkan `SECURITY DEFINER` hanya jika diperlukan, dengan `search_path` yang aman serta validasi otorisasi eksplisit. Audit juga permission `EXECUTE` agar RPC sensitif tidak bisa dipanggil oleh role yang tidak berhak.
+
+Pastikan fungsi tidak dapat memindahkan peserta lintas tenant dengan memanfaatkan ID tahap atau peserta dari tenant berbeda.
+
+## 10. P1 — Hubungkan aplikasi dengan Supabase secara nyata
+
+Setelah jalur domain dan keamanan kritis diperbaiki, integrasikan backend.
+
+Audit `package.json`, `src/context/MtqContext.tsx`, dan seluruh layer akses data.
+
+Persyaratan:
+
+- Gunakan `@supabase/supabase-js` bila sesuai dengan arsitektur proyek.
+- Buat client dan konfigurasi environment yang aman.
+- Pisahkan akses data dari UI dan perhitungan domain.
+- Gunakan Supabase sebagai sumber data bersama untuk tenant, pengguna, peserta, cabang, tahap, rubrik, aturan, penugasan hakim, penilaian, dan hasil final.
+- Jangan menjadikan `localStorage` sebagai sumber kebenaran untuk data kompetisi bersama.
+- `localStorage` hanya boleh digunakan untuk cache atau draft lokal yang memang diperbolehkan.
+- Sediakan penanganan loading, error, retry yang aman, dan konflik pembaruan.
+- Pastikan status penilaian tidak terlihat final sebelum server mengonfirmasi transaksi yang sukses.
+- Jangan mengklaim realtime aktif hanya karena UI menggunakan state lokal. Implementasikan dan uji langganan realtime jika memang dibutuhkan.
+- Jangan menaruh service-role key di browser. Gunakan autentikasi pengguna dan RLS.
+- Jangan mengarang kredensial atau mengirim data rahasia ke repository.
+
+Jika kredensial atau proyek Supabase belum tersedia, buat implementasi yang dapat dikonfigurasi dan dokumentasikan langkah setup. Tetap buat pengujian lokal, tetapi tandai integrasi live sebagai belum diverifikasi sampai benar-benar diuji.
+
+## 11. P1 — Pengujian otomatis dan CI wajib
+
+Jangan menganggap tes domain yang sudah ada cukup untuk menyatakan aplikasi siap produksi.
+
+Pertahankan tes lama yang valid, koreksi tes yang salah, dan tambahkan cakupan berikut.
+
+### A. Unit test
+
+Uji konfigurasi rubrik, pemetaan kategori, deduction rules, skor desimal, validasi skor, ranking, tie-break, kuota, manual override, dan snapshot.
+
+Contoh tes wajib:
+
+- Rubrik tanpa Lagu dapat dibuat dan digunakan tanpa fallback ke Lagu.
+- Bidang Itqan dapat ditambahkan dan digunakan dalam perhitungan.
+- Pengurangan `0.5 × 3` menghasilkan `1.5`.
+- Input jumlah kejadian `0.5`, negatif, `NaN`, atau tak hingga ditolak.
+- Kategori tanpa pemetaan yang sah mencegah finalisasi.
+- Konfigurasi rubrik yang tidak ditemukan menghentikan proses, bukan memakai rubrik lain.
+- Tahap Penyisihan cabang A tidak memengaruhi cabang B.
+- Tie-break yang berhasil membedakan peserta tidak menimbulkan false positive unresolved tie.
+- Override `false` tetap tersimpan dan dihormati.
+- Penilaian kosong tidak dapat difinalisasi melalui bypass.
+- Rubrik historis tetap konsisten setelah konfigurasi baru dibuat.
+
+### B. Integration test database
+
+Gunakan proyek Supabase lokal atau database staging yang aman jika tersedia.
+
+Uji RLS dan RPC memakai role atau sesi berbeda:
+
+- Admin pada tenant A tidak bisa mengakses data tenant B.
+- Hakim tidak bisa memfinalisasi penilaian milik hakim lain.
+- Hakim yang tidak ditugaskan tidak dapat mengirim skor.
+- Data terkunci tidak dapat diubah melalui request API langsung.
+- RPC menolak ID tahap tujuan dari tenant berbeda.
+- Kegagalan pengesahan tidak meninggalkan snapshot atau partisipasi setengah jadi.
+- Reopen hanya dapat dilakukan aktor berwenang dengan alasan yang sah.
+
+Jangan mengganti integration test dengan unit test yang sekadar mengasumsikan RLS bekerja.
+
+### C. End-to-end test
+
+Gunakan Playwright atau alat E2E yang sudah sesuai dengan proyek bila tersedia.
+
+Uji alur utama:
+
+1. Login menggunakan akun uji.
+2. Admin membuat cabang dan tahap.
+3. Admin membuat rubrik dinamis dan menetapkan aturan kompetisi.
+4. Admin menetapkan hakim pada bidang dan tahap yang tepat.
+5. Hakim membuka peserta yang ditugaskan.
+6. Hakim memasukkan kesalahan dan potongan desimal yang sah.
+7. Hakim menyimpan serta memfinalisasi penilaian.
+8. Sistem menghitung skor dan ranking.
+9. Admin meninjau hasil dan mengesahkan kelulusan.
+10. Sistem menghasilkan snapshot final.
+11. Data tetap konsisten setelah reload dan diakses dari sesi/perangkat uji lain.
+
+Gunakan data pengujian, bukan data peserta kompetisi nyata.
+
+### D. GitHub Actions
+
+Tambahkan workflow CI yang berjalan pada pull request dan perubahan relevan ke branch utama.
+
+Workflow sekurang-kurangnya menjalankan:
+
+- Instalasi dependency menggunakan lockfile dan instalasi reproducible.
+- Type check/lint yang tersedia.
+- Unit test.
+- Integration test bila dependensi database lokal tersedia.
+- Build produksi.
+- E2E test jika environment CI telah dikonfigurasi untuk menjalankannya.
+
+Jika suatu tahap memerlukan secret atau service eksternal yang belum dikonfigurasi, tandai kebutuhan tersebut dengan jelas. Jangan membuat workflow palsu yang selalu sukses tanpa menjalankan tes.
+
+## 12. Kriteria penerimaan akhir
+
+Perbaikan hanya boleh dinyatakan memenuhi tahap hardening jika semua kriteria yang relevan telah dibuktikan.
+
+1. Tidak ada fallback diam-diam ke rubrik atau aturan kompetisi yang salah.
+2. Semua operasi ranking, progres, dan kelulusan terisolasi berdasarkan ID dan tenant yang sah.
+3. Tie-break memblokir hanya keadaan seri yang memang belum terselesaikan menurut aturan yang berlaku.
+4. Finalisasi hanya dapat dilakukan oleh hakim yang sah untuk penugasan tersebut dan tidak bisa dilakukan melalui input kosong yang belum memenuhi alur penilaian.
+5. Manual override untuk lolos maupun tidak lolos tersimpan secara konsisten.
+6. Rubrik dan snapshot historis tidak berubah secara tidak sah.
+7. Deduction rules yang dikonfigurasi benar-benar digunakan dalam perhitungan.
+8. Pengurangan desimal dipertahankan dari input sampai hasil akhir.
+9. RLS dan RPC menegakkan otorisasi serta integritas tenant di database.
+10. Pengesahan kelulusan, snapshot, dan perubahan tahap mempunyai perilaku transaksi yang konsisten.
+11. Integrasi Supabase terhubung dengan benar atau status keterbatasan environment dinyatakan secara eksplisit.
+12. Build dan tes yang diklaim lulus benar-benar telah dijalankan dan hasilnya tersedia.
+13. Tidak ada regression kritis terhadap UI, responsivitas tablet, atau alur kerja hakim.
+14. Pull request memuat ringkasan perubahan, migrasi, hasil tes, cara pengujian, dan risiko yang masih terbuka.
+
+**Jangan menyatakan aplikasi siap produksi hanya karena type check dan build berhasil.** Keamanan database, integritas penilaian, dan otorisasi harus mempunyai pengujian khusus.
+
+## 13. Format laporan akhir
+
+Setelah mengerjakan repository, sampaikan laporan dengan format berikut.
+
+### A. Ringkasan implementasi
+Jelaskan perubahan nyata yang dibuat dan masalah yang diselesaikan.
+
+### B. Daftar file yang diubah
+Untuk setiap file, jelaskan perubahan dan alasannya.
+
+### C. Hasil verifikasi
+Gunakan tabel:
+
+| Pemeriksaan | Status | Bukti |
+|---|---|---|
+| Unit test | PASS/FAIL/NOT RUN | Perintah dan hasil |
+| Type check | PASS/FAIL/NOT RUN | Perintah dan hasil |
+| Build produksi | PASS/FAIL/NOT RUN | Perintah dan hasil |
+| Integration test | PASS/FAIL/NOT RUN | Lingkungan dan hasil |
+| RLS dan RPC | PASS/FAIL/NOT RUN | Tes dan hasil |
+| E2E test | PASS/FAIL/NOT RUN | Skenario dan hasil |
+| GitHub Actions | PASS/FAIL/NOT CONFIGURED | Link workflow/check |
+
+Jangan menggunakan status PASS tanpa bukti eksekusi aktual.
+
+### D. Database dan migrasi
+Cantumkan nama migrasi, perubahan skema, dampak terhadap data lama, dan langkah menjalankannya di Supabase.
+
+### E. Kekurangan yang tersisa
+Pisahkan antara:
+- Bug yang belum diperbaiki.
+- Tes yang belum dijalankan.
+- Kredensial atau environment yang belum tersedia.
+- Pekerjaan lanjutan yang tidak menghalangi kriteria saat ini.
+
+### F. Hasil GitHub
+Berikan branch yang dibuat, commit yang dihasilkan, dan link pull request jika berhasil dibuat.
+
+### G. Keputusan kesiapan
+Pilih salah satu:
+
+- **Belum lolos:** masih ada blocker P0.
+- **Lolos pengujian lokal, belum terverifikasi di backend nyata:** tes lokal lulus tetapi integrasi database atau otorisasi live belum terbukti.
+- **Siap untuk staging:** seluruh kriteria staging dan tes keamanan yang relevan telah lulus.
+- **Layak dipertimbangkan untuk produksi:** hanya setelah seluruh tes wajib, konfigurasi lingkungan, keamanan backend, migrasi, dan verifikasi operasional benar-benar terpenuhi.
+
+Mulai dengan memeriksa kondisi repository terkini. Lanjutkan langsung ke implementasi, pengujian, dan pembuatan pull request jika akses memungkinkan. Jangan berhenti setelah memberikan rencana, jangan menyembunyikan kegagalan tes, dan jangan mengklaim pekerjaan selesai tanpa bukti.

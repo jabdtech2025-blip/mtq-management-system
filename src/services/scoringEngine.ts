@@ -106,14 +106,26 @@ export function calculateAssessmentScore(
 
   activeCategories.forEach((cat) => {
     const rawCount = errorCounts[cat.id] ?? 0;
-    const count = Math.max(0, Math.floor(rawCount));
-    
-    // Validasi input
-    if (isNaN(rawCount) || rawCount < 0) {
-      validationErrors.push(`Jumlah kesalahan kategori "${cat.name}" tidak valid: ${rawCount}`);
+
+    // P0-B: Validasi ketat jumlah kesalahan (wajib integer non-negatif)
+    if (typeof rawCount !== 'number' || isNaN(rawCount) || !isFinite(rawCount) || rawCount < 0) {
+      validationErrors.push(
+        `Jumlah kesalahan kategori "${cat.name}" (${cat.code}) tidak valid: ${rawCount}. Harus berupa bilangan bulat non-negatif.`
+      );
+      return;
     }
 
-    const deductionAmount = Number((count * cat.defaultDeduction).toFixed(2));
+    if (!Number.isInteger(rawCount)) {
+      validationErrors.push(
+        `Jumlah kejadian kesalahan kategori "${cat.name}" (${cat.code}) harus berupa bilangan bulat non-negatif (diterima: ${rawCount}). Pengurangan per kejadian (${cat.defaultDeduction}) yang dapat berupa angka desimal.`
+      );
+      return;
+    }
+
+    const count = rawCount;
+    // Potongan per kejadian mendukung desimal (misal 0.5, 1.0, 1.5) dengan presisi aritmetika aman
+    const rawDeduction = count * cat.defaultDeduction;
+    const deductionAmount = Math.round((rawDeduction + Number.EPSILON) * 100) / 100;
     deductions[cat.id] = deductionAmount;
 
     // Petakan secara relasional ke bidang rubrik
@@ -130,7 +142,7 @@ export function calculateAssessmentScore(
     if (fieldDeductions[fieldName] === undefined) {
       fieldDeductions[fieldName] = 0;
     }
-    fieldDeductions[fieldName] = Number(((fieldDeductions[fieldName] || 0) + deductionAmount).toFixed(2));
+    fieldDeductions[fieldName] = Math.round(((fieldDeductions[fieldName] || 0) + deductionAmount + Number.EPSILON) * 100) / 100;
   });
 
   // Hitung nilai per bidang dengan batas minScore dan maxScore dinamis
@@ -138,7 +150,12 @@ export function calculateAssessmentScore(
   let totalDeductions = 0;
 
   rubric.fields.forEach((field) => {
-    const deduction = fieldDeductions[field.name] || 0;
+    let deduction = fieldDeductions[field.name] || 0;
+
+    // Dukungan batas potongan maksimum per bidang (field maxDeduction atau maxScore - minScore)
+    const fieldMaxDeduction = (field as any).maxDeduction ?? (field.maxScore - field.minScore);
+    deduction = Math.min(deduction, fieldMaxDeduction);
+
     totalDeductions += deduction;
 
     // Batasi nilai bidang: minScore <= score <= maxScore
@@ -147,13 +164,13 @@ export function calculateAssessmentScore(
       Math.min(field.maxScore, field.maxScore - deduction)
     );
 
-    fieldScores[field.name] = Number(calculatedFieldScore.toFixed(2));
+    fieldScores[field.name] = Math.round((calculatedFieldScore + Number.EPSILON) * 100) / 100;
     totalCalculatedScore += fieldScores[field.name];
   });
 
-  totalDeductions = Number(totalDeductions.toFixed(2));
+  totalDeductions = Math.round((totalDeductions + Number.EPSILON) * 100) / 100;
   const startingScore = customStartingScore ?? rubric.startingScore;
-  const finalScore = Number(Math.max(0, Math.min(startingScore, totalCalculatedScore)).toFixed(2));
+  const finalScore = Math.round((Math.max(0, Math.min(startingScore, totalCalculatedScore)) + Number.EPSILON) * 100) / 100;
 
   return {
     deductions,

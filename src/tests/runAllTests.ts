@@ -1,15 +1,21 @@
 import { runDomainTests } from './domainRules.test';
+import { runSupabaseTests } from './supabaseRules.test';
 
 console.log('===========================================================');
-console.log('   MTQ MANAGEMENT SYSTEM — DOMAIN & BUSINESS RULE TESTS    ');
+console.log('   MTQ MANAGEMENT SYSTEM — DOMAIN & SUPABASE INTEGRATION   ');
 console.log('   Standar: Pedoman Musabaqah 2025 & Juknis Nasional 2026  ');
 console.log('===========================================================\n');
 
 const startTime = Date.now();
-const { passed, failed, results } = runDomainTests();
+const domainRes = runDomainTests();
+const supabaseRes = runSupabaseTests();
 const duration = Date.now() - startTime;
 
-results.forEach((res, index) => {
+const allResults = [...domainRes.results, ...supabaseRes.results];
+const totalPassed = domainRes.passed + supabaseRes.passed;
+const totalFailed = domainRes.failed + supabaseRes.failed;
+
+allResults.forEach((res) => {
   if (res.success) {
     console.log(`[PASS] ${res.name}`);
   } else {
@@ -18,15 +24,15 @@ results.forEach((res, index) => {
 });
 
 console.log('\n-----------------------------------------------------------');
-console.log(`Total Pengujian : ${results.length}`);
-console.log(`Lulus (Passed)  : ${passed}`);
-console.log(`Gagal (Failed)  : ${failed}`);
+console.log(`Total Pengujian : ${allResults.length}`);
+console.log(`Lulus (Passed)  : ${totalPassed}`);
+console.log(`Gagal (Failed)  : ${totalFailed}`);
 console.log(`Durasi Eksekusi : ${duration}ms`);
 console.log('-----------------------------------------------------------');
 
-if (failed > 0) {
+if (totalFailed > 0) {
   process.exit(1);
 } else {
-  console.log('SEMUA PENGUJIAN DOMAIN DAN ATURAN BISNIS MTQ BERHASIL 100%!\n');
+  console.log('SEMUA PENGUJIAN DOMAIN, ATURAN BISNIS, DAN DATABASE BERHASIL 100%!\n');
   process.exit(0);
 }

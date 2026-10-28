@@ -43,7 +43,8 @@ import {
   OFFICIAL_SENI_BACA_RUBRIC,
   INITIAL_RUBRIC_VERSIONS,
   DEFAULT_COMPETITION_RULES,
-  getBranchRuleConfig
+  getBranchRuleConfig,
+  resolveActiveRubricForBranch
 } from '../services/competitionRules';
 
 export type ViewType =
@@ -108,8 +109,8 @@ interface MtqContextType {
   archiveRubricVersion: (id: string) => void;
   addCompetitionRule: (rule: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => void;
   updateCompetitionRule: (id: string, updated: Partial<CompetitionRuleConfig>) => void;
-  getActiveRubricForBranch: (branchName: string) => RubricVersion;
-  getBranchRuleConfigByBranch: (branchName: string) => CompetitionRuleConfig;
+  getActiveRubricForBranch: (branchName: string, branchId?: string) => RubricVersion | null;
+  getBranchRuleConfigByBranch: (branchName: string, branchId?: string) => CompetitionRuleConfig;
 
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
@@ -149,7 +150,7 @@ interface MtqContextType {
     judgeId: string,
     stageName?: string,
     questionId?: string
-  ) => void;
+  ) => { success: boolean; message: string };
   reopenAssessment: (
     participantId: string,
     judgeId: string,
@@ -237,9 +238,21 @@ interface MtqContextType {
   addStage: (stage: Omit<CompetitionStage, 'id' | 'tenantId'>) => void;
   updateStage: (id: string, updated: Partial<CompetitionStage>) => void;
   advanceQualifiers: (
-    currentStageName: string,
-    nextStageName: string,
-    qualifiedParticipantIds: string[],
+    currentStageNameOrParams:
+      | string
+      | {
+          currentStageId?: string;
+          currentStageName: string;
+          nextStageId?: string;
+          nextStageName?: string;
+          branchId?: string;
+          branchName?: string;
+          qualifiedParticipantIds: string[];
+          overrideReasons?: Record<string, string>;
+          manualOverrides?: Record<string, boolean>;
+        },
+    nextStageName?: string,
+    qualifiedParticipantIds?: string[],
     overrideReasons?: Record<string, string>
   ) => { success: boolean; message: string };
 
@@ -904,21 +917,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Dynamic Rubric & Competition Rule Resolvers (P0 Dynamic Architecture)
-  const getBranchRuleConfigByBranch = (branchName: string): CompetitionRuleConfig => {
-    return getBranchRuleConfig(branchName, currentTenantId, competitionRules);
+  const getBranchRuleConfigByBranch = (branchName: string, branchId?: string): CompetitionRuleConfig => {
+    return getBranchRuleConfig(branchName, currentTenantId, competitionRules, branchId);
   };
 
-  const getActiveRubricForBranch = (branchName: string): RubricVersion => {
-    const ruleCfg = getBranchRuleConfigByBranch(branchName);
-    const matched = rubricVersions.find(
-      (r) => r.id === ruleCfg.rubricVersionId && (r.status === 'Aktif' || !r.status)
-    );
-    if (matched) return matched;
-    const fallbackActive =
-      rubricVersions.find((r) => r.status === 'Aktif') ||
-      rubricVersions[0] ||
-      OFFICIAL_SENI_BACA_RUBRIC;
-    return fallbackActive;
+  const getActiveRubricForBranch = (branchName: string, branchId?: string): RubricVersion | null => {
+    const res = resolveActiveRubricForBranch({
+      branchName,
+      branchId,
+      tenantId: currentTenantId,
+      competitionRules,
+      rubricVersions
+    });
+    return res.rubric;
   };
 
   const addRubricVersion = (rubricData: Omit<RubricVersion, 'id' | 'tenantId' | 'createdAt'>) => {
@@ -1062,7 +1073,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     currentCounts[categoryId] = newCount;
 
     // Resolusi rubrik aktif dinamis sesuai cabang lomba peserta (P0)
-    const activeRubric = getActiveRubricForBranch(part.branchName);
+    const activeRubric = getActiveRubricForBranch(part.branchName, part.branchId);
+    if (!activeRubric) {
+      console.warn(`Pembaruan nilai dibatalkan: Cabang "${part.branchName}" belum memiliki rubrik aktif yang valid.`);
+      return;
+    }
+
     const scoreResult = calculateAssessmentScore(
       currentCounts,
       errorCategories,
@@ -1266,26 +1282,108 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     judgeId: string,
     stageName?: string,
     questionId?: string
-  ) => {
-    // Role check: Admin cannot finalize on behalf of judge
+  ): { success: boolean; message: string } => {
+    // 1. Role check: Admin cannot finalize on behalf of judge
     if (currentUser.role !== 'judge') {
-      console.warn('Mode Pemantauan Admin: Hanya dewan hakim yang dapat mengunci dan memfinalisasi nilai.');
-      return;
+      return {
+        success: false,
+        message: 'Otorisasi ditolak: Hanya dewan hakim yang berwenang memfinalisasi lembar penilaian.'
+      };
     }
 
+    // 2. Judge identity check
+    if (currentUser.id !== judgeId) {
+      return {
+        success: false,
+        message: 'Otorisasi ditolak: Identitas hakim tidak sesuai dengan pengguna yang sedang login.'
+      };
+    }
+
+    // 3. Participant check
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
-    if (!part) return;
+    if (!part) {
+      return {
+        success: false,
+        message: 'Peserta tidak ditemukan pada tenant aktif.'
+      };
+    }
+
     const targetStage = stageName || part.stageName || selectedStageName;
     const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
     const targetQuestionId = questionId || stageQuestions[0]?.questionId;
 
+    // 4. Maqra check
     if (!targetQuestionId) {
-      console.warn('Finalisasi ditolak: Peserta belum memiliki maqra pada babak ini.');
-      return;
+      return {
+        success: false,
+        message: 'Finalisasi ditolak: Peserta belum memiliki penetapan maqra pada babak ini.'
+      };
+    }
+
+    // 5. Official Judge Assignment check
+    const stageAssignments = judgeAssignments.filter(
+      (ja) => ja.tenantId === currentTenantId && ja.stageName === targetStage
+    );
+    if (stageAssignments.length > 0) {
+      const isJudgeAssigned = stageAssignments.some(
+        (ja) =>
+          ja.judgeId === judgeId &&
+          (!ja.branchName ||
+            ja.branchName === part.branchName ||
+            part.branchName.includes(ja.branchName) ||
+            ja.branchName.includes(part.branchName))
+      );
+      if (!isJudgeAssigned) {
+        return {
+          success: false,
+          message: 'Finalisasi ditolak: Anda tidak terdaftar secara resmi sebagai hakim penilai untuk cabang/babak ini.'
+        };
+      }
+    }
+
+    // 6. Active Rubric check (without silent fallback to Seni Baca)
+    const activeRubric = getActiveRubricForBranch(part.branchName, part.branchId);
+    if (!activeRubric) {
+      return {
+        success: false,
+        message: `Finalisasi ditolak: Aturan/rubrik penilaian belum terkonfigurasi atau masih berstatus Draft untuk cabang "${part.branchName}".`
+      };
+    }
+
+    const existing = assessments.find(
+      (a) =>
+        a.tenantId === currentTenantId &&
+        a.judgeId === judgeId &&
+        a.participantId === participantId &&
+        a.stageName === targetStage &&
+        a.questionId === targetQuestionId
+    );
+
+    // 7. Reject re-finalization of already finalized assessment
+    if (existing && existing.status === 'finalized') {
+      return {
+        success: false,
+        message: 'Lembar penilaian ini sudah dalam status terfinalisasi.'
+      };
+    }
+
+    // 8. Calculate score and validate rubric fields
+    const currentCounts = existing ? existing.errorCounts : {};
+    const scoreResult = calculateAssessmentScore(
+      currentCounts,
+      errorCategories,
+      activeRubric,
+      activeRubric.startingScore
+    );
+
+    if (scoreResult.validationErrors.length > 0) {
+      return {
+        success: false,
+        message: `Finalisasi diblokir karena validasi rubrik gagal: ${scoreResult.validationErrors.join('; ')}`
+      };
     }
 
     const nowTime = getWibTime();
-
     let sp = stageParticipations.find(
       (item) =>
         item.tenantId === currentTenantId &&
@@ -1314,30 +1412,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const targetJudge = users.find((u) => u.id === judgeId) || currentUser;
-
-    const existing = assessments.find(
-      (a) =>
-        a.tenantId === currentTenantId &&
-        a.judgeId === judgeId &&
-        a.participantId === participantId &&
-        a.stageName === targetStage &&
-        a.questionId === targetQuestionId
-    );
-
-    const activeRubric = getActiveRubricForBranch(part.branchName);
-    const currentCounts = existing ? existing.errorCounts : {};
-    const scoreResult = calculateAssessmentScore(
-      currentCounts,
-      errorCategories,
-      activeRubric,
-      activeRubric.startingScore
-    );
-
-    if (scoreResult.validationErrors.length > 0) {
-      console.warn('Finalisasi lembar penilaian diblokir karena validasi rubrik gagal:', scoreResult.validationErrors);
-      return;
-    }
-
     const finalizedScore = scoreResult.finalScore;
 
     let updatedAssessments: JudgeAssessment[];
@@ -1404,7 +1478,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .map((u) => u.id);
     }
 
-    // Compute updated completion across ALL assigned questions and ALL required judges on this stage
     const totalRequiredUnits = requiredJudgeIds.length * stageQuestions.length;
     let finalizedUnits = 0;
     for (const q of stageQuestions) {
@@ -1431,7 +1504,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? 'Menunggu Hakim Lain'
       : 'Berlangsung';
 
-    // Update StageParticipation state
     setStageParticipations((prev) => {
       const existsInList = prev.some((item) => item.id === sp!.id);
 
@@ -1457,8 +1529,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // P0: Penyelesaian penilaian babak tidak mengubah status kompetisi peserta menjadi 'Final'
-    // Status 'Final' hanya diberikan setelah pengesahan kejuaraan babak akhir (advanceQualifiers)
     if (part.status === 'Menunggu') {
       setParticipants((prev) =>
         prev.map((p) =>
@@ -1469,7 +1539,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    // Audit Log for finalization
     const currentQObj = stageQuestions.find((q) => q.questionId === targetQuestionId);
     const qLabel = currentQObj?.code || 'Maqra';
     const auditFinalized: AuditLogItem = {
@@ -1484,7 +1553,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setAuditLogs((prev) => [auditFinalized, ...prev]);
 
-    // Activity Log
     const newLog: ActivityLogItem = {
       id: generateUniqueLogId('act'),
       tenantId: currentTenantId,
@@ -1498,6 +1566,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setSyncStatus('Tersimpan di browser');
     setLastSyncTime(nowTime);
+
+    return {
+      success: true,
+      message: `Penilaian ${qLabel} untuk peserta ${part.name} (Skor: ${finalizedScore.toFixed(2)}) berhasil dikunci dan difinalisasi.`
+    };
   };
 
   /**
@@ -2513,13 +2586,53 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * - Records complete historical snapshots (score, rank, finalizedAt)
    */
   const advanceQualifiers = (
-    currentStageName: string,
-    nextStageName: string,
-    qualifiedParticipantIds: string[],
-    overrideReasons?: Record<string, string>
+    currentStageNameOrParams:
+      | string
+      | {
+          currentStageId?: string;
+          currentStageName: string;
+          nextStageId?: string;
+          nextStageName?: string;
+          branchId?: string;
+          branchName?: string;
+          qualifiedParticipantIds: string[];
+          overrideReasons?: Record<string, string>;
+          manualOverrides?: Record<string, boolean>;
+        },
+    nextStageNameArg?: string,
+    qualifiedParticipantIdsArg?: string[],
+    overrideReasonsArg?: Record<string, string>
   ): { success: boolean; message: string } => {
+    let currentStageName: string;
+    let nextStageName: string = '';
+    let qualifiedParticipantIds: string[] = [];
+    let overrideReasons: Record<string, string> | undefined = undefined;
+    let manualOverridesParam: Record<string, boolean> | undefined = undefined;
+    let branchIdParam: string | undefined = undefined;
+    let branchNameParam: string | undefined = undefined;
+    let stageIdParam: string | undefined = undefined;
+
+    if (typeof currentStageNameOrParams === 'object' && currentStageNameOrParams !== null) {
+      currentStageName = currentStageNameOrParams.currentStageName;
+      nextStageName = currentStageNameOrParams.nextStageName || '';
+      qualifiedParticipantIds = currentStageNameOrParams.qualifiedParticipantIds || [];
+      overrideReasons = currentStageNameOrParams.overrideReasons;
+      manualOverridesParam = currentStageNameOrParams.manualOverrides;
+      branchIdParam = currentStageNameOrParams.branchId;
+      branchNameParam = currentStageNameOrParams.branchName;
+      stageIdParam = currentStageNameOrParams.currentStageId;
+    } else {
+      currentStageName = currentStageNameOrParams;
+      nextStageName = nextStageNameArg || '';
+      qualifiedParticipantIds = qualifiedParticipantIdsArg || [];
+      overrideReasons = overrideReasonsArg;
+    }
+
     const currentStg = stages.find(
-      (s) => s.tenantId === currentTenantId && s.name === currentStageName
+      (s) =>
+        s.tenantId === currentTenantId &&
+        ((stageIdParam && s.id === stageIdParam) || s.name === currentStageName) &&
+        (!branchNameParam || !s.branchName || s.branchName === branchNameParam)
     );
 
     if (!currentStg) {
@@ -2549,7 +2662,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Find participations for currentStage in currentTenant
     const stageParts = stageParticipations.filter(
-      (sp) => sp.tenantId === currentTenantId && sp.stageName === currentStageName
+      (sp) =>
+        sp.tenantId === currentTenantId &&
+        ((stageIdParam && sp.stageId === stageIdParam) || sp.stageName === currentStageName) &&
+        (!branchIdParam || !sp.branchId || sp.branchId === branchIdParam) &&
+        (!branchNameParam || !sp.branchName || sp.branchName === branchNameParam)
     );
 
     if (stageParts.length === 0) {
@@ -2581,15 +2698,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Gunakan RankingService terpusat dengan penegakan tie-break resmi dan isolasi cabang
-    const manualOverridesMap = (qualifiedParticipantIds || []).reduce<Record<string, boolean>>((acc, pid) => {
-      acc[pid] = true;
-      return acc;
-    }, {});
+    const manualOverridesMap: Record<string, boolean> =
+      manualOverridesParam ||
+      (qualifiedParticipantIds || []).reduce<Record<string, boolean>>((acc, pid) => {
+        acc[pid] = true;
+        return acc;
+      }, {});
 
     const evalResult = RankingService.evaluateStageParticipants({
       tenantId: currentTenantId,
+      stageId: currentStg.id,
       stageName: currentStageName,
-      branchName: currentStg.branchName,
+      branchId: branchIdParam || currentStg.branchId,
+      branchName: branchNameParam || currentStg.branchName,
       participations: stageParticipations,
       participants,
       assessments,
