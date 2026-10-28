@@ -188,10 +188,10 @@ export const HasilKelulusanView: React.FC = () => {
   };
 
   // Confirm Advancement to Next Stage OR Finalize Championship
-  const handleConfirmAdvancement = () => {
+  const handleConfirmAdvancement = async () => {
     const qualifiedIds = qualifiedParticipants.map((item) => item.participant.id);
     const targetNextStage = nextStage ? nextStage.name : '';
-    const result = advanceQualifiers(selectedStageName, targetNextStage, qualifiedIds, overrideReasons);
+    const result = await advanceQualifiers(selectedStageName, targetNextStage, qualifiedIds, overrideReasons);
 
     setIsConfirmAdvancementOpen(false);
     if (result.success) {

@@ -5,9 +5,11 @@
 -- Target: Database Supabase Kosong (Idempotent & Siap Dijalankan di SQL Editor)
 -- ==============================================================================
 
--- 1. EXTENSIONS
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- 1. EXTENSIONS (PostgreSQL 13+ menyediakan gen_random_uuid() secara bawaan; blok DO menjaga kompatibilitas di seluruh engine Postgres)
+DO $$ BEGIN
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 -- 2. TENANTS & COMPETITIONS
 CREATE TABLE IF NOT EXISTS tenants (
@@ -382,7 +384,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_stage_result_snapshots_unique_stage_branch
 
 -- 13. DATA INTEGRITY & IMMUTABILITY TRIGGERS
 
--- 13A. Proteksi Imutabilitas Lembar Penilaian Final (Mencegah perubahan/penghapusan langsung di luar RPC reopen)
+-- 13A. Proteksi Imutabilitas Lembar Penilaian Final (Mencegah finalisasi/perubahan/penghapusan langsung di luar RPC resmi)
 CREATE OR REPLACE FUNCTION public.enforce_judge_assessment_immutability()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -398,7 +400,10 @@ BEGIN
     END IF;
 
     IF TG_OP = 'INSERT' THEN
-        IF NEW.status = 'finalized' THEN
+        IF (NEW.status = 'finalized' OR NEW.is_locked = true) THEN
+            IF COALESCE(current_setting('mtq.rpc_finalize_active', true), 'false') <> 'true' THEN
+                RAISE EXCEPTION 'Pelanggaran Keamanan: Lembar penilaian tidak dapat langsung dibuat dalam status final/terkunci melalui Data API. Gunakan prosedur resmi finalize_judge_assessment.';
+            END IF;
             NEW.is_locked := true;
             NEW.finalized_at := COALESCE(NEW.finalized_at, now());
         END IF;
@@ -421,8 +426,12 @@ BEGIN
             END IF;
         END IF;
 
-        -- Pastikan setiap transisi ke finalized mengunci baris secara otomatis
-        IF NEW.status = 'finalized' THEN
+        -- Cegah transisi status ke finalized atau penguncian langsung di luar RPC finalize_judge_assessment
+        IF (OLD.status <> 'finalized' AND NOT OLD.is_locked)
+           AND (NEW.status = 'finalized' OR NEW.is_locked = true) THEN
+            IF COALESCE(current_setting('mtq.rpc_finalize_active', true), 'false') <> 'true' THEN
+                RAISE EXCEPTION 'Pelanggaran Keamanan: Finalisasi dan penguncian lembar penilaian hanya dapat dilakukan melalui fungsi RPC resmi finalize_judge_assessment.';
+            END IF;
             NEW.is_locked := true;
             NEW.finalized_at := COALESCE(NEW.finalized_at, now());
         END IF;
@@ -440,7 +449,7 @@ CREATE TRIGGER trg_enforce_judge_assessment_immutability
     BEFORE INSERT OR UPDATE OR DELETE ON judge_assessments
     FOR EACH ROW EXECUTE FUNCTION public.enforce_judge_assessment_immutability();
 
--- 13B. Proteksi Append-Only pada Audit Logs & Stage Result Snapshots
+-- 13B. Proteksi Append-Only & Trusted Insert pada Audit Logs & Stage Result Snapshots
 CREATE OR REPLACE FUNCTION public.enforce_append_only_records()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -451,6 +460,25 @@ BEGIN
     RAISE EXCEPTION 'Pelanggaran Integritas: Tabel % bersifat append-only (rekaman historis permanen) dan tidak dapat diubah atau dihapus.', TG_TABLE_NAME;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION public.enforce_trusted_audit_log_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF COALESCE(current_setting('mtq.rpc_audit_active', true), 'false') <> 'true' THEN
+        RAISE EXCEPTION 'Pelanggaran Keamanan: Pencatatan audit_logs secara langsung melalui Data API ditolak. Catatan audit hanya dapat dibuat melalui fungsi RPC tepercaya.';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_audit_logs_trusted_insert ON audit_logs;
+CREATE TRIGGER trg_audit_logs_trusted_insert
+    BEFORE INSERT ON audit_logs
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_trusted_audit_log_insert();
 
 DROP TRIGGER IF EXISTS trg_audit_logs_append_only ON audit_logs;
 CREATE TRIGGER trg_audit_logs_append_only
@@ -803,6 +831,8 @@ USING (
 )
 WITH CHECK (
     judge_profile_id = auth.uid()
+    AND is_locked = false
+    AND status IN ('not_started', 'in_progress')
     AND tenant_id IN (SELECT get_user_tenants())
     AND is_assigned_judge(tenant_id, stage_participation_id, auth.uid())
 );
@@ -833,8 +863,9 @@ USING (tenant_id IN (SELECT get_user_tenants()));
 
 CREATE POLICY audit_logs_insert_policy ON audit_logs FOR INSERT
 WITH CHECK (
-    tenant_id IN (SELECT get_user_tenants())
-    AND (actor_id IS NULL OR actor_id = auth.uid())
+    COALESCE(current_setting('mtq.rpc_audit_active', true), 'false') = 'true'
+    AND tenant_id IN (SELECT get_user_tenants())
+    AND actor_id = auth.uid()
 );
 
 -- 15. STORED PROCEDURES / RPC FUNCTIONS (ATOMIC & HARDENED)
@@ -886,6 +917,10 @@ BEGIN
     IF v_stage.is_finalized THEN
         RAISE EXCEPTION 'Finalisasi ditolak: Babak musabaqah ini telah ditutup/disahkan.';
     END IF;
+
+    -- Aktifkan flag transaksi lokal agar trigger imutabilitas mengizinkan finalisasi & audit resmi
+    PERFORM set_config('mtq.rpc_finalize_active', 'true', true);
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
 
     -- Kunci lembar penilaian
     UPDATE judge_assessments
@@ -1004,8 +1039,9 @@ BEGIN
 
     SELECT * INTO v_actor FROM profiles WHERE id = v_actor_id;
 
-    -- Aktifkan flag transaksi lokal agar trigger imutabilitas mengizinkan pembukaan kunci resmi ini
+    -- Aktifkan flag transaksi lokal agar trigger imutabilitas mengizinkan pembukaan kunci & audit resmi
     PERFORM set_config('mtq.rpc_reopen_active', 'true', true);
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
 
     -- Update status kembali ke in_progress dan lepaskan kunci
     UPDATE judge_assessments
@@ -1228,6 +1264,18 @@ BEGIN
     WHERE sp.stage_id = p_stage_id
       AND sp.tenant_id = v_stage.tenant_id;
 
+    -- 12B. Sinkronisasi final_score dan rank dari p_rankings_snapshot jika tersedia
+    IF p_rankings_snapshot IS NOT NULL AND jsonb_typeof(p_rankings_snapshot) = 'array' THEN
+        UPDATE stage_participations sp
+        SET final_score = COALESCE((snap.elem ->> 'final_score')::numeric(6,2), sp.final_score),
+            rank = COALESCE((snap.elem ->> 'rank')::int, sp.rank)
+        FROM jsonb_array_elements(p_rankings_snapshot) AS snap(elem)
+        WHERE sp.stage_id = p_stage_id
+          AND sp.tenant_id = v_stage.tenant_id
+          AND (snap.elem ->> 'participant_id') IS NOT NULL
+          AND sp.participant_id::text = (snap.elem ->> 'participant_id');
+    END IF;
+
     -- 13. Perbarui status participants sesuai hasil babak
     UPDATE participants p
     SET status = CASE
@@ -1310,7 +1358,9 @@ BEGIN
         );
     END IF;
 
-    -- 17. Catat immutable audit log
+    -- 17. Catat immutable audit log melalui flag RPC resmi
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
+
     INSERT INTO audit_logs (tenant_id, actor_id, actor_name, action, target, summary, reason, outcome)
     VALUES (
         v_stage.tenant_id,
@@ -1318,15 +1368,88 @@ BEGIN
         COALESCE(v_actor.name, 'Admin') || ' (' || COALESCE(v_actor.role, 'admin') || ')',
         'STAGE_FINALIZED',
         'Babak: ' || v_stage.name,
-        'Pengesahan resmi babak ' || v_stage.name || ' dengan ' || v_qualified_count::text || ' peserta lolos.',
+        CASE
+            WHEN p_next_stage_id IS NOT NULL THEN
+                'Pengesahan resmi babak ' || v_stage.name || ' dengan ' || v_qualified_count::text || ' peserta lolos ke babak lanjutan.'
+            ELSE
+                'Pengesahan resmi hasil kejuaraan babak final ' || v_stage.name || ' dengan ' || v_qualified_count::text || ' juara ditetapkan.'
+        END,
         p_override_reasons::text,
         'Success'
     );
 
     RETURN jsonb_build_object(
         'success', true,
-        'message', 'Babak berhasil difinalisasi dan peserta lolos telah didaftarkan ke babak berikutnya.'
+        'message', CASE
+            WHEN p_next_stage_id IS NOT NULL THEN
+                'Babak berhasil difinalisasi dan peserta lolos telah didaftarkan ke babak berikutnya.'
+            ELSE
+                'Hasil kejuaraan babak final berhasil disahkan dan dikunci secara permanen di database.'
+        END
     );
+END;
+$$;
+
+-- RPC 4: Pencatatan Audit Log Terotentikasi Khusus Admin (Trusted Admin Audit Log)
+CREATE OR REPLACE FUNCTION append_admin_audit_log(
+    p_tenant_id UUID,
+    p_action TEXT,
+    p_target TEXT,
+    p_summary TEXT,
+    p_reason TEXT DEFAULT NULL,
+    p_outcome TEXT DEFAULT 'Success'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_actor_id UUID;
+    v_actor RECORD;
+    v_clean_action TEXT;
+    v_clean_outcome TEXT;
+BEGIN
+    v_actor_id := auth.uid();
+    IF v_actor_id IS NULL THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Permintaan tidak memiliki sesi autentikasi.';
+    END IF;
+
+    IF NOT is_tenant_admin(p_tenant_id) THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Hanya Administrator atau Superadmin yang berwenang mencatat audit administrasi.';
+    END IF;
+
+    v_clean_action := UPPER(TRIM(COALESCE(p_action, '')));
+    IF v_clean_action = '' THEN
+        RAISE EXCEPTION 'Tindakan audit (action) wajib diisi.';
+    END IF;
+
+    IF v_clean_action IN ('ASSESSMENT_FINALIZED', 'ASSESSMENT_REOPENED', 'STAGE_FINALIZED', 'CHAMPIONSHIP_FINALIZED') THEN
+        RAISE EXCEPTION 'Pelanggaran Keamanan: Tindakan sistem % hanya dapat dicatat oleh prosedur transaksi utamanya.', v_clean_action;
+    END IF;
+
+    v_clean_outcome := CASE
+        WHEN p_outcome IN ('Success', 'Failed', 'Warning') THEN p_outcome
+        ELSE 'Success'
+    END;
+
+    SELECT * INTO v_actor FROM profiles WHERE id = v_actor_id;
+
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
+
+    INSERT INTO audit_logs (tenant_id, actor_id, actor_name, action, target, summary, reason, outcome)
+    VALUES (
+        p_tenant_id,
+        v_actor_id,
+        COALESCE(v_actor.name, 'Admin') || ' (' || COALESCE(v_actor.role, 'admin') || ')',
+        v_clean_action,
+        LEFT(TRIM(COALESCE(p_target, '-')), 255),
+        TRIM(COALESCE(p_summary, '-')),
+        p_reason,
+        v_clean_outcome
+    );
+
+    RETURN jsonb_build_object('success', true);
 END;
 $$;
 
@@ -1339,3 +1462,7 @@ GRANT EXECUTE ON FUNCTION reopen_judge_assessment(UUID, TEXT) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION advance_stage_qualifiers(UUID, UUID, UUID[], JSONB, JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION advance_stage_qualifiers(UUID, UUID, UUID[], JSONB, JSONB) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION append_admin_audit_log(UUID, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION append_admin_audit_log(UUID, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+

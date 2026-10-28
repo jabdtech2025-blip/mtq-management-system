@@ -34,6 +34,7 @@ export const OFFICIAL_SENI_BACA_RUBRIC: RubricVersion = {
   version: '2025.1',
   description: 'Rubrik resmi LPTQ/Kemenag untuk Cabang Seni Baca Al-Qur’an (Tilawah Anak, Remaja, Dewasa, Mujawwad/Murattal).',
   officialSource: 'Buku Pedoman Musabaqah Al-Qur’an dan Al-Hadits 2025 hal. 42-45',
+  isOfficialVerified: true,
   status: 'Aktif',
   startingScore: 100,
   createdAt: '2025-04-25T00:00:00Z',
@@ -220,15 +221,15 @@ export const DEFAULT_COMPETITION_RULES: Record<string, CompetitionRuleConfig> = 
     branchName: 'Tahfizh',
     branchCode: 'THF',
     rubricVersionId: 'rubric-tahfizh-default',
-    // Tahfizh: Total -> Tahfizh (Kelancaran) -> Tajwid -> Fashahah
+    // Konfigurasi default Tahfizh (perlu verifikasi Juknis penyelenggara): Total -> Tahfizh -> Tajwid -> Fashahah
     tieBreakOrder: ['total', 'Tahfizh', 'Tajwid', 'Fashahah'],
     quotaPerStage: {
       'Penyisihan': 3,
       'Final': 3
     },
     maqraTiming: 'saat_undian',
-    officialSource: 'Buku Pedoman Musabaqah 2025 (Ketentuan Khusus Tahfizh)',
-    isVerifiedOfficial: true
+    officialSource: 'Template Konfigurasi Tahfizh (Wajib Diverifikasi Sesuai Juknis Penyelenggara)',
+    isVerifiedOfficial: false
   },
   'Fahmil': {
     id: 'rule-cfg-fahmil',
@@ -242,8 +243,8 @@ export const DEFAULT_COMPETITION_RULES: Record<string, CompetitionRuleConfig> = 
       'Semi Final': 3,
       'Final': 3
     },
-    officialSource: 'Juknis MTQN 2026 (Kompetisi Cepat Tepat Regu)',
-    isVerifiedOfficial: true
+    officialSource: 'Template Konfigurasi Fahmil / MFQ (3 Babak Juknis MTQN 2026 - Bobot Wajib Diverifikasi Penyelenggara)',
+    isVerifiedOfficial: false
   }
 };
 
@@ -251,12 +252,13 @@ export const OFFICIAL_TAHFIZH_RUBRIC: RubricVersion = {
   id: 'rubric-tahfizh-default',
   tenantId: 'system',
   code: 'RUBRIC-TAHFIZH-2025',
-  name: "Rubrik Resmi Tahfizh Al-Qur'an (Pedoman MTQ 2025)",
+  name: "Template Rubrik Tahfizh Al-Qur'an (Konfigurasi Penyelenggara)",
   branchCode: 'THF',
   branchName: 'Tahfizh',
   version: '2025.1',
-  description: 'Rubrik resmi untuk Cabang Hifzhil Qur’an (1 Juz, 5 Juz, 10 Juz, 20 Juz, 30 Juz).',
-  officialSource: 'Buku Pedoman Musabaqah 2025 (Ketentuan Khusus Tahfizh)',
+  description: 'Template konfigurasi rubrik untuk Cabang Hifzhil Qur’an (Tahfizh 50, Tajwid 25, Fashahah 25) — disesuaikan dengan Juknis penyelenggara.',
+  officialSource: 'Template Konfigurasi Penyelenggara (Belum Diverifikasi dari Halaman Dokumen Sumber)',
+  isOfficialVerified: false,
   status: 'Aktif',
   startingScore: 100,
   createdAt: '2025-04-25T00:00:00Z',

@@ -346,7 +346,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   const [isFlawlessConfirmed, setIsFlawlessConfirmed] = useState<boolean>(false);
 
   // Finalize action
-  const handleConfirmFinalize = () => {
+  const handleConfirmFinalize = async () => {
     if (!currentParticipant) return;
     if (!currentAssessment) {
       if (!isFlawlessConfirmed) {
@@ -366,7 +366,7 @@ export const PenilaianDualPanelView: React.FC = () => {
         return;
       }
     }
-    const result = finalizeAssessment(currentParticipant.id, activeJudgeId, activeStageName, activeQuestionId);
+    const result = await finalizeAssessment(currentParticipant.id, activeJudgeId, activeStageName, activeQuestionId);
     if (!result.success) {
       setFinalizeError(result.message);
     } else {

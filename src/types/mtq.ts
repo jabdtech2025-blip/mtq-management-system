@@ -48,6 +48,7 @@ export type ParticipantProgressStatus =
   | 'Maqra Belum Ditetapkan';
 
 export interface AssignedMaqraItem {
+  id?: string; // Primary key ID from database table assigned_maqras.id
   questionId: string;
   code?: string;
   title: string;
@@ -223,6 +224,7 @@ export interface RubricVersion {
   version: string; // e.g. "2025.1"
   description: string;
   officialSource?: string; // e.g. "Buku Pedoman MTQ 2025 LPTQ hal. 42-45"
+  isOfficialVerified?: boolean;
   status: 'Draft' | 'Validasi' | 'Aktif' | 'Arsip';
   startingScore: number; // e.g. 100
   fields: RubricField[];
@@ -278,6 +280,7 @@ export interface JudgeAssessment {
   id: string;
   tenantId: string;
   stageParticipationId: string;
+  assignedMaqraId?: string; // Relational FK to assigned_maqras.id in database
   stageId: string;
   stageName: string;
   participantId: string;

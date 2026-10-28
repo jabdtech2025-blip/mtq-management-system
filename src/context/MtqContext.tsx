@@ -159,14 +159,14 @@ interface MtqContextType {
     judgeId: string,
     stageName?: string,
     questionId?: string
-  ) => { success: boolean; message: string };
+  ) => Promise<{ success: boolean; message: string }>;
   reopenAssessment: (
     participantId: string,
     judgeId: string,
     reason: string,
     stageName?: string,
     questionId?: string
-  ) => { success: boolean; message: string };
+  ) => Promise<{ success: boolean; message: string }>;
   stageSnapshots: StageResultSnapshot[];
   getJudgeAssessment: (
     participantId: string,
@@ -263,7 +263,7 @@ interface MtqContextType {
     nextStageName?: string,
     qualifiedParticipantIds?: string[],
     overrideReasons?: Record<string, string>
-  ) => { success: boolean; message: string };
+  ) => Promise<{ success: boolean; message: string }>;
 
   // Judge Assignments
   addJudgeAssignment: (asg: Omit<JudgeAssignment, 'id' | 'tenantId'>) => void;
@@ -282,6 +282,8 @@ interface MtqContextType {
   // Real Supabase Connection & Auth Integration
   connectionInfo: SupabaseConnectionInfo;
   authenticatedProfile: AuthenticatedSupabaseProfile | null;
+  dataSourceMode: 'demo_local' | 'supabase_live' | 'supabase_error';
+  workspaceError: string | null;
   refreshSupabaseConnection: () => Promise<SupabaseConnectionInfo>;
   signInWithSupabase: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
   signOutSupabase: () => Promise<void>;
@@ -576,6 +578,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     supabaseDataService.getConnectionStatus()
   );
   const [authenticatedProfile, setAuthenticatedProfile] = useState<AuthenticatedSupabaseProfile | null>(null);
+  const [dataSourceMode, setDataSourceMode] = useState<'demo_local' | 'supabase_live' | 'supabase_error'>(() =>
+    supabaseDataService.isLive() ? 'supabase_live' : 'demo_local'
+  );
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<string>(() =>
     supabaseDataService.isLive()
       ? supabaseDataService.getConnectionStatus().statusLabel
@@ -750,6 +756,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   /**
    * Pemeriksaan koneksi nyata ke Supabase, sinkronisasi profil Auth, dan hidrasi data workspace.
+   * Memastikan tenant aktif pasca-login digunakan untuk query dan tidak mempertahankan data demo
+   * ketika database nyata gagal atau mengembalikan tabel kosong.
    */
   const refreshSupabaseConnection = async (): Promise<SupabaseConnectionInfo> => {
     const info = await supabaseDataService.verifyDatabaseConnection();
@@ -760,12 +768,16 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const profile = await supabaseDataService.fetchAuthenticatedUserProfile();
       setAuthenticatedProfile(profile);
 
+      let targetTenantId = currentTenantId;
+
       if (profile) {
         const primaryMembership = profile.memberships[0];
         const effectiveRole = primaryMembership?.role || profile.globalRole;
         const effectiveTenantId =
           primaryMembership?.tenantId ||
           (effectiveRole === 'superadmin' ? 'platform' : currentTenantId);
+
+        targetTenantId = primaryMembership?.tenantId || targetTenantId;
 
         setUsers((prev) => {
           const exists = prev.some((u) => u.id === profile.authUserId);
@@ -790,39 +802,60 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      const hydrated = await supabaseDataService.fetchTenantWorkspaceData(currentTenantId);
-      if (hydrated) {
-        if (hydrated.tenants && hydrated.tenants.length > 0) setTenants(hydrated.tenants);
-        if (hydrated.cabangList && hydrated.cabangList.length > 0) setCabangList(hydrated.cabangList);
-        if (hydrated.jenjangList && hydrated.jenjangList.length > 0) setJenjangList(hydrated.jenjangList);
-        if (hydrated.kafilahs && hydrated.kafilahs.length > 0) setKafilahs(hydrated.kafilahs);
-        if (hydrated.stages && hydrated.stages.length > 0) setStages(hydrated.stages);
-        if (hydrated.questions && hydrated.questions.length > 0) setQuestions(hydrated.questions);
-        if (hydrated.participants && hydrated.participants.length > 0) setParticipants(hydrated.participants);
-        if (hydrated.stageParticipations && hydrated.stageParticipations.length > 0) {
-          setStageParticipations(hydrated.stageParticipations);
+      const hydration = await supabaseDataService.fetchTenantWorkspaceResult(targetTenantId);
+      if (hydration.success && hydration.payload) {
+        const hydrated = hydration.payload;
+        setDataSourceMode('supabase_live');
+        setWorkspaceError(null);
+
+        if (hydrated.tenants && hydrated.tenants.length > 0) {
+          setTenants(hydrated.tenants);
         }
-        if (hydrated.errorCategories && hydrated.errorCategories.length > 0) {
-          setErrorCategories(hydrated.errorCategories);
+        if (hydrated.users && hydrated.users.length > 0) {
+          setUsers(hydrated.users);
         }
-        if (hydrated.competitionRules && hydrated.competitionRules.length > 0) {
-          setCompetitionRules(hydrated.competitionRules);
+        // Replace tenant operational data unconditionally so demo/mock data is never retained in live mode
+        setCabangList(hydrated.cabangList || []);
+        setJenjangList(hydrated.jenjangList || []);
+        setKafilahs(hydrated.kafilahs || []);
+        setStages(hydrated.stages || []);
+        setQuestions(hydrated.questions || []);
+        setParticipants(hydrated.participants || []);
+        setStageParticipations(hydrated.stageParticipations || []);
+        setErrorCategories(hydrated.errorCategories || []);
+        setCompetitionRules(hydrated.competitionRules || []);
+        setJudgeAssignments(hydrated.judgeAssignments || []);
+        setAssessments(hydrated.assessments || []);
+        setStageSnapshots(hydrated.stageSnapshots || []);
+        setAuditLogs(hydrated.auditLogs || []);
+        if (hydrated.rubricVersions && hydrated.rubricVersions.length > 0) {
+          setRubricVersions(hydrated.rubricVersions);
         }
-        if (hydrated.judgeAssignments && hydrated.judgeAssignments.length > 0) {
-          setJudgeAssignments(hydrated.judgeAssignments);
-        }
-        if (hydrated.assessments && hydrated.assessments.length > 0) {
-          setAssessments(hydrated.assessments);
-        }
-        if (hydrated.stageSnapshots && hydrated.stageSnapshots.length > 0) {
-          setStageSnapshots(hydrated.stageSnapshots);
-        }
-        if (hydrated.auditLogs && hydrated.auditLogs.length > 0) {
-          setAuditLogs(hydrated.auditLogs);
+      } else {
+        setDataSourceMode('supabase_error');
+        setWorkspaceError(hydration.error || 'Gagal memuat workspace database.');
+        setSyncStatus('Gagal Memuat Workspace Database');
+        if (info.isAuthenticated) {
+          // Do not silently retain demo data when authenticated live workspace query fails
+          setKafilahs([]);
+          setStages([]);
+          setQuestions([]);
+          setParticipants([]);
+          setStageParticipations([]);
+          setJudgeAssignments([]);
+          setAssessments([]);
+          setStageSnapshots([]);
         }
       }
     } else {
       setAuthenticatedProfile(null);
+      if (supabaseDataService.isLive()) {
+        setDataSourceMode('supabase_error');
+        setWorkspaceError(info.lastError || info.statusLabel);
+      } else {
+        setDataSourceMode('demo_local');
+        setWorkspaceError(null);
+      }
     }
 
     return info;
@@ -1377,17 +1410,31 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
-      void supabaseDataService.syncAssessmentToRemote(
-        {
-          ...initializedAsm,
-          id: toDeterministicUuid(initializedAsm.id),
-          tenantId: toDeterministicUuid(currentTenantId),
-          stageParticipationId: toDeterministicUuid(sp.id),
-          judgeId: toDeterministicUuid(judgeId),
-          rubricVersionId: toDeterministicUuid(activeRubric.id)
-        },
-        toDeterministicUuid(`am-${sp.id}-${targetQuestionId}`)
-      );
+      const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
+      void supabaseDataService
+        .syncAssessmentToRemote(
+          {
+            ...initializedAsm,
+            id: toDeterministicUuid(initializedAsm.id),
+            tenantId: toDeterministicUuid(currentTenantId),
+            stageParticipationId: toDeterministicUuid(sp.id),
+            judgeId: toDeterministicUuid(judgeId),
+            rubricVersionId: toDeterministicUuid(activeRubric.id),
+            questionId: toDeterministicUuid(targetQuestionId),
+            assignedMaqraId: matchedMaqraItem?.id
+          },
+          matchedMaqraItem?.id,
+          { stageParticipation: sp, participant: part }
+        )
+        .then((res) => {
+          if (res.success && res.data?.assignedMaqraId) {
+            setAssessments((prev) =>
+              prev.map((a) =>
+                a.id === initializedAsm.id ? { ...a, assignedMaqraId: res.data!.assignedMaqraId } : a
+              )
+            );
+          }
+        });
     }
 
     return {
@@ -1555,17 +1602,31 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
-      void supabaseDataService.syncAssessmentToRemote(
-        {
-          ...updatedAssessment,
-          id: toDeterministicUuid(updatedAssessment.id),
-          tenantId: toDeterministicUuid(currentTenantId),
-          stageParticipationId: toDeterministicUuid(sp.id),
-          judgeId: toDeterministicUuid(judgeId),
-          rubricVersionId: toDeterministicUuid(activeRubric.id)
-        },
-        toDeterministicUuid(`am-${sp.id}-${targetQuestionId}`)
-      );
+      const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
+      void supabaseDataService
+        .syncAssessmentToRemote(
+          {
+            ...updatedAssessment,
+            id: toDeterministicUuid(updatedAssessment.id),
+            tenantId: toDeterministicUuid(currentTenantId),
+            stageParticipationId: toDeterministicUuid(sp.id),
+            judgeId: toDeterministicUuid(judgeId),
+            rubricVersionId: toDeterministicUuid(activeRubric.id),
+            questionId: toDeterministicUuid(targetQuestionId),
+            assignedMaqraId: matchedMaqraItem?.id
+          },
+          matchedMaqraItem?.id,
+          { stageParticipation: sp, participant: part }
+        )
+        .then((res) => {
+          if (res.success && res.data?.assignedMaqraId) {
+            setAssessments((prev) =>
+              prev.map((a) =>
+                a.id === updatedAssessment.id ? { ...a, assignedMaqraId: res.data!.assignedMaqraId } : a
+              )
+            );
+          }
+        });
     }
 
     // Update stage participation status to Berlangsung
@@ -1734,13 +1795,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /**
    * Finalize individual judge assessment scoped strictly to question, stage, and official judge assignment.
    * Rejects unassigned judges and rejects empty/uninitialized assessment sheets.
+   * When connected to live database, waits for sync + RPC finalization before mutating local state to finalized.
    */
-  const finalizeAssessment = (
+  const finalizeAssessment = async (
     participantId: string,
     judgeId: string,
     stageName?: string,
     questionId?: string
-  ): { success: boolean; message: string } => {
+  ): Promise<{ success: boolean; message: string }> => {
     // 1. Role check: Admin cannot finalize on behalf of judge
     if (currentUser.role !== 'judge') {
       return {
@@ -1868,6 +1930,56 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
+    const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
+    let resolvedAssignedMaqraId = existing.assignedMaqraId || matchedMaqraItem?.id;
+
+    // 10. Database Transaction First when in live database mode!
+    if (supabaseDataService.isLive() && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      setSyncStatus('Memproses finalisasi di server...');
+      const asmUuid = toDeterministicUuid(existing.id);
+
+      const syncRes = await supabaseDataService.syncAssessmentToRemote(
+        {
+          ...existing,
+          id: asmUuid,
+          tenantId: toDeterministicUuid(currentTenantId),
+          stageParticipationId: toDeterministicUuid(sp.id),
+          judgeId: toDeterministicUuid(judgeId),
+          rubricVersionId: toDeterministicUuid(activeRubric.id),
+          questionId: toDeterministicUuid(targetQuestionId),
+          assignedMaqraId: resolvedAssignedMaqraId,
+          status: 'in_progress',
+          isLocked: false,
+          deductions: scoreResult.deductions,
+          fieldScores: scoreResult.fieldScores,
+          totalDeductions: scoreResult.totalDeductions,
+          finalScore: scoreResult.finalScore
+        },
+        resolvedAssignedMaqraId,
+        { stageParticipation: sp, participant: part }
+      );
+
+      if (!syncRes.success) {
+        setSyncStatus('Gagal Menyimpan Draf ke Database');
+        return {
+          success: false,
+          message: `Gagal menyimpan draf penilaian ke database sebelum finalisasi: ${syncRes.message}`
+        };
+      }
+
+      const persistedAssessmentId = syncRes.data?.assessmentId || asmUuid;
+      resolvedAssignedMaqraId = syncRes.data?.assignedMaqraId || resolvedAssignedMaqraId;
+
+      const rpcRes = await supabaseDataService.finalizeJudgeAssessmentRpc(persistedAssessmentId);
+      if (!rpcRes.success) {
+        setSyncStatus('Gagal Memfinalisasi di Database');
+        return {
+          success: false,
+          message: `Finalisasi database ditolak: ${rpcRes.message}`
+        };
+      }
+    }
+
     const nowTime = getWibTime();
     const targetJudge = users.find((u) => u.id === judgeId) || currentUser;
     const finalizedScore = scoreResult.finalScore;
@@ -1879,6 +1991,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stageParticipationId: sp.id,
             stageId,
             stageName: targetStage,
+            assignedMaqraId: resolvedAssignedMaqraId,
             status: 'finalized',
             isLocked: true,
             deductions: scoreResult.deductions,
@@ -1895,7 +2008,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     setAssessments(updatedAssessments);
 
-    // 10. Check required judges strictly from official assignments (NO fallback to all tenant judges)
+    // 11. Check required judges strictly from official assignments (NO fallback to all tenant judges)
     const requiredJudgeIds = Array.from(new Set(stageBranchAssignments.map((ja) => ja.judgeId)));
     const totalRequiredUnits = requiredJudgeIds.length * stageQuestions.length;
     let finalizedUnits = 0;
@@ -1978,28 +2091,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     setLastSyncTime(nowTime);
 
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
-      const asmUuid = toDeterministicUuid(existing.id);
-      void supabaseDataService
-        .syncAssessmentToRemote(
-          {
-            ...existing,
-            id: asmUuid,
-            tenantId: toDeterministicUuid(currentTenantId),
-            stageParticipationId: toDeterministicUuid(sp.id),
-            judgeId: toDeterministicUuid(judgeId),
-            rubricVersionId: toDeterministicUuid(activeRubric.id),
-            status: 'in_progress',
-            deductions: scoreResult.deductions,
-            fieldScores: scoreResult.fieldScores,
-            totalDeductions: scoreResult.totalDeductions,
-            finalScore: scoreResult.finalScore
-          },
-          toDeterministicUuid(`am-${sp.id}-${targetQuestionId}`)
-        )
-        .then(() => supabaseDataService.finalizeJudgeAssessmentRpc(asmUuid));
-    }
-
     return {
       success: true,
       message: `Penilaian ${qLabel} untuk peserta ${part.name} (Skor: ${finalizedScore.toFixed(2)}) berhasil dikunci dan difinalisasi.`
@@ -2009,15 +2100,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /**
    * Pembukaan kembali lembar penilaian final (Correction & Reopen Policy)
    * Hanya dapat dilakukan oleh Administrator / Superadmin dengan mencantumkan alasan wajib.
-   * Menghasilkan catatan Audit Log permanen demi integritas hasil kompetisi.
+   * Menunggu transaksi RPC server sebelum membuka kunci di state lokal.
    */
-  const reopenAssessment = (
+  const reopenAssessment = async (
     participantId: string,
     judgeId: string,
     reason: string,
     stageName?: string,
     questionId?: string
-  ): { success: boolean; message: string } => {
+  ): Promise<{ success: boolean; message: string }> => {
     if (currentUser.role === 'judge') {
       return {
         success: false,
@@ -2056,6 +2147,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (existing.status !== 'finalized') {
       return { success: false, message: 'Lembar penilaian belum berstatus final.' };
+    }
+
+    // Execute server RPC FIRST when connected to live database
+    if (supabaseDataService.isLive() && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      setSyncStatus('Membuka kunci penilaian di server...');
+      const rpcRes = await supabaseDataService.reopenJudgeAssessmentRpc(
+        toDeterministicUuid(existing.id),
+        reason
+      );
+      if (!rpcRes.success) {
+        setSyncStatus('Gagal Membuka Kunci di Database');
+        return {
+          success: false,
+          message: `Pembukaan kembali penilaian di database ditolak: ${rpcRes.message}`
+        };
+      }
     }
 
     const nowTime = getWibTime();
@@ -2124,12 +2231,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setActivityLogs((prev) => [reopenActivity, ...prev.filter((l) => l.id !== reopenActivity.id).slice(0, 20)]);
 
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
-      void supabaseDataService.reopenJudgeAssessmentRpc(
-        toDeterministicUuid(existing.id),
-        reason
-      );
-    }
+    setSyncStatus(
+      supabaseDataService.isLive()
+        ? supabaseDataService.getConnectionStatus().statusLabel
+        : 'Mode Lokal (Tersimpan di Browser)'
+    );
+    setLastSyncTime(nowTime);
 
     return {
       success: true,
@@ -2389,7 +2496,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       : `Hal. ${q.pageNumber}`;
     const assignedLabel = `${q.title} (${pageLabel})`;
 
+    const maqraRecordId = generateUuid();
     const newMaqraItem: AssignedMaqraItem = {
+      id: maqraRecordId,
       questionId: q.id,
       code: q.code,
       title: q.title,
@@ -2404,6 +2513,46 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       assignedAt: getWibTime(),
       stageName: targetStage
     };
+
+    const targetStageObj = stages.find(
+      (s) => s.tenantId === currentTenantId && s.name === targetStage
+    );
+    const existingSp = stageParticipations.find(
+      (sp) =>
+        sp.tenantId === currentTenantId &&
+        sp.participantId === participantId &&
+        sp.stageName === targetStage
+    );
+    const resolvedSp: StageParticipation = existingSp
+      ? {
+          ...existingSp,
+          questionId: q.id,
+          assignedMaqra:
+            ((existingSp.assignedQuestions || []).filter((item) => item.questionId !== '').length + 1) === 1
+              ? assignedLabel
+              : `${(existingSp.assignedQuestions || []).filter((item) => item.questionId !== '').length + 1} Maqra Ditetapkan`,
+          pageNumber: q.pageNumber,
+          assignedQuestions: [
+            ...(existingSp.assignedQuestions || []).filter((item) => item.questionId !== ''),
+            newMaqraItem
+          ],
+          status: existingSp.status === 'Maqra Belum Ditetapkan' ? 'Belum Dimulai' : existingSp.status
+        }
+      : {
+          id: generateUuid(),
+          tenantId: currentTenantId,
+          participantId,
+          stageId: targetStageObj?.id || toDeterministicUuid('stage-penyisihan'),
+          stageName: targetStage,
+          branchId: part.branchId,
+          branchName: part.branchName,
+          lotteryNumber: part.lotteryNumber,
+          questionId: q.id,
+          assignedMaqra: assignedLabel,
+          pageNumber: q.pageNumber,
+          assignedQuestions: [newMaqraItem],
+          status: 'Belum Dimulai'
+        };
 
     // Update participant
     setParticipants((prev) =>
@@ -2430,56 +2579,56 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Update or create stage participation
     setStageParticipations((prev) => {
-      const exists = prev.some(
-        (sp) =>
-          sp.tenantId === currentTenantId &&
-          sp.participantId === participantId &&
-          sp.stageName === targetStage
-      );
-
-      if (exists) {
-        return prev.map((sp) => {
-          if (
-            sp.tenantId === currentTenantId &&
-            sp.participantId === participantId &&
-            sp.stageName === targetStage
-          ) {
-            const currentList = (sp.assignedQuestions || []).filter((item) => item.questionId !== '');
-            const updatedList = [...currentList, newMaqraItem];
-            const nextStatus: ParticipantProgressStatus =
-              sp.status === 'Maqra Belum Ditetapkan' ? 'Belum Dimulai' : sp.status;
-            return {
-              ...sp,
-              questionId: q.id,
-              assignedMaqra: updatedList.length === 1 ? assignedLabel : `${updatedList.length} Maqra Ditetapkan`,
-              pageNumber: q.pageNumber,
-              assignedQuestions: updatedList,
-              status: nextStatus
-            };
-          }
-          return sp;
-        });
-      } else {
-        const targetStageObj = stages.find(
-          (s) => s.tenantId === currentTenantId && s.name === targetStage
-        );
-        const newSp: StageParticipation = {
-          id: `sp-${participantId}-${targetStageObj?.id || 'stage'}-${Date.now()}`,
-          tenantId: currentTenantId,
-          participantId,
-          stageId: targetStageObj?.id || 'stage',
-          stageName: targetStage,
-          branchName: part.branchName,
-          lotteryNumber: part.lotteryNumber,
-          questionId: q.id,
-          assignedMaqra: assignedLabel,
-          pageNumber: q.pageNumber,
-          assignedQuestions: [newMaqraItem],
-          status: 'Belum Dimulai'
-        };
-        return [...prev, newSp];
+      if (existingSp) {
+        return prev.map((sp) => (sp.id === existingSp.id ? resolvedSp : sp));
       }
+      return [...prev, resolvedSp];
     });
+
+    // Persist assigned_maqra in database and sync returned database row ID
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      void supabaseDataService
+        .assignMaqraRecord({
+          id: maqraRecordId,
+          tenantId: toDeterministicUuid(currentTenantId),
+          stageParticipationId: toDeterministicUuid(resolvedSp.id),
+          questionId: toDeterministicUuid(q.id),
+          method: 'manual',
+          stageParticipation: resolvedSp,
+          participant: part
+        })
+        .then((res) => {
+          const dbMaqraId = res.data?.assignedMaqraId;
+          if (res.success && dbMaqraId) {
+            setStageParticipations((prev) =>
+              prev.map((sp) =>
+                sp.id === resolvedSp.id
+                  ? {
+                      ...sp,
+                      assignedQuestions: (sp.assignedQuestions || []).map((aq) =>
+                        aq.questionId === q.id ? { ...aq, id: dbMaqraId } : aq
+                      )
+                    }
+                  : sp
+              )
+            );
+            setParticipants((prev) =>
+              prev.map((p) =>
+                p.id === participantId
+                  ? {
+                      ...p,
+                      assignedQuestions: (p.assignedQuestions || []).map((aq) =>
+                        aq.questionId === q.id && aq.stageName === targetStage
+                          ? { ...aq, id: dbMaqraId }
+                          : aq
+                      )
+                    }
+                  : p
+              )
+            );
+          }
+        });
+    }
 
     // Update question assignment tag
     setQuestions((prev) =>
@@ -2628,6 +2777,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ? `Hal. ${q.pageStart} - ${q.pageEnd}`
           : `Hal. ${q.pageNumber}`;
         const newMaqraItem: AssignedMaqraItem = {
+          id: generateUuid(),
           questionId: q.id,
           code: q.code,
           title: q.title,
@@ -2679,6 +2829,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     // 3. Atomic StageParticipations Update
+    const resolvedSpByParticipant: Record<string, StageParticipation> = {};
     setStageParticipations((prev) => {
       const updated = prev.map((sp) => {
         if (sp.tenantId === currentTenantId && sp.stageName === stageName && itemsByParticipant[sp.participantId]) {
@@ -2691,7 +2842,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           });
           const lastItem = combined[combined.length - 1];
-          return {
+          const updatedSp: StageParticipation = {
             ...sp,
             questionId: lastItem ? lastItem.questionId : '',
             assignedMaqra: combined.length === 1 ? combined[0].title : `${combined.length} Maqra Ditetapkan`,
@@ -2699,6 +2850,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             assignedQuestions: combined,
             status: sp.status === 'Maqra Belum Ditetapkan' ? ('Belum Dimulai' as ParticipantProgressStatus) : sp.status
           };
+          resolvedSpByParticipant[sp.participantId] = updatedSp;
+          return updatedSp;
         }
         return sp;
       });
@@ -2713,12 +2866,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (part) {
             const newItems = itemsByParticipant[r.participantId] || [];
             const lastItem = newItems[newItems.length - 1];
-            updated.push({
-              id: `sp-${r.participantId}-${stageId}-${Date.now()}`,
+            const createdSp: StageParticipation = {
+              id: generateUuid(),
               tenantId: currentTenantId,
               participantId: r.participantId,
               stageId,
               stageName,
+              branchId: part.branchId,
               branchName: part.branchName,
               lotteryNumber: part.lotteryNumber,
               questionId: lastItem ? lastItem.questionId : '',
@@ -2726,13 +2880,62 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               pageNumber: lastItem ? lastItem.pageNumber : 1,
               assignedQuestions: newItems,
               status: 'Belum Dimulai'
-            });
+            };
+            resolvedSpByParticipant[r.participantId] = createdSp;
+            updated.push(createdSp);
           }
         }
       });
 
       return updated;
     });
+
+    // Persist assigned_maqras to live database if connected
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      results.forEach((r) => {
+        const part = participants.find((p) => p.id === r.participantId && p.tenantId === currentTenantId);
+        const sp =
+          resolvedSpByParticipant[r.participantId] ||
+          stageParticipations.find(
+            (item) =>
+              item.tenantId === currentTenantId &&
+              item.stageName === stageName &&
+              item.participantId === r.participantId
+          );
+        const newItems = itemsByParticipant[r.participantId] || [];
+        if (part && sp) {
+          newItems.forEach((maqraItem) => {
+            void supabaseDataService
+              .assignMaqraRecord({
+                id: maqraItem.id || generateUuid(),
+                tenantId: toDeterministicUuid(currentTenantId),
+                stageParticipationId: toDeterministicUuid(sp.id),
+                questionId: toDeterministicUuid(maqraItem.questionId),
+                method: 'undian',
+                stageParticipation: sp,
+                participant: part
+              })
+              .then((res) => {
+                const dbMaqraId = res.data?.assignedMaqraId;
+                if (res.success && dbMaqraId) {
+                  setStageParticipations((prev) =>
+                    prev.map((item) =>
+                      item.id === sp.id
+                        ? {
+                            ...item,
+                            assignedQuestions: (item.assignedQuestions || []).map((aq) =>
+                              aq.questionId === maqraItem.questionId ? { ...aq, id: dbMaqraId } : aq
+                            )
+                          }
+                        : item
+                    )
+                  );
+                }
+              });
+          });
+        }
+      });
+    }
 
     // 4. Atomic Questions Update
     setQuestions((prev) =>
@@ -3061,7 +3264,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * - Supports final stage championship finalization (when nextStageName is empty)
    * - Records complete historical snapshots (score, rank, finalizedAt)
    */
-  const advanceQualifiers = (
+  const advanceQualifiers = async (
     currentStageNameOrParams:
       | string
       | {
@@ -3078,7 +3281,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     nextStageNameArg?: string,
     qualifiedParticipantIdsArg?: string[],
     overrideReasonsArg?: Record<string, string>
-  ): { success: boolean; message: string } => {
+  ): Promise<{ success: boolean; message: string }> => {
     let currentStageName: string;
     let nextStageName: string = '';
     let qualifiedParticipantIds: string[] = [];
@@ -3246,6 +3449,21 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .filter((item) => item.isQualified)
       .map((item) => item.participant.id);
 
+    if (!isFinalChampionship) {
+      const alreadyAdvanced = stageParticipations.some(
+        (sp) =>
+          sp.tenantId === currentTenantId &&
+          (nextStg?.id && sp.stageId ? sp.stageId === nextStg.id : sp.stageName === nextStageName) &&
+          finalQualifiedIds.includes(sp.participantId)
+      );
+      if (alreadyAdvanced) {
+        return {
+          success: false,
+          message: `Sebagian peserta yang dipilih sudah terdaftar di Babak ${nextStageName}.`
+        };
+      }
+    }
+
     const scoreMap: Record<string, { score: number; rank: number; tieBreakResolvedBy?: string; isQualified: boolean }> = {};
     evalResult.evaluatedParticipants.forEach((item) => {
       scoreMap[item.participant.id] = {
@@ -3256,7 +3474,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     });
 
-    // Buat snapshot permanen hasil babak
+    // Buat objek snapshot hasil babak (disimpan ke state HANYA setelah transaksi RPC berhasil)
     const stageSnapshot = RankingService.createStageResultSnapshot({
       tenantId: currentTenantId,
       stageId: currentStg.id,
@@ -3268,6 +3486,37 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       evaluatedParticipants: evalResult.evaluatedParticipants,
       customRuleConfigs: competitionRules
     });
+
+    // 7. Execute Server RPC Transaction FIRST (including final championship where nextStageId = null!)
+    if (supabaseDataService.isLive() && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      setSyncStatus('Mengesahkan hasil babak di server...');
+      const rpcRankingsSnapshot = stageSnapshot.rankings.map((entry) => ({
+        ...entry,
+        participant_id: toDeterministicUuid(entry.participantId),
+        final_score: entry.totalScore,
+        rank: entry.rank
+      }));
+
+      const rpcRes = await supabaseDataService.advanceStageQualifiersRpc({
+        stageId: toDeterministicUuid(currentStg.id),
+        nextStageId: isFinalChampionship ? null : nextStg ? toDeterministicUuid(nextStg.id) : null,
+        qualifiedParticipantIds: finalQualifiedIds.map((id) => toDeterministicUuid(id)),
+        overrideReasons: Object.fromEntries(
+          Object.entries(overrideReasons || {}).map(([k, v]) => [toDeterministicUuid(k), v])
+        ),
+        rankingsSnapshot: rpcRankingsSnapshot
+      });
+
+      if (!rpcRes.success) {
+        setSyncStatus('Gagal Mengesahkan Babak di Database');
+        return {
+          success: false,
+          message: `Pengesahan babak di database ditolak: ${rpcRes.message}`
+        };
+      }
+    }
+
+    // 8. Commit local state AFTER server transaction succeeded
     setStageSnapshots((prev) => [...prev.filter((s) => s.id !== stageSnapshot.id), stageSnapshot]);
 
     const nowTime = getWibTime();
@@ -3383,6 +3632,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
 
+      setSyncStatus(
+        supabaseDataService.isLive()
+          ? supabaseDataService.getConnectionStatus().statusLabel
+          : 'Mode Lokal (Tersimpan di Browser)'
+      );
+      setLastSyncTime(nowTime);
+
       return {
         success: true,
         message: `Hasil kejuaraan Babak ${currentStageName} berhasil disahkan secara resmi dan musabaqah dinyatakan selesai.`
@@ -3390,19 +3646,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // STANDARD ADVANCEMENT TO NEXT STAGE
-    const alreadyAdvanced = stageParticipations.some(
-      (sp) =>
-        sp.tenantId === currentTenantId &&
-        (nextStg?.id && sp.stageId ? sp.stageId === nextStg.id : sp.stageName === nextStageName) &&
-        finalQualifiedIds.includes(sp.participantId)
-    );
-    if (alreadyAdvanced) {
-      return {
-        success: false,
-        message: `Sebagian peserta yang dipilih sudah terdaftar di Babak ${nextStageName}.`
-      };
-    }
-
     // 1. Mark current stage as finalized and activate next stage
     setStages((prev) =>
       prev.map((s) => {
@@ -3449,7 +3692,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const part = participants.find((p) => p.id === pId && p.tenantId === currentTenantId);
         if (part && nextStg) {
           newParticipations.push({
-            id: `sp-${part.id}-${nextStg.id}-${Date.now()}`,
+            id: generateUuid(),
             tenantId: currentTenantId,
             participantId: part.id,
             stageId: nextStg.id,
@@ -3534,17 +3777,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setAuditLogs((prev) => [newAudit, ...prev.filter((l) => l.id !== newAudit.id)]);
 
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
-      void supabaseDataService.advanceStageQualifiersRpc({
-        stageId: toDeterministicUuid(currentStg.id),
-        nextStageId: nextStg ? toDeterministicUuid(nextStg.id) : null,
-        qualifiedParticipantIds: finalQualifiedIds.map((id) => toDeterministicUuid(id)),
-        overrideReasons: Object.fromEntries(
-          Object.entries(overrideReasons || {}).map(([k, v]) => [toDeterministicUuid(k), v])
-        ),
-        rankingsSnapshot: stageSnapshot.rankings
-      });
-    }
+    setSyncStatus(
+      supabaseDataService.isLive()
+        ? supabaseDataService.getConnectionStatus().statusLabel
+        : 'Mode Lokal (Tersimpan di Browser)'
+    );
+    setLastSyncTime(nowTime);
 
     return {
       success: true,
@@ -3668,6 +3906,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resetPrototypeData,
         connectionInfo,
         authenticatedProfile,
+        dataSourceMode,
+        workspaceError,
         refreshSupabaseConnection,
         signInWithSupabase,
         signOutSupabase

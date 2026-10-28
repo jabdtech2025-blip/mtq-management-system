@@ -50,9 +50,9 @@ export const RekapNilaiView: React.FC = () => {
   const [reopenReason, setReopenReason] = useState<string>('');
   const [reopenAlert, setReopenAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const handleConfirmReopen = () => {
+  const handleConfirmReopen = async () => {
     if (!reopenTarget || !reopenReason.trim()) return;
-    const res = reopenAssessment(
+    const res = await reopenAssessment(
       reopenTarget.participantId,
       reopenTarget.judgeId,
       reopenReason.trim(),
@@ -1062,11 +1062,17 @@ export const RekapNilaiView: React.FC = () => {
                       className="w-full p-2.5 text-xs border border-slate-300 rounded-xl focus:border-emerald-600 outline-none"
                     />
                   </div>
+                  {reopenAlert && reopenAlert.type === 'error' && (
+                    <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium">
+                      {reopenAlert.message}
+                    </div>
+                  )}
                   <div className="flex items-center justify-end gap-2 pt-2">
                     <button
                       onClick={() => {
                         setReopenTarget(null);
                         setReopenReason('');
+                        setReopenAlert(null);
                       }}
                       className="px-3 py-1.5 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
                     >
