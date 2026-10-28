@@ -919,6 +919,246 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     `Blocking reason: ${blockedEval.blockingReason}`
   );
 
+  // 29. Rubrik Dinamis Penuh: Menghapus/Menonaktifkan bidang Lagu dan Menambahkan bidang baru Itqan
+  const rubricWithItqanNoLagu: RubricVersion = {
+    id: 'rubric-tahfizh-itqan-2026',
+    tenantId: 'tenant-test',
+    code: 'RUBRIC-ITQAN-2026',
+    name: 'Rubrik Tahfizh & Itqan 2026',
+    branchCode: 'THF-ITQ',
+    branchName: 'Tahfizh 20 Juz',
+    version: '2026.1',
+    description: 'Rubrik tanpa Lagu dengan tambahan bidang Itqan',
+    status: 'Aktif',
+    startingScore: 100,
+    fields: [
+      { id: 'fld-tjw', code: 'TJW', name: 'Tajwid', maxScore: 35, minScore: 0, order: 1, status: 'Aktif' },
+      { id: 'fld-fsh', code: 'FSH', name: 'Fashahah', maxScore: 25, minScore: 0, order: 2, status: 'Aktif' },
+      { id: 'fld-lag', code: 'LAG', name: 'Lagu', maxScore: 25, minScore: 0, order: 3, status: 'Nonaktif' },
+      { id: 'fld-itq', code: 'ITQ', name: 'Itqan', maxScore: 40, minScore: 0, order: 4, status: 'Aktif' }
+    ],
+    createdAt: new Date().toISOString()
+  };
+  const itqanCategories: ErrorCategory[] = [
+    {
+      id: 'cat-itq-1',
+      tenantId: 'tenant-test',
+      fieldId: 'fld-itq',
+      code: 'ITQ1',
+      name: 'Tawaqquf Hafalan',
+      scope: 'Itqan Hafalan',
+      defaultDeduction: 1.5,
+      methodType: 'Pengurangan tetap',
+      status: 'Aktif',
+      order: 1
+    }
+  ];
+  const itqanCalc = calculateAssessmentScore({ 'cat-itq-1': 2 }, itqanCategories, rubricWithItqanNoLagu);
+  // Itqan: 40 - (2 * 1.5) = 37.0; Tajwid: 35.0; Fashahah: 25.0; Lagu is Nonaktif (undefined). Total = 97.0
+  assert(
+    '29. Rubrik Dinamis: Penonaktifan bidang Lagu dan penambahan bidang Itqan dihitung presisi tanpa perubahan kode',
+    itqanCalc.validationErrors.length === 0 &&
+      itqanCalc.fieldScores['Itqan'] === 37.0 &&
+      itqanCalc.fieldScores['Lagu'] === undefined &&
+      itqanCalc.finalScore === 97.0,
+    `Itqan: ${itqanCalc.fieldScores['Itqan']}, Lagu: ${itqanCalc.fieldScores['Lagu']}, Final: ${itqanCalc.finalScore}`
+  );
+
+  // 30. Eksekusi DeductionRule dan Batas Maksimum Kriteria (RubricCriterion.maxDeduction)
+  const rubricWithCriterionRules: RubricVersion = {
+    id: 'rubric-crit-cap',
+    tenantId: 'tenant-test',
+    code: 'RUBRIC-CRIT-2026',
+    name: 'Rubrik Kriteria Bertingkat',
+    branchCode: 'TLW',
+    branchName: 'Tilawah',
+    version: '1.0',
+    description: 'Uji batas potongan per kriteria dan aturan pengurangan',
+    status: 'Aktif',
+    startingScore: 100,
+    fields: [
+      {
+        id: 'f-1',
+        code: 'TJW',
+        name: 'Tajwid',
+        maxScore: 100,
+        minScore: 0,
+        order: 1,
+        status: 'Aktif',
+        criteria: [
+          {
+            id: 'cr-makhraj',
+            fieldId: 'f-1',
+            name: 'Makharijul Huruf',
+            maxDeduction: 4.0,
+            deductionRules: [
+              {
+                id: 'dr-jali',
+                criterionId: 'cr-makhraj',
+                label: 'Khafi/Jali',
+                deductionPerError: 1.5,
+                maxDeduction: 3.0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    createdAt: new Date().toISOString()
+  };
+  const critCategories: ErrorCategory[] = [
+    {
+      id: 'cat-dr-1',
+      tenantId: 'tenant-test',
+      fieldId: 'f-1',
+      criterionId: 'cr-makhraj',
+      deductionRuleId: 'dr-jali',
+      code: 'DRJ',
+      name: 'Kesalahan Makhraj Jali',
+      scope: 'Tajwid',
+      defaultDeduction: 1.5,
+      methodType: 'Pengurangan tetap',
+      status: 'Aktif',
+      order: 1
+    }
+  ];
+  // 4 errors * 1.5 = 6.0 raw, capped by DeductionRule.maxDeduction = 3.0 -> finalScore = 97.0
+  const critCalc = calculateAssessmentScore({ 'cat-dr-1': 4 }, critCategories, rubricWithCriterionRules);
+  assert(
+    '30. Eksekusi DeductionRule & Criterion Cap: Potongan dibatasi sesuai maxDeduction pada DeductionRule/RubricCriterion',
+    critCalc.validationErrors.length === 0 &&
+      critCalc.deductions['cat-dr-1'] === 3.0 &&
+      critCalc.finalScore === 97.0,
+    `Deduction: ${critCalc.deductions['cat-dr-1']}, Final: ${critCalc.finalScore}`
+  );
+
+  // 31. Penolakan Metode "Pengurangan berbobot" Tanpa Formula Resmi
+  const weightedCat: ErrorCategory = {
+    id: 'cat-weighted',
+    tenantId: 'tenant-test',
+    fieldId: 'fld-tajwid',
+    code: 'WGT',
+    name: 'Kesalahan Berbobot',
+    scope: 'Tajwid & Makhraj',
+    defaultDeduction: 1.0,
+    methodType: 'Pengurangan berbobot',
+    status: 'Aktif',
+    order: 10
+  };
+  const weightedCalc = calculateAssessmentScore({ 'cat-weighted': 1 }, [weightedCat], OFFICIAL_SENI_BACA_RUBRIC);
+  assert(
+    '31. Bloker Konfigurasi: Metode "Pengurangan berbobot" ditolak dengan validation error eksplisit',
+    weightedCalc.validationErrors.length > 0 &&
+      weightedCalc.validationErrors.some((e) => e.includes('Pengurangan berbobot')),
+    `Errors: ${weightedCalc.validationErrors.join('; ')}`
+  );
+
+  // 32. Penolakan Finalisasi Babak Tanpa Penugasan Hakim Resmi (judge_assignments kosong)
+  const noAssignmentEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageId: 'stg-1',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: tieBreakAssessments,
+    judgeAssignments: [], // Kosong -> wajib menolak finalisasi!
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1
+  });
+  assert(
+    '32. Otorisasi Majelis Hakim: Babak tanpa penugasan hakim resmi (judgeAssignments kosong) memblokir pengesahan',
+    noAssignmentEval.canFinalize === false &&
+      Boolean(noAssignmentEval.blockingReason?.includes('penugasan dewan hakim')),
+    `canFinalize: ${noAssignmentEval.canFinalize}, reason: ${noAssignmentEval.blockingReason}`
+  );
+
+  // 33. Validasi Kriteria Tie-Break Terhadap Bidang Rubrik Aktif
+  const invalidTieBreakConfig: CompetitionRuleConfig[] = [
+    {
+      id: 'cfg-invalid-tb',
+      tenantId: 't-tb',
+      branchName: 'Tilawah Dewasa Putra',
+      rubricVersionId: 'rubric-seni-baca-2025',
+      tieBreakOrder: ['total', 'BidangFiktifYangTidakAda'],
+      quotaPerStage: { Penyisihan: 1 }
+    }
+  ];
+  const invalidTbEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageId: 'stg-1',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: tieBreakAssessments,
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1,
+    customRuleConfigs: invalidTieBreakConfig
+  });
+  assert(
+    '33. Validasi Tie-Break: Kriteria tie-break yang tidak ada pada rubrik aktif memblokir pengesahan babak',
+    invalidTbEval.canFinalize === false && invalidTbEval.isTieBreakConfigValid === false,
+    `canFinalize: ${invalidTbEval.canFinalize}, isTieBreakConfigValid: ${invalidTbEval.isTieBreakConfigValid}`
+  );
+
+  // 34. Deteksi Konflik Manual Override False Tanpa Alasan Wajib
+  const overrideConflictWithoutReason = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageId: 'stg-1',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: tieBreakAssessments,
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1,
+    manualOverrides: { 'p-tb-b': false }, // p-tb-b adalah peringkat 1 otomatis, digugurkan manual tanpa alasan
+    overrideReasons: {}
+  });
+  assert(
+    '34. Validasi Override Manual: Menggugurkan peserta yang lolos otomatis (override false) tanpa alasan >= 5 karakter ditolak',
+    overrideConflictWithoutReason.canFinalize === false &&
+      Boolean(overrideConflictWithoutReason.blockingReason?.includes('override manual')),
+    `canFinalize: ${overrideConflictWithoutReason.canFinalize}, reason: ${overrideConflictWithoutReason.blockingReason}`
+  );
+
+  // 35. Isolasi Ketat Berbasis stageId dan branchId untuk Dua Cabang dengan Babak "Penyisihan"
+  const strictStageIsolationEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-1',
+    stageId: 'stg-1',
+    stageName: 'Penyisihan',
+    branchId: 'br-tilawah',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: [
+      { id: 'sp-til', tenantId: 't-1', participantId: 'p-til-1', stageId: 'stg-1', stageName: 'Penyisihan', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra', lotteryNumber: '01', questionId: 'q-1', assignedMaqra: 'Maqra 1', pageNumber: 300, status: 'Lengkap' },
+      { id: 'sp-tah', tenantId: 't-1', participantId: 'p-tah-1', stageId: 'stg-2', stageName: 'Penyisihan', branchId: 'br-tahfizh', branchName: 'Tahfizh 30 Juz', lotteryNumber: '01', questionId: 'q-2', assignedMaqra: 'Maqra 2', pageNumber: 305, status: 'Lengkap' }
+    ],
+    participants: [
+      { id: 'p-til-1', tenantId: 't-1', name: 'Qari Tilawah', participantId: 'TLW-01', lotteryNumber: '01', gender: 'Putra', kafilahId: 'kf-1', kafilahName: 'Kafilah Kota', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra', levelName: 'Dewasa', questionId: 'q-1', assignedMaqra: 'Maqra 1', pageNumber: 300, status: 'Berlangsung', stageName: 'Penyisihan' },
+      { id: 'p-tah-1', tenantId: 't-1', name: 'Hafizh Tahfizh', participantId: 'THF-01', lotteryNumber: '01', gender: 'Putra', kafilahId: 'kf-1', kafilahName: 'Kafilah Kota', branchId: 'br-tahfizh', branchName: 'Tahfizh 30 Juz', levelName: 'Dewasa', questionId: 'q-2', assignedMaqra: 'Maqra 2', pageNumber: 305, status: 'Berlangsung', stageName: 'Penyisihan' }
+    ],
+    assessments: [
+      { id: 'a-til', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', participantId: 'p-til-1', stageParticipationId: 'sp-til', stageId: 'stg-1', stageName: 'Penyisihan', questionId: 'q-1', fieldScores: { Tajwid: 29, Fashahah: 29, Lagu: 24, Suara: 14 }, finalScore: 96, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 4, annotations: [], lastUpdated: '10:00' },
+      { id: 'a-tah', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tahfizh', participantId: 'p-tah-1', stageParticipationId: 'sp-tah', stageId: 'stg-2', stageName: 'Penyisihan', questionId: 'q-2', fieldScores: { Tahfizh: 49, Tajwid: 25, Fashahah: 24 }, finalScore: 98, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 2, annotations: [], lastUpdated: '10:00' }
+    ],
+    judgeAssignments: [
+      { id: 'ja-1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', stageId: 'stg-1', stageName: 'Penyisihan', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra' }
+    ],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1
+  });
+  assert(
+    '35. Isolasi ID Ketat (stageId & branchId): Babak Penyisihan pada cabang berbeda terisolasi 100% dan siap disahkan',
+    strictStageIsolationEval.canFinalize === true &&
+      strictStageIsolationEval.evaluatedParticipants.length === 1 &&
+      strictStageIsolationEval.evaluatedParticipants[0].participant.id === 'p-til-1',
+    `canFinalize: ${strictStageIsolationEval.canFinalize}, count: ${strictStageIsolationEval.evaluatedParticipants.length}`
+  );
+
   return { passed, failed, results };
 }
+
 

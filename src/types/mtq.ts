@@ -153,6 +153,9 @@ export interface ErrorCategory {
   name: string;
   scope: string;
   fieldId?: string; // Explicit relational link to RubricField.id (P0 Dynamic Rubric)
+  criterionId?: string; // Explicit relational link to RubricCriterion.id
+  deductionRuleId?: string; // Explicit relational link to DeductionRule.id
+  maxDeduction?: number; // Optional cap on total deduction for this category
   defaultDeduction: number; // e.g. 0.50, 1.00
   methodType: 'Pengurangan tetap' | 'Pengurangan berbobot';
   status: 'Aktif' | 'Nonaktif';
@@ -176,16 +179,19 @@ export interface CanvasStroke {
 export interface DeductionRule {
   id: string;
   criterionId: string;
-  name: string;
-  errorGrade: 'Jali' | 'Khafi' | 'Umum' | 'Kecil' | 'Sedang' | 'Besar';
-  deductionPoints: number;
-  methodType: 'Pengurangan tetap' | 'Pengurangan berbobot';
+  name?: string;
+  label?: string;
+  errorGrade?: 'Jali' | 'Khafi' | 'Umum' | 'Kecil' | 'Sedang' | 'Besar';
+  deductionPoints?: number;
+  deductionPerError?: number;
+  maxDeduction?: number;
+  methodType?: 'Pengurangan tetap' | 'Pengurangan berbobot';
 }
 
 export interface RubricCriterion {
   id: string;
   fieldId: string;
-  code: string;
+  code?: string;
   name: string;
   description?: string;
   deductionRules: DeductionRule[];
@@ -194,10 +200,12 @@ export interface RubricCriterion {
 
 export interface RubricField {
   id: string;
-  code: string; // e.g. "TJW", "FSH", "LAG", "SUA"
-  name: string; // e.g. "Tajwid", "Fashahah", "Lagu", "Suara"
+  code: string; // e.g. "TJW", "FSH", "LAG", "SUA", "ITQ"
+  name: string; // e.g. "Tajwid", "Fashahah", "Lagu", "Suara", "Itqan"
   maxScore: number; // e.g. 30, 30, 25, 15
   minScore: number; // e.g. 0
+  maxDeduction?: number;
+  maxAllowedErrors?: number;
   weight?: number;
   order: number;
   description?: string;
@@ -234,7 +242,7 @@ export interface CompetitionRuleConfig {
   maqraTiming?: string; // e.g. 'sebelum_mimbar', '1_jam_sebelum'
   officialSource?: string;
   isVerifiedOfficial?: boolean;
-  status?: 'Draft' | 'Aktif' | 'Arsip';
+  status?: 'Draft' | 'Validasi' | 'Aktif' | 'Arsip';
 }
 
 export interface JudgeAssignment {
@@ -301,12 +309,18 @@ export interface ParticipantRankingItem {
   participantName: string;
   lotteryNumber: string;
   kafilahName: string;
+  branchId?: string;
   branchName: string;
+  stageId?: string;
   stageName: string;
   totalScore: number;
   fieldScores: Record<string, number>;
   rank: number;
   isQualified: boolean;
+  autoQualified?: boolean;
+  isOverridden?: boolean;
+  overrideReason?: string;
+  hasOverrideConflict?: boolean;
   reason: string;
   tieBreakResolvedBy?: string;
 }
@@ -316,8 +330,10 @@ export interface StageResultSnapshot {
   tenantId: string;
   stageId: string;
   stageName: string;
+  branchId?: string;
   branchName: string;
   quota: number;
+  qualificationMethod?: 'top_n' | 'manual';
   finalizedAt: string;
   finalizedBy: string;
   rubricVersionId: string;

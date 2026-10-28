@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- MTQ MANAGEMENT SYSTEM — CORE DATABASE SCHEMA (SUPABASE / POSTGRESQL)
--- Versi: 2026.1 (Arsitektur Multi-Tenant, RLS, & Atomic RPC)
+-- Versi: 2026.2 (Arsitektur Multi-Tenant, Least-Privilege RLS, & Atomic RPC)
 -- Standar Regulasi: LPTQ Nasional / Buku Pedoman MTQ 2025
 -- ==============================================================================
 
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS stages (
     stage_order INT NOT NULL DEFAULT 1,
     qualification_quota INT NOT NULL DEFAULT 3,
     qualification_method VARCHAR(30) NOT NULL DEFAULT 'top_n' CHECK (qualification_method IN ('top_n', 'manual')),
-    status VARCHAR(30) NOT NULL DEFAULT 'Menunggu' CHECK (status IN ('Menunggu', 'Aktif', 'Selesai')),
+    status VARCHAR(30) NOT NULL DEFAULT 'Menunggu' CHECK (status IN ('Menunggu', 'Aktif', 'Berlangsung', 'Selesai')),
     is_finalized BOOLEAN NOT NULL DEFAULT false,
     finalized_at TIMESTAMPTZ,
     finalized_by UUID REFERENCES profiles(id),
@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS rubric_versions (
     description TEXT,
     official_source TEXT,
     starting_score NUMERIC(5,2) NOT NULL DEFAULT 100.00,
-    status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif', 'Arsip')),
+    status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Draft', 'Validasi', 'Aktif', 'Arsip')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, code, version)
 );
@@ -189,7 +189,9 @@ CREATE TABLE IF NOT EXISTS rubric_fields (
     name VARCHAR(100) NOT NULL,
     max_score NUMERIC(5,2) NOT NULL,
     min_score NUMERIC(5,2) NOT NULL DEFAULT 0.00,
+    max_deduction NUMERIC(5,2),
     field_order INT NOT NULL DEFAULT 1,
+    status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif', 'Nonaktif', 'Arsip')),
     description TEXT,
     UNIQUE (rubric_version_id, code)
 );
@@ -202,6 +204,7 @@ CREATE TABLE IF NOT EXISTS error_categories (
     name VARCHAR(150) NOT NULL,
     scope VARCHAR(150),
     default_deduction NUMERIC(4,2) NOT NULL DEFAULT 0.50,
+    max_deduction NUMERIC(5,2),
     method_type VARCHAR(40) NOT NULL DEFAULT 'Pengurangan tetap',
     status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif', 'Nonaktif')),
     sort_order INT NOT NULL DEFAULT 1,
@@ -217,7 +220,7 @@ CREATE TABLE IF NOT EXISTS competition_rule_configs (
     quota_per_stage JSONB NOT NULL DEFAULT '{"Penyisihan": 3, "Final": 3}'::jsonb,
     official_source TEXT,
     is_verified_official BOOLEAN NOT NULL DEFAULT false,
-    status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Draft', 'Aktif', 'Arsip')),
+    status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Draft', 'Validasi', 'Aktif', 'Arsip')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, branch_id)
 );
@@ -295,7 +298,7 @@ CREATE INDEX IF NOT EXISTS idx_assigned_maqras_lookup ON assigned_maqras (stage_
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_time ON audit_logs (tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_competition_rules_lookup ON competition_rule_configs (tenant_id, branch_id);
 
--- 13. ROW LEVEL SECURITY (RLS) POLICIES
+-- 13. ROW LEVEL SECURITY (RLS) POLICIES (LEAST PRIVILEGE)
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_memberships ENABLE ROW LEVEL SECURITY;
@@ -348,19 +351,117 @@ AS $$
     );
 $$;
 
+-- Security Helper: Verify official judge assignment for a specific stage participation
+CREATE OR REPLACE FUNCTION is_assigned_judge(
+    p_tenant_id UUID,
+    p_stage_participation_id UUID,
+    p_judge_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM stage_participations sp
+        JOIN stages s ON s.id = sp.stage_id
+        JOIN participants p ON p.id = sp.participant_id
+        JOIN judge_assignments ja ON ja.stage_id = sp.stage_id
+             AND ja.tenant_id = sp.tenant_id
+             AND (ja.branch_id IS NULL OR ja.branch_id = p.branch_id OR ja.branch_id = s.branch_id)
+        WHERE sp.id = p_stage_participation_id
+          AND sp.tenant_id = p_tenant_id
+          AND ja.judge_profile_id = p_judge_id
+          AND ja.status = 'Aktif'
+    );
+$$;
+
+-- RLS: Tenants
+CREATE POLICY "Users can view assigned tenants"
+ON tenants FOR SELECT
+USING (id IN (SELECT get_user_tenants()));
+
+CREATE POLICY "Superadmins and tenant admins can update tenant"
+ON tenants FOR UPDATE
+USING (is_tenant_admin(id))
+WITH CHECK (is_tenant_admin(id));
+
+-- RLS: Profiles (Prevent self role-escalation)
+CREATE POLICY "Users can view profiles in same tenant"
+ON profiles FOR SELECT
+USING (
+    id = auth.uid() OR 
+    id IN (
+        SELECT tm.profile_id FROM tenant_memberships tm 
+        WHERE tm.tenant_id IN (SELECT get_user_tenants())
+    )
+);
+
+CREATE POLICY "Users can update own profile without escalating role"
+ON profiles FOR UPDATE
+USING (id = auth.uid())
+WITH CHECK (
+    id = auth.uid()
+    AND role = (SELECT p.role FROM profiles p WHERE p.id = auth.uid())
+);
+
 -- RLS: Tenant Memberships
 CREATE POLICY "Users can view memberships of their tenants"
 ON tenant_memberships FOR SELECT
 USING (tenant_id IN (SELECT get_user_tenants()));
 
--- RLS: Master & Competition Data (Read access for tenant members)
+CREATE POLICY "Tenant admins can manage tenant memberships"
+ON tenant_memberships FOR ALL
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
+-- RLS: Master & Competition Data (Read access for tenant members, Write for tenant admins)
+CREATE POLICY "Tenant members can view branches"
+ON branches FOR SELECT
+USING (tenant_id IN (SELECT get_user_tenants()));
+
+CREATE POLICY "Tenant admins can manage branches"
+ON branches FOR ALL
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
+CREATE POLICY "Tenant members can view levels"
+ON levels FOR SELECT
+USING (tenant_id IN (SELECT get_user_tenants()));
+
+CREATE POLICY "Tenant admins can manage levels"
+ON levels FOR ALL
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
+CREATE POLICY "Tenant members can view kafilahs"
+ON kafilahs FOR SELECT
+USING (tenant_id IN (SELECT get_user_tenants()));
+
+CREATE POLICY "Tenant admins can manage kafilahs"
+ON kafilahs FOR ALL
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
 CREATE POLICY "Tenant members can view participants"
 ON participants FOR SELECT
 USING (tenant_id IN (SELECT get_user_tenants()));
 
 CREATE POLICY "Tenant admins can manage participants"
 ON participants FOR ALL
-USING (is_tenant_admin(tenant_id));
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
+CREATE POLICY "Tenant members can view stages"
+ON stages FOR SELECT
+USING (tenant_id IN (SELECT get_user_tenants()));
+
+CREATE POLICY "Tenant admins can manage stages"
+ON stages FOR ALL
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
 
 CREATE POLICY "Tenant members can view stage participations"
 ON stage_participations FOR SELECT
@@ -368,7 +469,26 @@ USING (tenant_id IN (SELECT get_user_tenants()));
 
 CREATE POLICY "Tenant admins can manage stage participations"
 ON stage_participations FOR ALL
-USING (is_tenant_admin(tenant_id));
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
+CREATE POLICY "Tenant members can view questions"
+ON questions FOR SELECT
+USING (tenant_id IN (SELECT get_user_tenants()));
+
+CREATE POLICY "Tenant admins can manage questions"
+ON questions FOR ALL
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
+CREATE POLICY "Tenant members can view assigned maqras"
+ON assigned_maqras FOR SELECT
+USING (tenant_id IN (SELECT get_user_tenants()));
+
+CREATE POLICY "Tenant admins can manage assigned maqras"
+ON assigned_maqras FOR ALL
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
 
 CREATE POLICY "Tenant members can view rubric versions"
 ON rubric_versions FOR SELECT
@@ -376,7 +496,35 @@ USING (tenant_id IN (SELECT get_user_tenants()) OR tenant_id = '00000000-0000-00
 
 CREATE POLICY "Tenant admins can manage rubric versions"
 ON rubric_versions FOR ALL
-USING (is_tenant_admin(tenant_id));
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
+CREATE POLICY "Tenant members can view rubric fields"
+ON rubric_fields FOR SELECT
+USING (
+    EXISTS (
+        SELECT 1 FROM rubric_versions rv
+        WHERE rv.id = rubric_fields.rubric_version_id
+          AND (rv.tenant_id IN (SELECT get_user_tenants()) OR rv.tenant_id = '00000000-0000-0000-0000-000000000000'::uuid)
+    )
+);
+
+CREATE POLICY "Tenant admins can manage rubric fields"
+ON rubric_fields FOR ALL
+USING (
+    EXISTS (
+        SELECT 1 FROM rubric_versions rv
+        WHERE rv.id = rubric_fields.rubric_version_id
+          AND is_tenant_admin(rv.tenant_id)
+    )
+)
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM rubric_versions rv
+        WHERE rv.id = rubric_fields.rubric_version_id
+          AND is_tenant_admin(rv.tenant_id)
+    )
+);
 
 CREATE POLICY "Tenant members can view error categories"
 ON error_categories FOR SELECT
@@ -384,7 +532,8 @@ USING (tenant_id IN (SELECT get_user_tenants()));
 
 CREATE POLICY "Tenant admins can manage error categories"
 ON error_categories FOR ALL
-USING (is_tenant_admin(tenant_id));
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
 
 CREATE POLICY "Tenant members can view competition rules"
 ON competition_rule_configs FOR SELECT
@@ -392,26 +541,59 @@ USING (tenant_id IN (SELECT get_user_tenants()));
 
 CREATE POLICY "Tenant admins can manage competition rules"
 ON competition_rule_configs FOR ALL
-USING (is_tenant_admin(tenant_id));
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
 
--- RLS: Assessments (Judges can update own unlocked sheets, Admins can inspect all)
-CREATE POLICY "Tenant members can view assessments"
-ON judge_assessments FOR SELECT
+CREATE POLICY "Tenant members can view judge assignments"
+ON judge_assignments FOR SELECT
 USING (tenant_id IN (SELECT get_user_tenants()));
 
-CREATE POLICY "Judges can update assigned unlocked assessments"
+CREATE POLICY "Tenant admins can manage judge assignments"
+ON judge_assignments FOR ALL
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
+
+-- RLS: Judge Assessments (Least Privilege: Judges only access own assigned sheets, cannot edit locked sheets)
+CREATE POLICY "Admins and assigned judges can view assessments"
+ON judge_assessments FOR SELECT
+USING (
+    is_tenant_admin(tenant_id)
+    OR (
+        judge_profile_id = auth.uid()
+        AND tenant_id IN (SELECT get_user_tenants())
+        AND is_assigned_judge(tenant_id, stage_participation_id, auth.uid())
+    )
+);
+
+CREATE POLICY "Assigned judges can insert unlocked assessments"
+ON judge_assessments FOR INSERT
+WITH CHECK (
+    judge_profile_id = auth.uid()
+    AND is_locked = false
+    AND tenant_id IN (SELECT get_user_tenants())
+    AND is_assigned_judge(tenant_id, stage_participation_id, auth.uid())
+);
+
+CREATE POLICY "Assigned judges can update own unlocked assessments"
 ON judge_assessments FOR UPDATE
 USING (
     judge_profile_id = auth.uid() 
     AND is_locked = false 
     AND tenant_id IN (SELECT get_user_tenants())
+    AND is_assigned_judge(tenant_id, stage_participation_id, auth.uid())
+)
+WITH CHECK (
+    judge_profile_id = auth.uid()
+    AND tenant_id IN (SELECT get_user_tenants())
+    AND is_assigned_judge(tenant_id, stage_participation_id, auth.uid())
 );
 
 CREATE POLICY "Admins can manage assessments"
 ON judge_assessments FOR ALL
-USING (is_tenant_admin(tenant_id));
+USING (is_tenant_admin(tenant_id))
+WITH CHECK (is_tenant_admin(tenant_id));
 
--- RLS: Stage Result Snapshots & Audit Logs (Append-Only Immutable)
+-- RLS: Stage Result Snapshots & Audit Logs (Append-Only Immutable: NO UPDATE / DELETE policies)
 CREATE POLICY "Tenant members can view snapshots"
 ON stage_result_snapshots FOR SELECT
 USING (tenant_id IN (SELECT get_user_tenants()));
@@ -431,7 +613,6 @@ WITH CHECK (tenant_id IN (SELECT get_user_tenants()));
 -- 14. STORED PROCEDURES / RPC FUNCTIONS (ATOMIC & HARDENED)
 
 -- RPC 1: Buka Kembali Penilaian Final (Reopen Assessment)
--- Terproteksi auth.uid(), membatasi search_path, dan mencatat audit log tak terhapus.
 CREATE OR REPLACE FUNCTION reopen_judge_assessment(
     p_assessment_id UUID,
     p_reason TEXT
@@ -452,7 +633,7 @@ BEGIN
         RAISE EXCEPTION 'Otorisasi ditolak: Permintaan tidak memiliki sesi autentikasi.';
     END IF;
 
-    IF LENGTH(TRIM(p_reason)) < 5 THEN
+    IF p_reason IS NULL OR LENGTH(TRIM(p_reason)) < 5 THEN
         RAISE EXCEPTION 'Alasan pembukaan kembali lembar nilai wajib diisi minimal 5 karakter untuk rekaman audit trail.';
     END IF;
 
@@ -465,7 +646,6 @@ BEGIN
         RAISE EXCEPTION 'Lembar penilaian belum berstatus final.';
     END IF;
 
-    -- Validasi kewenangan actor: Wajib Admin / Superadmin tenant terkait
     SELECT * INTO v_actor FROM profiles WHERE id = v_actor_id;
     SELECT is_tenant_admin(v_assessment.tenant_id) INTO v_is_authorized;
 
@@ -495,7 +675,7 @@ BEGIN
     VALUES (
         v_assessment.tenant_id,
         v_actor_id,
-        v_actor.name || ' (' || v_actor.role || ')',
+        COALESCE(v_actor.name, 'Admin') || ' (' || COALESCE(v_actor.role, 'admin') || ')',
         'ASSESSMENT_REOPENED',
         'Assessment ID: ' || p_assessment_id::text,
         'Pembukaan kembali lembar penilaian final dengan skor sebelum koreksi: ' || v_assessment.final_score::text,
@@ -515,7 +695,8 @@ CREATE OR REPLACE FUNCTION advance_stage_qualifiers(
     p_stage_id UUID,
     p_next_stage_id UUID,
     p_qualified_participant_ids UUID[],
-    p_override_reasons JSONB DEFAULT '{}'::jsonb
+    p_override_reasons JSONB DEFAULT '{}'::jsonb,
+    p_rankings_snapshot JSONB DEFAULT '[]'::jsonb
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -527,14 +708,21 @@ DECLARE
     v_actor RECORD;
     v_stage RECORD;
     v_next_stage RECORD;
+    v_rule RECORD;
     v_pid UUID;
+    v_qualified_count INT;
+    v_assigned_judges_count INT;
+    v_incomplete_count INT;
+    v_invalid_participant_count INT;
     v_now TIMESTAMPTZ := now();
 BEGIN
+    -- 1. Validasi sesi autentikasi
     v_actor_id := auth.uid();
     IF v_actor_id IS NULL THEN
         RAISE EXCEPTION 'Otorisasi ditolak: Sesi tidak terautentikasi.';
     END IF;
 
+    -- 2. Validasi babak asal ada dan belum difinalisasi
     SELECT * INTO v_stage FROM stages WHERE id = p_stage_id;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Babak musabaqah tidak ditemukan.';
@@ -544,13 +732,116 @@ BEGIN
         RAISE EXCEPTION 'Babak ini sudah pernah difinalisasi sebelumnya.';
     END IF;
 
+    -- 3. Validasi hak akses admin pada tenant terkait
     IF NOT is_tenant_admin(v_stage.tenant_id) THEN
         RAISE EXCEPTION 'Otorisasi ditolak: Anda tidak memiliki wewenang administrator pada tenant ini.';
     END IF;
 
     SELECT * INTO v_actor FROM profiles WHERE id = v_actor_id;
 
-    -- Finalisasi babak saat ini
+    -- 4. Validasi kuota kelulusan
+    v_qualified_count := COALESCE(array_length(p_qualified_participant_ids, 1), 0);
+    IF v_stage.qualification_quota <= 0 THEN
+        RAISE EXCEPTION 'Kuota kelulusan pada babak ini tidak valid.';
+    END IF;
+    IF v_qualified_count > v_stage.qualification_quota THEN
+        RAISE EXCEPTION 'Jumlah peserta yang diloloskan (%) melebihi kuota babak (%).', v_qualified_count, v_stage.qualification_quota;
+    END IF;
+
+    -- 5. Validasi bahwa penugasan majelis hakim resmi tersedia untuk babak & cabang ini
+    SELECT COUNT(DISTINCT ja.judge_profile_id) INTO v_assigned_judges_count
+    FROM judge_assignments ja
+    WHERE ja.tenant_id = v_stage.tenant_id
+      AND ja.stage_id = p_stage_id
+      AND (v_stage.branch_id IS NULL OR ja.branch_id IS NULL OR ja.branch_id = v_stage.branch_id)
+      AND ja.status = 'Aktif';
+
+    IF v_assigned_judges_count = 0 THEN
+        RAISE EXCEPTION 'Pengesahan babak ditolak: Belum ada penugasan majelis hakim resmi (judge_assignments) pada babak ini.';
+    END IF;
+
+    -- 6. Validasi seluruh peserta yang diloloskan berasal dari babak & cabang yang benar
+    IF v_qualified_count > 0 THEN
+        SELECT COUNT(*) INTO v_invalid_participant_count
+        FROM unnest(p_qualified_participant_ids) AS q_pid
+        LEFT JOIN stage_participations sp
+               ON sp.participant_id = q_pid
+              AND sp.stage_id = p_stage_id
+              AND sp.tenant_id = v_stage.tenant_id
+        LEFT JOIN participants p
+               ON p.id = q_pid
+              AND p.tenant_id = v_stage.tenant_id
+        WHERE sp.id IS NULL
+           OR (v_stage.branch_id IS NOT NULL AND p.branch_id <> v_stage.branch_id);
+
+        IF v_invalid_participant_count > 0 THEN
+            RAISE EXCEPTION 'Pengesahan babak ditolak: Terdapat peserta lolos yang tidak terdaftar pada babak atau cabang lomba ini.';
+        END IF;
+    END IF;
+
+    -- 7. Validasi seluruh peserta pada babak ini telah dinilai final oleh seluruh hakim yang ditugaskan
+    SELECT COUNT(*) INTO v_incomplete_count
+    FROM stage_participations sp
+    CROSS JOIN (
+        SELECT DISTINCT ja.judge_profile_id
+        FROM judge_assignments ja
+        WHERE ja.tenant_id = v_stage.tenant_id
+          AND ja.stage_id = p_stage_id
+          AND (v_stage.branch_id IS NULL OR ja.branch_id IS NULL OR ja.branch_id = v_stage.branch_id)
+          AND ja.status = 'Aktif'
+    ) req_judges
+    LEFT JOIN judge_assessments jass
+           ON jass.stage_participation_id = sp.id
+          AND jass.judge_profile_id = req_judges.judge_profile_id
+          AND jass.status = 'finalized'
+    WHERE sp.stage_id = p_stage_id
+      AND sp.tenant_id = v_stage.tenant_id
+      AND jass.id IS NULL;
+
+    IF v_incomplete_count > 0 THEN
+        RAISE EXCEPTION 'Pengesahan babak ditolak: Masih terdapat % lembar penilaian hakim yang belum berstatus final.', v_incomplete_count;
+    END IF;
+
+    -- 8. Validasi babak lanjutan jika ada (harus dalam tenant dan cabang yang sama)
+    IF p_next_stage_id IS NOT NULL THEN
+        SELECT * INTO v_next_stage FROM stages WHERE id = p_next_stage_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Babak lanjutan tidak ditemukan.';
+        END IF;
+        IF v_next_stage.tenant_id <> v_stage.tenant_id THEN
+            RAISE EXCEPTION 'Ketidaksesuaian tenant: Babak lanjutan berada pada tenant berbeda.';
+        END IF;
+        IF v_stage.branch_id IS NOT NULL AND v_next_stage.branch_id IS NOT NULL AND v_next_stage.branch_id <> v_stage.branch_id THEN
+            RAISE EXCEPTION 'Ketidaksesuaian cabang: Babak lanjutan berada pada cabang lomba berbeda.';
+        END IF;
+    END IF;
+
+    -- 9. Perbarui status kelulusan pada stage_participations babak asal
+    UPDATE stage_participations sp
+    SET is_qualified = (sp.participant_id = ANY(p_qualified_participant_ids)),
+        qualification_reason = COALESCE(
+            p_override_reasons ->> sp.participant_id::text,
+            CASE WHEN sp.participant_id = ANY(p_qualified_participant_ids) THEN 'Lolos Kuota Peringkat' ELSE 'Tidak Masuk Kuota' END
+        ),
+        finalized_at = v_now,
+        updated_at = v_now
+    WHERE sp.stage_id = p_stage_id
+      AND sp.tenant_id = v_stage.tenant_id;
+
+    -- 10. Perbarui status participants sesuai hasil babak
+    UPDATE participants p
+    SET status = CASE
+        WHEN p.id = ANY(p_qualified_participant_ids) THEN
+            CASE WHEN p_next_stage_id IS NOT NULL THEN 'Lolos' ELSE 'Final' END
+        ELSE 'Gugur'
+    END,
+    updated_at = v_now
+    FROM stage_participations sp
+    WHERE sp.participant_id = p.id
+      AND sp.stage_id = p_stage_id
+      AND sp.tenant_id = v_stage.tenant_id;
+
+    -- 11. Finalisasi babak saat ini
     UPDATE stages
     SET is_finalized = true,
         status = 'Selesai',
@@ -558,13 +849,8 @@ BEGIN
         finalized_by = v_actor_id
     WHERE id = p_stage_id;
 
-    -- Jika ada babak lanjutan, daftarkan peserta yang lolos ke stage_participations babak berikutnya
-    IF p_next_stage_id IS NOT NULL THEN
-        SELECT * INTO v_next_stage FROM stages WHERE id = p_next_stage_id;
-        IF NOT FOUND THEN
-            RAISE EXCEPTION 'Babak lanjutan tidak ditemukan.';
-        END IF;
-
+    -- 12. Daftarkan peserta lolos ke stage_participations babak berikutnya
+    IF p_next_stage_id IS NOT NULL AND v_qualified_count > 0 THEN
         FOREACH v_pid IN ARRAY p_qualified_participant_ids
         LOOP
             INSERT INTO stage_participations (
@@ -582,19 +868,50 @@ BEGIN
                 'Maqra Belum Ditetapkan'
             FROM participants p
             WHERE p.id = v_pid
+              AND p.tenant_id = v_stage.tenant_id
             ON CONFLICT (tenant_id, stage_id, participant_id) DO NOTHING;
         END LOOP;
     END IF;
 
-    -- Catat immutable audit log
+    -- 13. Simpan snapshot permanen ke stage_result_snapshots
+    SELECT * INTO v_rule
+    FROM competition_rule_configs crc
+    WHERE crc.tenant_id = v_stage.tenant_id
+      AND (v_stage.branch_id IS NULL OR crc.branch_id = v_stage.branch_id)
+    LIMIT 1;
+
+    IF v_stage.branch_id IS NOT NULL THEN
+        INSERT INTO stage_result_snapshots (
+            tenant_id,
+            stage_id,
+            branch_id,
+            quota,
+            rubric_version_id,
+            tie_break_rule_used,
+            finalized_by,
+            rankings_snapshot
+        )
+        VALUES (
+            v_stage.tenant_id,
+            p_stage_id,
+            v_stage.branch_id,
+            v_stage.qualification_quota,
+            v_rule.rubric_version_id,
+            COALESCE(array_to_string(v_rule.tie_break_order, ' > '), 'total > Tajwid > Lagu > Fashahah'),
+            v_actor_id,
+            COALESCE(p_rankings_snapshot, '[]'::jsonb)
+        );
+    END IF;
+
+    -- 14. Catat immutable audit log
     INSERT INTO audit_logs (tenant_id, actor_id, actor_name, action, target, summary, reason, outcome)
     VALUES (
         v_stage.tenant_id,
         v_actor_id,
-        v_actor.name || ' (' || v_actor.role || ')',
+        COALESCE(v_actor.name, 'Admin') || ' (' || COALESCE(v_actor.role, 'admin') || ')',
         'STAGE_FINALIZED',
         'Babak: ' || v_stage.name,
-        'Pengesahan resmi babak ' || v_stage.name || ' dengan ' || array_length(p_qualified_participant_ids, 1)::text || ' peserta lolos.',
+        'Pengesahan resmi babak ' || v_stage.name || ' dengan ' || v_qualified_count::text || ' peserta lolos.',
         p_override_reasons::text,
         'Success'
     );
@@ -605,3 +922,10 @@ BEGIN
     );
 END;
 $$;
+
+-- 15. EXPLICIT RPC EXECUTION PERMISSIONS
+REVOKE EXECUTE ON FUNCTION reopen_judge_assessment(UUID, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION reopen_judge_assessment(UUID, TEXT) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION advance_stage_qualifiers(UUID, UUID, UUID[], JSONB, JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION advance_stage_qualifiers(UUID, UUID, UUID[], JSONB, JSONB) TO authenticated;

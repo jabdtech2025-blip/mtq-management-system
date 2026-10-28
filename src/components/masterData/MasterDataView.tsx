@@ -96,7 +96,7 @@ export const MasterDataView: React.FC = () => {
   const [newRubricOfficialSource, setNewRubricOfficialSource] = useState('Buku Pedoman MTQ 2025 LPTQ');
   const [newRubricDescription, setNewRubricDescription] = useState('');
 
-  // Field Edit Modal State
+  // Field Edit / Add Modal State
   const [editingRubric, setEditingRubric] = useState<RubricVersion | null>(null);
   const [editingField, setEditingField] = useState<RubricField | null>(null);
   const [isEditFieldOpen, setIsEditFieldOpen] = useState(false);
@@ -104,6 +104,7 @@ export const MasterDataView: React.FC = () => {
   const [fieldCode, setFieldCode] = useState('');
   const [fieldMaxScore, setFieldMaxScore] = useState<number>(30);
   const [fieldMinScore, setFieldMinScore] = useState<number>(0);
+  const [fieldOrder, setFieldOrder] = useState<number>(1);
   const [fieldDescription, setFieldDescription] = useState('');
 
   // Rule Config Modal State
@@ -250,30 +251,75 @@ export const MasterDataView: React.FC = () => {
     setFeedbackMessage({ type: 'success', text: `Draft versi rubrik baru "${newRubricName}" berhasil dibuat.` });
   };
 
-  // Save Field Edit
+  // Save Field Edit or Add New Field
   const handleSaveFieldEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingRubric || !editingField) return;
+    if (!editingRubric) return;
 
-    const updatedFields = editingRubric.fields.map((f) => {
-      if (f.id === editingField.id) {
-        return {
-          ...f,
-          name: fieldName,
-          code: fieldCode.toUpperCase(),
-          maxScore: Number(fieldMaxScore),
-          minScore: Number(fieldMinScore),
-          description: fieldDescription
-        };
-      }
-      return f;
-    });
+    let updatedFields: RubricField[];
+    if (editingField) {
+      updatedFields = editingRubric.fields.map((f) => {
+        if (f.id === editingField.id) {
+          return {
+            ...f,
+            name: fieldName,
+            code: fieldCode.toUpperCase(),
+            maxScore: Number(fieldMaxScore),
+            minScore: Number(fieldMinScore),
+            order: Number(fieldOrder) || f.order,
+            description: fieldDescription
+          };
+        }
+        return f;
+      });
+    } else {
+      const newField: RubricField = {
+        id: `fld-${editingRubric.id}-${Date.now()}`,
+        code: fieldCode.toUpperCase(),
+        name: fieldName,
+        maxScore: Number(fieldMaxScore),
+        minScore: Number(fieldMinScore),
+        order: Number(fieldOrder) || editingRubric.fields.length + 1,
+        status: 'Aktif',
+        description: fieldDescription,
+        criteria: []
+      };
+      updatedFields = [...editingRubric.fields, newField];
+    }
 
-    updateRubricVersion(editingRubric.id, { fields: updatedFields });
+    const res = updateRubricVersion(editingRubric.id, { fields: updatedFields });
     setIsEditFieldOpen(false);
     setEditingRubric(null);
     setEditingField(null);
-    setFeedbackMessage({ type: 'success', text: `Bidang "${fieldName}" berhasil diperbarui. Nilai maksimal diubah menjadi ${fieldMaxScore}.` });
+    setFeedbackMessage({
+      type: res.success ? 'success' : 'error',
+      text: res.success
+        ? editingField
+          ? `Bidang "${fieldName}" berhasil diperbarui (Skor: ${fieldMinScore}–${fieldMaxScore}).`
+          : `Bidang baru "${fieldName}" (${fieldCode.toUpperCase()}) berhasil ditambahkan ke rubrik.`
+        : res.message
+    });
+  };
+
+  // Toggle or Remove Rubric Field
+  const handleToggleOrRemoveField = (rubric: RubricVersion, fld: RubricField, mode: 'toggle' | 'remove') => {
+    const updatedFields =
+      mode === 'remove'
+        ? rubric.fields.filter((f) => f.id !== fld.id)
+        : rubric.fields.map((f) =>
+            f.id === fld.id
+              ? { ...f, status: (f.status === 'Nonaktif' ? 'Aktif' : 'Nonaktif') as 'Aktif' | 'Nonaktif' }
+              : f
+          );
+    const res = updateRubricVersion(rubric.id, { fields: updatedFields });
+    setFeedbackMessage({
+      type: res.success ? 'success' : 'error',
+      text: res.success
+        ? mode === 'remove'
+          ? `Bidang "${fld.name}" berhasil dihapus dari versi rubrik.`
+          : `Status bidang "${fld.name}" berhasil diperbarui.`
+        : res.message
+    });
   };
 
   // Save Competition Rule Config
@@ -595,7 +641,8 @@ export const MasterDataView: React.FC = () => {
 
           <div className="grid grid-cols-1 gap-5">
             {rubricVersions.map((rubric) => {
-              const totalFieldsMax = rubric.fields.reduce((acc, f) => acc + f.maxScore, 0);
+              const activeFieldsList = rubric.fields.filter((f) => f.status !== 'Nonaktif' && f.status !== 'Arsip');
+              const totalFieldsMax = activeFieldsList.reduce((acc, f) => acc + f.maxScore, 0);
               const isActive = rubric.status === 'Aktif';
 
               return (
@@ -630,7 +677,24 @@ export const MasterDataView: React.FC = () => {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => {
+                          setEditingRubric(rubric);
+                          setEditingField(null);
+                          setFieldName('Itqan');
+                          setFieldCode('ITQ');
+                          setFieldMaxScore(20);
+                          setFieldMinScore(0);
+                          setFieldOrder(rubric.fields.length + 1);
+                          setFieldDescription('Ketepatan hafalan dan konsistensi bacaan');
+                          setIsEditFieldOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border border-emerald-700 text-emerald-800 hover:bg-emerald-50 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tambah Bidang</span>
+                      </button>
                       {!isActive && (
                         <button
                           onClick={() => {
@@ -660,43 +724,67 @@ export const MasterDataView: React.FC = () => {
                   {/* Fields list in this Rubric */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                      <span>Komposisi Bidang Penilaian Dinamis ({rubric.fields.length} Bidang):</span>
+                      <span>Komposisi Bidang Penilaian Dinamis ({activeFieldsList.length} Aktif / {rubric.fields.length} Total):</span>
                       <span className="font-mono text-emerald-800">
-                        Total Skor Maks: {totalFieldsMax} / {rubric.startingScore}
+                        Total Skor Maks Aktif: {totalFieldsMax} / {rubric.startingScore}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                      {rubric.fields.map((fld) => (
-                        <div
-                          key={fld.id}
-                          className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 flex flex-col justify-between"
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-mono font-bold text-[10px] text-slate-500">{fld.code}</span>
-                            <button
-                              onClick={() => {
-                                setEditingRubric(rubric);
-                                setEditingField(fld);
-                                setFieldName(fld.name);
-                                setFieldCode(fld.code);
-                                setFieldMaxScore(fld.maxScore);
-                                setFieldMinScore(fld.minScore || 0);
-                                setFieldDescription(fld.description || '');
-                                setIsEditFieldOpen(true);
-                              }}
-                              className="text-[11px] font-bold text-emerald-800 hover:text-emerald-900 cursor-pointer"
+                      {rubric.fields
+                        .slice()
+                        .sort((a, b) => (a.order || 0) - (b.order || 0))
+                        .map((fld) => {
+                          const isInactive = fld.status === 'Nonaktif' || fld.status === 'Arsip';
+                          return (
+                            <div
+                              key={fld.id}
+                              className={`p-3 rounded-lg border flex flex-col justify-between ${
+                                isInactive
+                                  ? 'bg-slate-100/70 border-slate-200 opacity-60'
+                                  : 'bg-slate-50 border-slate-200/80'
+                              }`}
                             >
-                              Edit Batas
-                            </button>
-                          </div>
-                          <div className="font-extrabold text-sm text-slate-800">{fld.name}</div>
-                          <div className="mt-2 pt-2 border-t border-slate-200 text-xs flex items-center justify-between font-mono">
-                            <span className="text-slate-500">Maksimal:</span>
-                            <span className="font-extrabold text-slate-900">{fld.maxScore} pts</span>
-                          </div>
-                        </div>
-                      ))}
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-mono font-bold text-[10px] text-slate-500">
+                                  #{fld.order} · {fld.code}
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => {
+                                      setEditingRubric(rubric);
+                                      setEditingField(fld);
+                                      setFieldName(fld.name);
+                                      setFieldCode(fld.code);
+                                      setFieldMaxScore(fld.maxScore);
+                                      setFieldMinScore(fld.minScore || 0);
+                                      setFieldOrder(fld.order || 1);
+                                      setFieldDescription(fld.description || '');
+                                      setIsEditFieldOpen(true);
+                                    }}
+                                    className="text-[11px] font-bold text-emerald-800 hover:text-emerald-900 cursor-pointer"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleOrRemoveField(rubric, fld, 'toggle')}
+                                    className="text-[10px] font-semibold text-slate-500 hover:text-amber-700 cursor-pointer"
+                                    title={isInactive ? 'Aktifkan kembali bidang ini' : 'Nonaktifkan bidang ini'}
+                                  >
+                                    {isInactive ? 'Aktifkan' : 'Nonaktif'}
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="font-extrabold text-sm text-slate-800">{fld.name}</div>
+                              <div className="mt-2 pt-2 border-t border-slate-200 text-xs flex items-center justify-between font-mono">
+                                <span className="text-slate-500">Rentang:</span>
+                                <span className="font-extrabold text-slate-900">
+                                  {fld.minScore ?? 0} – {fld.maxScore} pts
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
                     </div>
                   </div>
                 </div>
@@ -1258,12 +1346,12 @@ export const MasterDataView: React.FC = () => {
         </div>
       )}
 
-      {/* Edit Field Max / Min Score Modal */}
-      {isEditFieldOpen && editingField && (
+      {/* Edit / Add Field Modal */}
+      {isEditFieldOpen && editingRubric && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">
-              Edit Batas Nilai Bidang: {editingField.name}
+              {editingField ? `Edit Batas Nilai Bidang: ${editingField.name}` : `Tambah Bidang ke ${editingRubric.name}`}
             </h3>
             <form onSubmit={handleSaveFieldEdit} className="space-y-4 text-xs">
               <div>
@@ -1289,10 +1377,38 @@ export const MasterDataView: React.FC = () => {
                   />
                 </div>
                 <div>
+                  <label className="font-bold text-slate-600 block mb-1">Urutan Tampil</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={fieldOrder}
+                    onChange={(e) => setFieldOrder(Number(e.target.value))}
+                    required
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-600 block mb-1">Nilai Minimal</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="100"
+                    value={fieldMinScore}
+                    onChange={(e) => setFieldMinScore(Number(e.target.value))}
+                    required
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
                   <label className="font-bold text-slate-600 block mb-1">Nilai Maksimal</label>
                   <input
                     type="number"
-                    step="1"
+                    step="0.5"
                     min="1"
                     max="100"
                     value={fieldMaxScore}

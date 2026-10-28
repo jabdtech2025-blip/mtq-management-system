@@ -39,6 +39,7 @@ export const PenilaianDualPanelView: React.FC = () => {
     monitoringJudgeId,
     errorCategories,
     assessments,
+    initializeAssessment,
     updateErrorCount,
     saveAnnotations,
     finalizeAssessment,
@@ -342,15 +343,35 @@ export const PenilaianDualPanelView: React.FC = () => {
   };
 
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [isFlawlessConfirmed, setIsFlawlessConfirmed] = useState<boolean>(false);
 
   // Finalize action
   const handleConfirmFinalize = () => {
     if (!currentParticipant) return;
+    if (!currentAssessment) {
+      if (!isFlawlessConfirmed) {
+        setFinalizeError(
+          'Lembar penilaian belum memiliki input kesalahan. Centang konfirmasi penampilan sempurna (0 kesalahan) terlebih dahulu untuk menginisialisasi lembar nilai.'
+        );
+        return;
+      }
+      const initRes = initializeAssessment(
+        currentParticipant.id,
+        activeJudgeId,
+        activeStageName,
+        activeQuestionId
+      );
+      if (!initRes.success) {
+        setFinalizeError(initRes.message);
+        return;
+      }
+    }
     const result = finalizeAssessment(currentParticipant.id, activeJudgeId, activeStageName, activeQuestionId);
     if (!result.success) {
       setFinalizeError(result.message);
     } else {
       setFinalizeError(null);
+      setIsFlawlessConfirmed(false);
       setIsConfirmModalOpen(false);
     }
   };
