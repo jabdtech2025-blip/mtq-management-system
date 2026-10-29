@@ -215,7 +215,7 @@ export const Sidebar: React.FC = () => {
                 {currentUser.role === 'superadmin'
                   ? 'Superadmin'
                   : currentUser.role === 'judge'
-                  ? currentUser.judgeCategory || 'Hakim'
+                  ? currentUser.judgeCategory || (currentUser.judgeField ? `Hakim ${currentUser.judgeField}` : 'Hakim')
                   : 'Admin MTQ'}
               </p>
             </div>

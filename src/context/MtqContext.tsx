@@ -854,6 +854,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const enterOfflineDemoSimulation = () => {
+    try {
+      localStorage.setItem('mtq_offline_demo_simulation_v4', 'true');
+    } catch {}
     setIsOfflineDemoSimulation(true);
     setDataSourceMode('demo_local');
     setWorkspaceError(null);
@@ -994,6 +997,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
 
       setCurrentUserId(profile.authUserId);
+
+      // Pastikan tampilan awal sesuai dengan peran yang terautentikasi
+      if (effectiveRole === 'superadmin' && targetTenantId === 'platform') {
+        setCurrentView((prev) => (prev === 'dashboard' || !prev.startsWith('superadmin_') ? 'superadmin_dashboard' : prev));
+      } else if (effectiveRole === 'judge') {
+        setCurrentView((prev) => (prev === 'dashboard' || prev.startsWith('superadmin_') ? 'penilaian_hakim' : prev));
+      } else if (effectiveRole === 'admin') {
+        setCurrentView((prev) => (prev.startsWith('superadmin_') ? 'dashboard' : prev));
+      }
 
       if (!profile.hasProfileRow || (profile.memberships.length === 0 && profile.globalRole !== 'superadmin')) {
         // Profil atau membership tidak memenuhi syarat: bersihkan workspace operasional

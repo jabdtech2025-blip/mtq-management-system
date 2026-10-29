@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/tests/runAllTests.ts"
+    "test": "tsx src/tests/runAllTests.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.12",
+    "@playwright/test": "^1.64.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",

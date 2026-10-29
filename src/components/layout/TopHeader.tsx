@@ -29,7 +29,7 @@ export const TopHeader: React.FC = () => {
   const getRoleBadge = (role: string) => {
     if (role === 'superadmin') return 'Superadmin Platform';
     if (role === 'admin') return 'Admin MTQ';
-    return currentUser.judgeCategory || 'Dewan Hakim';
+    return currentUser.judgeCategory || (currentUser.judgeField ? `Hakim ${currentUser.judgeField}` : 'Dewan Hakim');
   };
 
   return (
