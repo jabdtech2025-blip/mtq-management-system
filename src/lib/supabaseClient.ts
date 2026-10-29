@@ -275,3 +275,20 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured()
       }
     })
   : null;
+
+/**
+ * Membuat instance client Supabase Auth sementara (non-persisting) agar Admin / Superadmin
+ * dapat mendaftarkan akun pengguna baru beserta kata sandi awal tanpa menimpa sesi login aktif milik Admin.
+ */
+export function createEphemeralSupabaseAuthClient(): SupabaseClient | null {
+  if (!isSupabaseConfigured()) return null;
+  return createClient(rawUrl, rawAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: `mtq-ephemeral-auth-${Date.now()}`
+    }
+  });
+}
+

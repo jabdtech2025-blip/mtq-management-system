@@ -259,6 +259,36 @@ function createPgliteSupabaseAdapter(
       async signInWithPassword({ email }: { email: string; password?: string }) {
         return { data: { user: { email } }, error: null };
       },
+      async signUp({
+        email,
+        password,
+        options: signUpOpts
+      }: {
+        email: string;
+        password: string;
+        options?: { data?: { name?: string; username?: string } };
+      }) {
+        if (!email || !password || password.length < 8) {
+          return { data: null, error: { message: 'Invalid email or password too short' } };
+        }
+        const metaJson = JSON.stringify(signUpOpts?.data || {});
+        const insRes = await pg.query<{ id: string; email: string }>(
+          `INSERT INTO auth.users (id, email, raw_user_meta_data)
+           VALUES (gen_random_uuid(), ${formatSqlVal(email)}, ${formatSqlVal(metaJson)}::jsonb)
+           RETURNING id::text, email;`
+        );
+        const createdUser = insRes.rows[0];
+        if (!createdUser) {
+          return { data: null, error: { message: 'Failed to insert into auth.users' } };
+        }
+        return {
+          data: {
+            user: { id: createdUser.id, email: createdUser.email },
+            session: { access_token: 'mock-jwt-token', user: { id: createdUser.id, email: createdUser.email } }
+          },
+          error: null
+        };
+      },
       async signOut() {
         return { error: null };
       },
@@ -1726,6 +1756,56 @@ export async function runSupabaseTests(): Promise<{
         Boolean(failedAutosaveRes.message) &&
         Number(scoreAfterFailedAutosave.rows[0]?.final_score) === 97,
       `failedAutosaveSuccess: ${failedAutosaveRes.success}, msg: ${failedAutosaveRes.message}, dbScore: ${scoreAfterFailedAutosave.rows[0]?.final_score}`
+    );
+
+    // =========================================================================
+    // 56. P0 SIGN-UP AKUN BARU, INPUT KATA SANDI ADMIN, & SINKRONISASI TABEL PROFILES MURNI
+    // =========================================================================
+    const selfSignUpRes = await supabaseDataService.signUpNewUser({
+      name: 'Ustadz Pendaftar Mandiri',
+      username: 'ustadz_mandiri',
+      email: 'mandiri@jabar.mtq.id',
+      password: 'SandiAmanMandiri2026!'
+    });
+
+    // Admin/Superadmin menambahkan akun baru langsung beserta kata sandi awal tanpa mengubah sesi aktif
+    currentAuthUser = { id: bootstrapUserId, email: 'superadmin@nasional.mtq.id' };
+    const directPasswordProvisionRes = await supabaseDataService.upsertUserAndMembership({
+      tenantId: tenantJabarId,
+      user: {
+        id: 'temp-ui-id-direct-pass',
+        tenantId: tenantJabarId,
+        username: 'hakim_sandi_langsung',
+        name: 'KH. Hakim Sandi Langsung',
+        email: 'hakim.sandi@jabar.mtq.id',
+        role: 'judge',
+        judgeCategory: 'Hakim 4',
+        judgeField: 'Bidang Lagu',
+        status: 'Aktif'
+      },
+      initialPassword: 'SandiHakimLangsung2026!'
+    });
+
+    // Hydrate workspace menggunakan tenantId non-UUID ('platform') seperti saat Superadmin membuka Manajemen Akun Global
+    const superadminWorkspaceHydration = await supabaseDataService.fetchTenantWorkspaceResult('platform');
+    const hydratedGlobalUsers = superadminWorkspaceHydration.payload?.users || [];
+    const hasSelfSignedUpProfile = hydratedGlobalUsers.some(
+      (u) => u.email === 'mandiri@jabar.mtq.id' && u.tenantId === 'unassigned'
+    );
+    const hasDirectPasswordJudge = hydratedGlobalUsers.some(
+      (u) => u.email === 'hakim.sandi@jabar.mtq.id' && u.provisioningStatus === 'Aktif'
+    );
+
+    assert(
+      '56. P0 Sign-Up Pengguna Baru, Input Kata Sandi Saat Tambah Akun, & Hidrasi Tabel public.profiles Murni: Mendaftarkan akun baru di auth.users & profiles, mendukung pembuatan akun dengan kata sandi langsung oleh Admin/Superadmin, dan memuat seluruh akun riil dari public.profiles',
+      selfSignUpRes.success === true &&
+        Boolean(selfSignUpRes.userId) &&
+        directPasswordProvisionRes.success === true &&
+        directPasswordProvisionRes.data?.provisioningStatus === 'Aktif' &&
+        superadminWorkspaceHydration.success === true &&
+        hasSelfSignedUpProfile === true &&
+        hasDirectPasswordJudge === true,
+      `signUp: ${selfSignUpRes.success}, directPassProv: ${directPasswordProvisionRes.success} (${directPasswordProvisionRes.message}), hasSelfSignedUp: ${hasSelfSignedUpProfile}, hasDirectJudge: ${hasDirectPasswordJudge}`
     );
   } finally {
     supabaseDataService.setTestDatabaseClient(null);

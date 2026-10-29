@@ -83,7 +83,7 @@ interface MtqContextType {
   users: User[];
   currentUser: User;
   setCurrentUserId: (id: string) => void;
-  addUser: (user: Omit<User, 'id'>) => Promise<{ success: boolean; message: string }>;
+  addUser: (user: Omit<User, 'id'> & { initialPassword?: string }) => Promise<{ success: boolean; message: string }>;
   updateUser: (id: string, updated: Partial<User>) => Promise<{ success: boolean; message: string }>;
   retryUserProvisioning: (id: string) => Promise<{ success: boolean; message: string }>;
   toggleUserStatus: (id: string) => void;
@@ -300,6 +300,12 @@ interface MtqContextType {
   exitOfflineDemoSimulation: () => Promise<void>;
   refreshSupabaseConnection: () => Promise<SupabaseConnectionInfo>;
   signInWithSupabase: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
+  signUpWithSupabase: (params: {
+    name: string;
+    username: string;
+    email: string;
+    password: string;
+  }) => Promise<{ success: boolean; requiresEmailConfirmation?: boolean; message: string }>;
   signOutSupabase: () => Promise<void>;
   requestPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
   completePasswordReset: (newPassword: string) => Promise<{ success: boolean; message: string }>;
@@ -337,10 +343,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [users, setUsers] = useState<User[]>(() => {
     try {
+      const isDemoMode = localStorage.getItem('mtq_offline_demo_simulation_v4') === 'true';
+      if (!isDemoMode) {
+        return [];
+      }
       const saved = localStorage.getItem(STORAGE_PREFIX + 'users');
       return saved ? JSON.parse(saved) : INITIAL_USERS;
     } catch {
-      return INITIAL_USERS;
+      return [];
     }
   });
 
@@ -931,6 +941,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Sesi belum login di mode live: bersihkan state operasional agar data demo tidak bocor
         setDataSourceMode('supabase_live');
         setWorkspaceError(null);
+        setUsers([]);
         setKafilahs([]);
         setStages([]);
         setQuestions([]);
@@ -955,36 +966,38 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (
         primaryMembership?.tenantId &&
-        (!isValidUuid(currentTenantId) || !profile.memberships.some((m) => m.tenantId === currentTenantId))
+        (!isValidUuid(currentTenantId) || !profile.memberships.some((m) => m.tenantId === currentTenantId)) &&
+        !(effectiveRole === 'superadmin' && currentTenantId === 'platform')
       ) {
         targetTenantId = primaryMembership.tenantId;
         setCurrentTenantId(primaryMembership.tenantId);
       } else if (primaryMembership?.tenantId && isValidUuid(currentTenantId)) {
         targetTenantId = currentTenantId;
+      } else if (effectiveRole === 'superadmin' && !isValidUuid(currentTenantId)) {
+        targetTenantId = 'platform';
+        if (currentTenantId !== 'platform') {
+          setCurrentTenantId('platform');
+        }
       }
 
-      setUsers((prev) => {
-        const exists = prev.some((u) => u.id === profile.authUserId);
-        const mappedUser: User = {
-          id: profile.authUserId,
-          tenantId: effectiveTenantId,
-          username: profile.username,
-          email: profile.email,
-          name: profile.name,
-          role: effectiveRole,
-          status: 'Aktif',
-          provisioningStatus: 'Aktif',
-          judgeCategory: primaryMembership?.judgeCategory,
-          judgeField: primaryMembership?.judgeField
-        };
-        return exists
-          ? prev.map((u) => (u.id === profile.authUserId ? { ...u, ...mappedUser } : u))
-          : [mappedUser, ...prev];
-      });
+      const mappedUser: User = {
+        id: profile.authUserId,
+        tenantId: effectiveTenantId,
+        username: profile.username,
+        email: profile.email,
+        name: profile.name,
+        role: effectiveRole,
+        status: 'Aktif',
+        provisioningStatus: 'Aktif',
+        judgeCategory: primaryMembership?.judgeCategory,
+        judgeField: primaryMembership?.judgeField
+      };
+
       setCurrentUserId(profile.authUserId);
 
       if (!profile.hasProfileRow || (profile.memberships.length === 0 && profile.globalRole !== 'superadmin')) {
         // Profil atau membership tidak memenuhi syarat: bersihkan workspace operasional
+        setUsers([mappedUser]);
         setKafilahs([]);
         setStages([]);
         setQuestions([]);
@@ -1006,9 +1019,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (hydrated.tenants && hydrated.tenants.length > 0) {
           setTenants(hydrated.tenants);
         }
-        if (hydrated.users && hydrated.users.length > 0) {
-          setUsers(hydrated.users);
-        }
+        // Selalu ganti daftar users dengan data riil dari tabel profiles & tenant_memberships Supabase
+        // tanpa menyisakan akun tiruan (INITIAL_USERS) dari mockData
+        const dbUsers = hydrated.users || [];
+        const hasCurrentAuthUser = dbUsers.some((u) => u.id === profile.authUserId);
+        setUsers(hasCurrentAuthUser ? dbUsers : [mappedUser, ...dbUsers]);
+
         // Replace tenant operational data unconditionally so demo/mock data is never retained in live mode
         setCabangList(hydrated.cabangList || []);
         setJenjangList(hydrated.jenjangList || []);
@@ -1030,6 +1046,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setDataSourceMode('supabase_error');
         setWorkspaceError(hydration.error || 'Gagal memuat workspace database.');
         setSyncStatus('Gagal Memuat Workspace Database');
+        setUsers([mappedUser]);
         setKafilahs([]);
         setStages([]);
         setQuestions([]);
@@ -1044,6 +1061,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!isOfflineDemoSimulation) {
         setDataSourceMode('supabase_error');
         setWorkspaceError(info.lastError || info.statusLabel);
+        setUsers([]);
         setKafilahs([]);
         setStages([]);
         setQuestions([]);
@@ -1074,10 +1092,32 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: res.success, message: res.message };
   };
 
+  const signUpWithSupabase = async (params: {
+    name: string;
+    username: string;
+    email: string;
+    password: string;
+  }): Promise<{ success: boolean; requiresEmailConfirmation?: boolean; message: string }> => {
+    try {
+      localStorage.removeItem('mtq_offline_demo_simulation_v4');
+    } catch {}
+    setIsOfflineDemoSimulation(false);
+    const res = await supabaseDataService.signUpNewUser(params);
+    if (res.success && !res.requiresEmailConfirmation) {
+      await refreshSupabaseConnection();
+    }
+    return {
+      success: res.success,
+      requiresEmailConfirmation: res.requiresEmailConfirmation,
+      message: res.message
+    };
+  };
+
   const signOutSupabase = async (): Promise<void> => {
     await supabaseDataService.signOut();
     setAuthenticatedProfile(null);
     setIsPasswordRecoveryMode(false);
+    setUsers([]);
     setKafilahs([]);
     setStages([]);
     setQuestions([]);
@@ -3982,23 +4022,35 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // User & Judge Management
   const addUser = async (
-    userData: Omit<User, 'id'>
+    userData: Omit<User, 'id'> & { initialPassword?: string }
   ): Promise<{ success: boolean; message: string }> => {
+    const { initialPassword, ...cleanUserData } = userData;
     const newUser: User = {
-      ...userData,
+      ...cleanUserData,
       id: generateUuid(),
       provisioningStatus: isLiveDbActive ? 'Mengundang...' : 'Aktif'
     };
     setUsers((prev) => [...prev, newUser]);
 
     if (isLiveDbActive) {
-      const targetTenantUuid = toDeterministicUuid(
-        newUser.tenantId && newUser.tenantId !== 'platform' ? newUser.tenantId : currentTenantId
+      const rawTargetTenant =
+        newUser.tenantId && newUser.tenantId !== 'platform' && newUser.tenantId !== 'unassigned'
+          ? newUser.tenantId
+          : isValidUuid(currentTenantId)
+          ? currentTenantId
+          : tenants[0]?.id || 'platform';
+      const targetTenantUuid =
+        rawTargetTenant === 'platform' ? 'platform' : toDeterministicUuid(rawTargetTenant);
+
+      setSyncStatus(
+        initialPassword
+          ? 'Mendaftarkan akun Auth dengan kata sandi & memetakan profil di Supabase...'
+          : 'Memetakan profil & mengundang pengguna di Supabase...'
       );
-      setSyncStatus('Memetakan profil & mengundang pengguna di Supabase...');
       const res = await supabaseDataService.upsertUserAndMembership({
         tenantId: targetTenantUuid,
-        user: newUser
+        user: newUser,
+        initialPassword
       });
 
       if (!res.success) {
@@ -4952,6 +5004,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         exitOfflineDemoSimulation,
         refreshSupabaseConnection,
         signInWithSupabase,
+        signUpWithSupabase,
         signOutSupabase,
         requestPasswordReset,
         completePasswordReset,

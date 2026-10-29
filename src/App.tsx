@@ -8,7 +8,8 @@ import {
   AlertTriangle,
   Lock,
   FlaskConical,
-  ArrowRight
+  ArrowRight,
+  UserPlus
 } from 'lucide-react';
 import { MtqProvider, useMtq } from './context/MtqContext';
 import { Sidebar } from './components/layout/Sidebar';
@@ -39,6 +40,7 @@ const AuthenticationGateView: React.FC = () => {
     setIsPasswordRecoveryMode,
     refreshSupabaseConnection,
     signInWithSupabase,
+    signUpWithSupabase,
     signOutSupabase,
     requestPasswordReset,
     completePasswordReset,
@@ -46,7 +48,9 @@ const AuthenticationGateView: React.FC = () => {
     enterOfflineDemoSimulation
   } = useMtq();
 
-  const [authViewMode, setAuthViewMode] = useState<'login' | 'forgot_password'>('login');
+  const [authViewMode, setAuthViewMode] = useState<'login' | 'signup' | 'forgot_password'>('login');
+  const [signUpName, setSignUpName] = useState('');
+  const [signUpUsername, setSignUpUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -67,6 +71,57 @@ const AuthenticationGateView: React.FC = () => {
       });
       if (res.success) {
         setPassword('');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signUpName.trim() || !email.trim() || !password) return;
+    if (password.length < 8) {
+      setFeedback({
+        type: 'error',
+        text: 'Kata sandi wajib minimal 8 karakter.'
+      });
+      return;
+    }
+    if (password !== confirmPassword) {
+      setFeedback({
+        type: 'error',
+        text: 'Konfirmasi kata sandi tidak cocok.'
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFeedback(null);
+    try {
+      const derivedUsername =
+        signUpUsername.trim() ||
+        email
+          .trim()
+          .split('@')[0]
+          .replace(/[^a-zA-Z0-9_]/g, '_')
+          .toLowerCase();
+
+      const res = await signUpWithSupabase({
+        name: signUpName.trim(),
+        username: derivedUsername,
+        email: email.trim(),
+        password
+      });
+      setFeedback({
+        type: res.success ? 'success' : 'error',
+        text: res.message
+      });
+      if (res.success) {
+        setPassword('');
+        setConfirmPassword('');
+        if (res.requiresEmailConfirmation) {
+          setAuthViewMode('login');
+        }
       }
     } finally {
       setIsSubmitting(false);
@@ -227,8 +282,7 @@ const AuthenticationGateView: React.FC = () => {
     } else if (accessGateReason === 'membership_empty') {
       title = 'Belum Terdaftar pada Tenant MTQ (tenant_memberships Kosong)';
       description =
-        authenticatedProfile.verificationError ||
-        `Akun ${authenticatedProfile.email} belum memiliki keanggotaan pada penyelenggara/tenant MTQ mana pun. Hubungi Administrator atau Superadmin untuk menambahkan keanggotaan tenant.`;
+        `Akun ${authenticatedProfile.email} telah terdaftar di tabel public.profiles, namun belum ditugaskan ke penyelenggara/tenant MTQ mana pun. Jika ini adalah akun Superadmin pertama sistem, tekan tombol "Bootstrap Superadmin Pertama" di bawah. Jika Anda adalah Admin/Hakim, hubungi Superadmin untuk menetapkan penugasan MTQ Anda.`;
     } else if (accessGateReason === 'membership_inactive') {
       title = 'Keanggotaan Tenant Nonaktif';
       description =
@@ -260,7 +314,7 @@ const AuthenticationGateView: React.FC = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          {accessGateReason === 'profile_missing' && (
+          {(accessGateReason === 'profile_missing' || accessGateReason === 'membership_empty') && (
             <button
               type="button"
               onClick={() => void handleBootstrapFirstSuperadmin()}
@@ -435,10 +489,45 @@ const AuthenticationGateView: React.FC = () => {
               </div>
             </form>
           ) : (
-            /* Login or Forgot Password Form when unauthenticated and Supabase is configured */
+            /* Login / Sign Up / Forgot Password Form when unauthenticated and Supabase is configured */
             !authenticatedProfile &&
             connectionInfo.isConfigured && (
               <>
+                {authViewMode !== 'forgot_password' && (
+                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthViewMode('login');
+                        setFeedback(null);
+                      }}
+                      className={`py-2 px-3 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        authViewMode === 'login'
+                          ? 'bg-emerald-900 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      Masuk (Login)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthViewMode('signup');
+                        setFeedback(null);
+                      }}
+                      className={`py-2 px-3 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        authViewMode === 'signup'
+                          ? 'bg-emerald-900 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      Daftar Akun Baru
+                    </button>
+                  </div>
+                )}
+
                 {authViewMode === 'login' ? (
                   <form onSubmit={handleLogin} className="space-y-4">
                     <div>
@@ -500,6 +589,106 @@ const AuthenticationGateView: React.FC = () => {
                     >
                       <LogIn className="w-4 h-4" />
                       {isSubmitting ? 'Memverifikasi Sesi & Otorisasi...' : 'Masuk ke Workspace Produksi'}
+                    </button>
+                  </form>
+                ) : authViewMode === 'signup' ? (
+                  <form onSubmit={handleSignUp} className="space-y-3.5">
+                    <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 text-[11px] text-emerald-950 leading-relaxed">
+                      Pendaftaran akan membuat akun autentikasi resmi di <strong>Supabase Auth</strong> dan otomatis mencatat profil Anda pada tabel <code className="font-mono bg-emerald-100 px-1 rounded">public.profiles</code>.
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Nama Lengkap & Gelar
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={signUpName}
+                          onChange={(e) => setSignUpName(e.target.value)}
+                          placeholder="Contoh: H. Ahmad Fauzi, M.Ag"
+                          className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Username
+                        </label>
+                        <input
+                          type="text"
+                          value={signUpUsername}
+                          onChange={(e) => setSignUpUsername(e.target.value)}
+                          placeholder="Contoh: ahmad_fauzi"
+                          className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Email Resmi
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="nama@instansi.mtq.id"
+                        className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Kata Sandi Baru (Min. 8 Karakter)
+                        </label>
+                        <input
+                          type="password"
+                          required
+                          minLength={8}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Minimal 8 karakter"
+                          className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Konfirmasi Kata Sandi
+                        </label>
+                        <input
+                          type="password"
+                          required
+                          minLength={8}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="Ulangi kata sandi"
+                          className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700"
+                        />
+                      </div>
+                    </div>
+
+                    {feedback && (
+                      <div
+                        className={`p-3 rounded-xl text-xs font-semibold border ${
+                          feedback.type === 'success'
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                            : 'bg-rose-50 border-rose-200 text-rose-900'
+                        }`}
+                      >
+                        {feedback.text}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting || !signUpName.trim() || !email.trim() || !password || !confirmPassword}
+                      className="w-full py-2.5 px-4 rounded-xl bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer transition-all"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      {isSubmitting ? 'Mendaftarkan Akun ke Supabase...' : 'Daftarkan Akun Baru'}
                     </button>
                   </form>
                 ) : (

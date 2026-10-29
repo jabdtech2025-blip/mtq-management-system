@@ -3,6 +3,7 @@ import {
   isSupabaseConfigured,
   getSupabaseConnectionInfo,
   setRuntimeSupabaseConnectionState,
+  createEphemeralSupabaseAuthClient,
   SupabaseConnectionInfo
 } from '../lib/supabaseClient';
 import {
@@ -423,6 +424,93 @@ export const supabaseDataService = {
   },
 
   /**
+   * Mendaftarkan pengguna baru (Sign Up) ke Supabase Auth (`auth.users`).
+   * Trigger database `on_auth_user_created` akan otomatis membuat baris di `public.profiles`.
+   */
+  async signUpNewUser(params: {
+    name: string;
+    username: string;
+    email: string;
+    password: string;
+  }): Promise<{
+    success: boolean;
+    userId?: string;
+    requiresEmailConfirmation?: boolean;
+    message: string;
+    profile?: AuthenticatedSupabaseProfile | null;
+  }> {
+    const cleanName = (params.name || '').trim();
+    const cleanUsername = (params.username || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_.-]/g, '_');
+    const cleanEmail = (params.email || '').trim().toLowerCase();
+    const rawPassword = params.password || '';
+
+    if (!cleanName || cleanName.length < 2) {
+      return { success: false, message: 'Nama lengkap wajib diisi minimal 2 karakter.' };
+    }
+    if (!cleanUsername || cleanUsername.length < 3) {
+      return { success: false, message: 'Username wajib diisi minimal 3 karakter.' };
+    }
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return { success: false, message: 'Format alamat email tidak valid.' };
+    }
+    if (!rawPassword || rawPassword.length < 8) {
+      return { success: false, message: 'Kata sandi wajib minimal 8 karakter.' };
+    }
+
+    const client = getActiveClient();
+    if (!this.isLive() || !client || typeof client.auth?.signUp !== 'function') {
+      return {
+        success: false,
+        message: 'Layanan Supabase Auth belum dikonfigurasi atau tidak tersedia.'
+      };
+    }
+
+    const redirectValidation = this.validateRedirectUrl();
+    const { data, error } = await client.auth.signUp({
+      email: cleanEmail,
+      password: rawPassword,
+      options: {
+        data: {
+          name: cleanName,
+          username: cleanUsername
+        },
+        ...(redirectValidation.valid ? { emailRedirectTo: redirectValidation.url } : {})
+      }
+    });
+
+    if (error) {
+      return {
+        success: false,
+        message: `Pendaftaran akun gagal: ${error.message}`
+      };
+    }
+
+    const createdUserId = data?.user?.id ? String(data.user.id) : undefined;
+    await this.verifyDatabaseConnection();
+    const hasActiveSession = Boolean(data?.session?.user?.id);
+    if (hasActiveSession) {
+      const profile = await this.fetchAuthenticatedUserProfile();
+      return {
+        success: true,
+        userId: createdUserId,
+        requiresEmailConfirmation: false,
+        message: `Pendaftaran berhasil! Akun ${cleanName} (${cleanEmail}) telah dibuat di Supabase Auth & tabel public.profiles.`,
+        profile
+      };
+    }
+
+    return {
+      success: true,
+      userId: createdUserId,
+      requiresEmailConfirmation: true,
+      message: `Pendaftaran akun ${cleanName} (${cleanEmail}) berhasil! Akun telah tercatat di tabel public.profiles. Silakan buka kotak masuk email Anda untuk klik tautan verifikasi sebelum login.`
+    };
+  },
+
+  /**
    * Memvalidasi bahwa URL redirect (untuk reset password / undangan) aman, berada pada origin yang sama,
    * atau menggunakan HTTPS yang valid (mencegah open-redirect).
    */
@@ -639,7 +727,21 @@ export const supabaseDataService = {
       };
     }
 
-    const tenantUuid = isValidUuid(rawTenantId) ? rawTenantId : toDeterministicUuid(rawTenantId);
+    let tenantUuid = isValidUuid(rawTenantId) ? rawTenantId : '';
+    if (!tenantUuid) {
+      // Jika rawTenantId adalah kode lokal seperti 'tenant-jabar' atau 'platform', ambil UUID tenant pertama yang valid di database
+      const { data: firstTenants } = await client
+        .from('tenants')
+        .select('id')
+        .neq('id', SYSTEM_TENANT_UUID)
+        .limit(1);
+      if (firstTenants && firstTenants.length > 0 && firstTenants[0]?.id) {
+        tenantUuid = String(firstTenants[0].id);
+      } else {
+        tenantUuid = toDeterministicUuid(rawTenantId);
+      }
+    }
+
     if (!isValidUuid(tenantUuid)) {
       return {
         success: false,
@@ -652,6 +754,7 @@ export const supabaseDataService = {
 
     const [
       tenantsRes,
+      profilesRes,
       membershipsRes,
       branchesRes,
       levelsRes,
@@ -673,7 +776,8 @@ export const supabaseDataService = {
       auditRes
     ] = await Promise.all([
       client.from('tenants').select('*').neq('id', SYSTEM_TENANT_UUID),
-      client.from('tenant_memberships').select('*, profiles(id, username, name, email, role)').eq('tenant_id', tenantUuid),
+      client.from('profiles').select('id, username, name, email, role'),
+      client.from('tenant_memberships').select('*, profiles(id, username, name, email, role)'),
       client.from('branches').select('*').eq('tenant_id', tenantUuid),
       client.from('levels').select('*').eq('tenant_id', tenantUuid),
       client.from('kafilahs').select('*').eq('tenant_id', tenantUuid),
@@ -696,6 +800,7 @@ export const supabaseDataService = {
 
     const queryChecks: Array<{ name: string; error: { message?: string } | null }> = [
       { name: 'tenants', error: tenantsRes.error },
+      { name: 'profiles', error: profilesRes.error },
       { name: 'tenant_memberships', error: membershipsRes.error },
       { name: 'branches', error: branchesRes.error },
       { name: 'levels', error: levelsRes.error },
@@ -732,36 +837,98 @@ export const supabaseDataService = {
       };
     }
 
-    const tenants: Tenant[] = (tenantsRes.data || []).map((t: Record<string, unknown>) => ({
-      id: String(t.id),
-      code: String(t.code || ''),
-      name: String(t.name || ''),
-      eventName: String(t.event_name || ''),
-      region: String(t.region || ''),
-      edition: String(t.edition || '2025'),
-      period: String(t.period || '2025 - 2026'),
-      primaryAdminId: '',
-      status: (t.status as 'Aktif' | 'Nonaktif') || 'Aktif',
-      userCount: 1
-    }));
+    const allMemberships = (membershipsRes.data || []) as Array<Record<string, unknown>>;
+    const allProfiles = (profilesRes.data || []) as Array<Record<string, unknown>>;
+    const profileById = new Map<string, Record<string, unknown>>();
+    allProfiles.forEach((p) => {
+      if (p.id) profileById.set(String(p.id), p);
+    });
 
-    const users: User[] = (membershipsRes.data || []).map((m: Record<string, unknown>) => {
-      const prof = (m.profiles || {}) as Record<string, unknown>;
-      const profileId = String(m.profile_id || prof.id || '');
+    const userCountByTenant = new Map<string, number>();
+    allMemberships.forEach((m) => {
+      const tId = String(m.tenant_id || '');
+      if (tId) {
+        userCountByTenant.set(tId, (userCountByTenant.get(tId) || 0) + 1);
+      }
+    });
+
+    const tenants: Tenant[] = (tenantsRes.data || []).map((t: Record<string, unknown>) => {
+      const tId = String(t.id);
+      return {
+        id: tId,
+        code: String(t.code || ''),
+        name: String(t.name || ''),
+        eventName: String(t.event_name || ''),
+        region: String(t.region || ''),
+        edition: String(t.edition || '2025'),
+        period: String(t.period || '2025 - 2026'),
+        primaryAdminId: '',
+        status: (t.status as 'Aktif' | 'Nonaktif') || 'Aktif',
+        userCount: userCountByTenant.get(tId) || 0
+      };
+    });
+
+    const profileIdsWithMembership = new Set<string>();
+    const usersFromMemberships: User[] = allMemberships.map((m: Record<string, unknown>) => {
+      const rawProf = m.profiles;
+      const joinedProf = (Array.isArray(rawProf) ? rawProf[0] : rawProf) as Record<string, unknown> | undefined;
+      const profileId = String(m.profile_id || joinedProf?.id || '');
+      const fallbackProf = profileById.get(profileId) || {};
+      const prof = { ...fallbackProf, ...(joinedProf || {}) };
+
+      if (profileId) {
+        profileIdsWithMembership.add(profileId);
+      }
+
       const statusVal = ((m.status as string) || 'Aktif') as 'Aktif' | 'Nonaktif';
+      const globalRole = String(prof.role || '');
+      const memberRole = String(m.role || globalRole || 'judge');
+      const effectiveRole = (
+        globalRole === 'superadmin' ? 'superadmin' : memberRole
+      ) as 'superadmin' | 'admin' | 'judge';
+      const rawMemberTenantId = String(m.tenant_id || tenantUuid);
+
       return {
         id: profileId,
-        tenantId: String(m.tenant_id || tenantUuid),
+        tenantId:
+          effectiveRole === 'superadmin' && rawMemberTenantId === SYSTEM_TENANT_UUID
+            ? 'platform'
+            : rawMemberTenantId,
         username: String(prof.username || prof.email || profileId),
         name: String(prof.name || 'Pengguna MTQ'),
         email: prof.email ? String(prof.email) : undefined,
-        role: ((m.role as string) || (prof.role as string) || 'judge') as 'superadmin' | 'admin' | 'judge',
+        role: effectiveRole,
         judgeCategory: m.judge_category ? String(m.judge_category) : undefined,
         judgeField: m.judge_field ? String(m.judge_field) : undefined,
         status: statusVal,
         provisioningStatus: statusVal === 'Aktif' ? 'Aktif' : 'Nonaktif'
       };
     });
+
+    // Sertakan juga baris di tabel public.profiles yang belum memiliki baris di tenant_memberships
+    // (mis. akun baru hasil Sign Up atau Superadmin platform) agar 100% sinkron dengan tabel profiles Supabase
+    const usersWithoutMembership: User[] = allProfiles
+      .filter((p) => p.id && !profileIdsWithMembership.has(String(p.id)))
+      .map((p) => {
+        const profileId = String(p.id);
+        const roleVal = ((p.role as string) || 'judge') as 'superadmin' | 'admin' | 'judge';
+        const isSuper = roleVal === 'superadmin';
+        return {
+          id: profileId,
+          tenantId: isSuper ? 'platform' : 'unassigned',
+          username: String(p.username || p.email || profileId),
+          name: String(p.name || 'Pengguna Terdaftar'),
+          email: p.email ? String(p.email) : undefined,
+          role: roleVal,
+          status: 'Aktif' as const,
+          provisioningStatus: isSuper ? 'Aktif' : 'Menunggu Verifikasi',
+          provisioningMessage: isSuper
+            ? undefined
+            : 'Terdaftar di tabel profiles — belum ditugaskan ke tenant MTQ.'
+        };
+      });
+
+    const users: User[] = [...usersFromMemberships, ...usersWithoutMembership];
 
     const branchMap = new Map<string, string>();
     const cabangList: GenericMasterItem[] = (branchesRes.data || []).map((b: Record<string, unknown>) => {
@@ -2672,6 +2839,7 @@ export const supabaseDataService = {
   async upsertUserAndMembership(params: {
     tenantId: string;
     user: User;
+    initialPassword?: string;
     preferEdgeInvite?: boolean;
   }): Promise<
     RpcServiceResult<{
@@ -2679,7 +2847,36 @@ export const supabaseDataService = {
       provisioningStatus: 'Mengundang...' | 'Menunggu Verifikasi' | 'Aktif' | 'Nonaktif' | 'Gagal / Perlu Tindakan Admin';
     }>
   > {
-    const uuidCheck = this.validateReferences({ tenant_id: params.tenantId });
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: false,
+        mode: 'local_offline_fallback',
+        message: 'Mode lokal aktif.'
+      };
+    }
+
+    let effectiveTenantId = params.tenantId;
+    if (
+      !isValidUuid(effectiveTenantId) ||
+      effectiveTenantId === 'platform' ||
+      effectiveTenantId === 'unassigned'
+    ) {
+      if (params.user.role === 'superadmin') {
+        effectiveTenantId = SYSTEM_TENANT_UUID;
+      } else {
+        const { data: firstTenants } = await client
+          .from('tenants')
+          .select('id')
+          .neq('id', SYSTEM_TENANT_UUID)
+          .limit(1);
+        if (firstTenants && firstTenants.length > 0 && firstTenants[0]?.id) {
+          effectiveTenantId = String(firstTenants[0].id);
+        }
+      }
+    }
+
+    const uuidCheck = this.validateReferences({ tenant_id: effectiveTenantId });
     if (!uuidCheck.valid) {
       return {
         success: false,
@@ -2697,23 +2894,88 @@ export const supabaseDataService = {
       };
     }
 
-    const client = getActiveClient();
-    if (!this.isLive() || !client) {
-      return {
-        success: false,
-        mode: 'local_offline_fallback',
-        message: 'Mode lokal aktif.'
-      };
+    let resolvedProfileId: string | null = isValidUuid(params.user.id) ? params.user.id : null;
+    const cleanStatus = params.user.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif';
+    let createdViaPasswordSignUp = false;
+    let requiresEmailVerification = false;
+
+    // 0A. Jika Admin/Superadmin mengisi Kata Sandi Awal (initialPassword >= 8 karakter),
+    // daftarkan akun baru di Supabase Auth menggunakan client ephemeral (persistSession: false)
+    // sehingga sesi Admin/Superadmin yang sedang login TIDAK terputus.
+    if (params.initialPassword && params.initialPassword.trim().length > 0) {
+      const rawPassword = params.initialPassword.trim();
+      if (rawPassword.length < 8) {
+        return {
+          success: false,
+          mode: 'supabase_live',
+          message: 'Kata sandi awal untuk akun baru wajib minimal 8 karakter.',
+          data: {
+            profileId: params.user.id,
+            provisioningStatus: 'Gagal / Perlu Tindakan Admin'
+          }
+        };
+      }
+
+      const ephemeralClient = injectedDatabaseClient ? client : createEphemeralSupabaseAuthClient();
+      if (ephemeralClient && typeof ephemeralClient.auth?.signUp === 'function') {
+        const redirectValidation = this.validateRedirectUrl();
+        const { data: signUpData, error: signUpErr } = await ephemeralClient.auth.signUp({
+          email: cleanEmail,
+          password: rawPassword,
+          options: {
+            data: {
+              name: params.user.name,
+              username: params.user.username
+            },
+            ...(redirectValidation.valid ? { emailRedirectTo: redirectValidation.url } : {})
+          }
+        });
+
+        if (signUpErr) {
+          const errLower = (signUpErr.message || '').toLowerCase();
+          const isAlreadyRegistered =
+            errLower.includes('already registered') ||
+            errLower.includes('already exists') ||
+            errLower.includes('user_already_exists');
+          if (!isAlreadyRegistered) {
+            return {
+              success: false,
+              mode: 'supabase_live',
+              message: `Gagal mendaftarkan akun baru di Supabase Auth: ${signUpErr.message}`,
+              data: {
+                profileId: params.user.id,
+                provisioningStatus: 'Gagal / Perlu Tindakan Admin'
+              }
+            };
+          }
+        } else if (signUpData?.user?.id && isValidUuid(signUpData.user.id)) {
+          resolvedProfileId = signUpData.user.id;
+          createdViaPasswordSignUp = true;
+          requiresEmailVerification = !signUpData.session;
+        }
+      }
     }
 
-    const profileIdArg = isValidUuid(params.user.id) ? params.user.id : null;
-    const cleanStatus = params.user.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif';
+    // 0B. Resolusi UUID profil berdasarkan email dari tabel public.profiles jika sudah ada
+    // (memastikan kompatibilitas penuh meskipun menggunakan versi fungsi RPC sebelumnya)
+    try {
+      const { data: existingProf } = await client
+        .from('profiles')
+        .select('id')
+        .eq('email', cleanEmail)
+        .maybeSingle();
+      if (existingProf?.id && isValidUuid(String(existingProf.id))) {
+        resolvedProfileId = String(existingProf.id);
+      }
+    } catch {
+      // Lanjutkan ke RPC jika pembacaan prasyarat gagal
+    }
 
-    // 1. Coba tautkan/perbarui melalui RPC upsert_tenant_member_profile (mendukung resolusi email di auth.users & retry-safe)
+    // 1. Tautkan/perbarui melalui RPC upsert_tenant_member_profile (mendukung resolusi email di auth.users & retry-safe)
     if (!params.preferEdgeInvite) {
       const { data, error } = await client.rpc('upsert_tenant_member_profile', {
-        p_tenant_id: params.tenantId,
-        p_profile_id: profileIdArg,
+        p_tenant_id: effectiveTenantId,
+        p_profile_id: resolvedProfileId,
         p_username: params.user.username,
         p_name: params.user.name,
         p_email: cleanEmail,
@@ -2726,16 +2988,27 @@ export const supabaseDataService = {
       if (!error) {
         const realProfileId =
           (data && typeof data === 'object' && 'profile_id' in data && String(data.profile_id)) ||
-          profileIdArg ||
+          resolvedProfileId ||
           params.user.id;
+
+        const finalProvStatus =
+          createdViaPasswordSignUp && requiresEmailVerification
+            ? 'Menunggu Verifikasi'
+            : cleanStatus;
+
+        const successMsg = createdViaPasswordSignUp
+          ? requiresEmailVerification
+            ? `Akun ${params.user.name} (${cleanEmail}) berhasil dibuat beserta kata sandinya dan ditautkan ke tenant. Email verifikasi telah dikirim ke pengguna.`
+            : `Akun ${params.user.name} (${cleanEmail}) berhasil dibuat beserta kata sandinya dan langsung aktif di database.`
+          : `Profil dan keanggotaan ${params.user.name} (${cleanEmail}) berhasil ditautkan di database.`;
 
         return {
           success: true,
           mode: 'supabase_live',
-          message: `Profil dan keanggotaan ${params.user.name} (${cleanEmail}) berhasil ditautkan di database.`,
+          message: successMsg,
           data: {
             profileId: realProfileId,
-            provisioningStatus: cleanStatus
+            provisioningStatus: finalProvStatus
           }
         };
       }
@@ -2750,21 +3023,21 @@ export const supabaseDataService = {
           mode: 'supabase_live',
           message: error.message,
           data: {
-            profileId: params.user.id,
+            profileId: resolvedProfileId || params.user.id,
             provisioningStatus: 'Gagal / Perlu Tindakan Admin'
           }
         };
       }
     }
 
-    // 2. Jika akun belum ada di auth.users, panggil layanan server-side Supabase Edge Function `admin-provision-user`
+    // 2. Jika akun belum ada di auth.users dan tidak diberikan kata sandi awal, panggil Edge Function `admin-provision-user`
     if (client.functions && typeof client.functions.invoke === 'function') {
       try {
         const redirectCheck = this.validateRedirectUrl();
         const { data: fnData, error: fnError } = await client.functions.invoke('admin-provision-user', {
           body: {
-            tenantId: params.tenantId,
-            profileId: profileIdArg,
+            tenantId: effectiveTenantId,
+            profileId: resolvedProfileId,
             username: params.user.username,
             name: params.user.name,
             email: cleanEmail,
@@ -2778,7 +3051,7 @@ export const supabaseDataService = {
 
         const responseObj = (fnData || {}) as Record<string, unknown>;
         if (!fnError && responseObj.success === true) {
-          const resolvedId = String(responseObj.profileId || profileIdArg || params.user.id);
+          const resolvedId = String(responseObj.profileId || resolvedProfileId || params.user.id);
           const isInvited = responseObj.provisioningState === 'invited';
           return {
             success: true,
@@ -2794,26 +3067,20 @@ export const supabaseDataService = {
           };
         }
 
-        const fnErrMessage =
-          (typeof responseObj.error === 'string' && responseObj.error) ||
-          (fnError instanceof Error ? fnError.message : String(fnError || 'Edge Function tidak merespons'));
-
         return {
           success: false,
           mode: 'supabase_live',
-          message: `Akun ${cleanEmail} belum terdaftar di auth.users dan layanan Edge Function admin-provision-user belum aktif atau menolak permintaan (${fnErrMessage}). Undang email tersebut melalui Supabase Dashboard -> Authentication -> Users -> Invite User (atau deploy Edge Function admin-provision-user), lalu klik tombol Coba Ulang (Retry).`,
+          message: `Akun ${cleanEmail} belum terdaftar di Supabase Auth. Isi kolom "Kata Sandi Awal" (minimal 8 karakter) pada formulir Tambah Akun agar sistem langsung membuatkan akun login Supabase Auth, atau minta pengguna mendaftar melalui tab "Daftar Akun Baru (Sign Up)" di halaman login.`,
           data: {
             profileId: String(responseObj.authUserId || params.user.id),
             provisioningStatus: 'Gagal / Perlu Tindakan Admin'
           }
         };
-      } catch (err) {
+      } catch {
         return {
           success: false,
           mode: 'supabase_live',
-          message: `Gagal memanggil layanan undangan server-side untuk ${cleanEmail}: ${
-            err instanceof Error ? err.message : 'Unknown error'
-          }. Undang pengguna di Supabase Authentication terlebih dahulu lalu tekan Coba Ulang (Retry).`,
+          message: `Akun ${cleanEmail} belum terdaftar di Supabase Auth. Isi kolom "Kata Sandi Awal" (minimal 8 karakter) pada formulir Tambah Akun untuk membuat akun secara langsung, atau daftarkan melalui tab "Daftar Akun Baru" di halaman login.`,
           data: {
             profileId: params.user.id,
             provisioningStatus: 'Gagal / Perlu Tindakan Admin'
@@ -2825,7 +3092,7 @@ export const supabaseDataService = {
     return {
       success: false,
       mode: 'supabase_live',
-      message: `Pengguna (${cleanEmail}) belum terdaftar di Supabase Auth (auth.users). Daftarkan/undang akun email di Supabase Authentication terlebih dahulu atau aktifkan Edge Function admin-provision-user, kemudian tekan Coba Ulang.`,
+      message: `Pengguna (${cleanEmail}) belum terdaftar di Supabase Auth. Isi "Kata Sandi Awal" (min. 8 karakter) saat menambah akun agar sistem langsung membuatkan akun di Supabase Auth, atau gunakan menu "Daftar Akun Baru (Sign Up)" di halaman login.`,
       data: {
         profileId: params.user.id,
         provisioningStatus: 'Gagal / Perlu Tindakan Admin'

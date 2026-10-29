@@ -43,6 +43,7 @@ export const UserManagementView: React.FC = () => {
   const [formName, setFormName] = useState('');
   const [formUsername, setFormUsername] = useState('');
   const [formEmail, setFormEmail] = useState('');
+  const [formPassword, setFormPassword] = useState('');
   const [formRole, setFormRole] = useState<UserRole>('judge');
   const [formCategory, setFormCategory] = useState('Hakim 1');
   const [formField, setFormField] = useState('Bidang Tajwid & Makhraj');
@@ -75,6 +76,7 @@ export const UserManagementView: React.FC = () => {
     setFormName('');
     setFormUsername('');
     setFormEmail('');
+    setFormPassword('');
     setFormRole('judge');
     setFormCategory('Hakim Baru');
     setFormField('Bidang Fasahah & Waqf');
@@ -89,6 +91,7 @@ export const UserManagementView: React.FC = () => {
     setFormName(u.name);
     setFormUsername(u.username);
     setFormEmail(u.email || '');
+    setFormPassword('');
     setFormRole(u.role);
     setFormCategory(u.judgeCategory || '');
     setFormField(u.judgeField || '');
@@ -101,6 +104,13 @@ export const UserManagementView: React.FC = () => {
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName || !formUsername) return;
+    if (!editingUser && formPassword && formPassword.length < 8) {
+      setOperationBanner({
+        type: 'warning',
+        message: 'Kata sandi awal wajib minimal 8 karakter.'
+      });
+      return;
+    }
     setIsSubmitting(true);
     setOperationBanner(null);
 
@@ -133,7 +143,8 @@ export const UserManagementView: React.FC = () => {
           judgeField: formRole === 'judge' ? formField : undefined,
           assignedBranch: formRole === 'judge' ? formBranch : undefined,
           assignedStage: formRole === 'judge' ? formStage : undefined,
-          mimbarLocation: formRole === 'judge' ? formMimbar : undefined
+          mimbarLocation: formRole === 'judge' ? formMimbar : undefined,
+          initialPassword: formPassword.trim() || undefined
         });
         setOperationBanner({
           type: res.success ? 'success' : 'warning',
@@ -455,16 +466,38 @@ export const UserManagementView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="font-bold text-slate-600 block mb-1">Email (Opsional)</label>
+                  <label className="font-bold text-slate-600 block mb-1">
+                    Email {!editingUser && formPassword ? '(Wajib)' : '(Opsional)'}
+                  </label>
                   <input
                     type="email"
                     value={formEmail}
                     onChange={(e) => setFormEmail(e.target.value)}
+                    required={!editingUser && Boolean(formPassword)}
                     placeholder="hakim@mtq.id"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
               </div>
+
+              {!editingUser && (
+                <div>
+                  <label className="font-bold text-slate-600 block mb-1">
+                    Kata Sandi Awal (Minimal 8 Karakter)
+                  </label>
+                  <input
+                    type="password"
+                    minLength={8}
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                    placeholder="Isi kata sandi untuk langsung membuat akun login"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    Jika diisi, sistem akan langsung mendaftarkan akun di <code>auth.users</code> dan <code>public.profiles</code> dengan kata sandi ini tanpa mengeluarkan sesi Anda.
+                  </p>
+                </div>
+              )}
 
               {formRole === 'judge' && (
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
