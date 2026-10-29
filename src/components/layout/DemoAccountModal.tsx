@@ -10,7 +10,9 @@ import {
   LogIn,
   LogOut,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Lock,
+  FlaskConical
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 
@@ -25,6 +27,9 @@ export const DemoAccountModal: React.FC = () => {
     setTenantId,
     connectionInfo,
     authenticatedProfile,
+    isOfflineDemoSimulation,
+    enterOfflineDemoSimulation,
+    exitOfflineDemoSimulation,
     refreshSupabaseConnection,
     signInWithSupabase,
     signOutSupabase
@@ -37,7 +42,14 @@ export const DemoAccountModal: React.FC = () => {
 
   if (!isDemoAccountModalOpen) return null;
 
+  const isLiveProductionMode = connectionInfo.isConfigured && !isOfflineDemoSimulation;
+
   const handleSelectUser = (uId: string) => {
+    // Hard block persona switching in live production mode
+    if (isLiveProductionMode) {
+      return;
+    }
+
     const selected = users.find((u) => u.id === uId);
     if (!selected) return;
 
@@ -98,10 +110,14 @@ export const DemoAccountModal: React.FC = () => {
             </div>
             <div>
               <h3 className="font-extrabold text-sm text-slate-900">
-                Autentikasi Supabase & Persona Evaluasi
+                {isLiveProductionMode
+                  ? 'Sesi Autentikasi & Keamanan Supabase'
+                  : 'Mode Simulasi Demo Lokal & Persona Evaluasi'}
               </h3>
               <p className="text-[11px] text-slate-500">
-                Status koneksi database nyata, login Supabase Auth, & simulasi peran
+                {isLiveProductionMode
+                  ? 'Identitas & peran dikunci berdasarkan sesi Supabase Auth dan RLS'
+                  : 'Simulasi peran lokal terisolasi untuk pengujian antarmuka'}
               </p>
             </div>
           </div>
@@ -157,7 +173,7 @@ export const DemoAccountModal: React.FC = () => {
               )}
             </div>
 
-            {/* Supabase Auth Login Form when configured */}
+            {/* Supabase Auth Session Info / Login Form when configured */}
             {connectionInfo.isConfigured && (
               <div className="pt-2 border-t border-slate-200/80">
                 {authenticatedProfile ? (
@@ -166,7 +182,7 @@ export const DemoAccountModal: React.FC = () => {
                       <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-emerald-950 truncate">
-                          {authenticatedProfile.name} ({authenticatedProfile.globalRole})
+                          {authenticatedProfile.name} ({currentUser.role})
                         </p>
                         <p className="text-[11px] text-emerald-800 truncate">
                           {authenticatedProfile.email} · Sesi Auth Aktif
@@ -175,7 +191,10 @@ export const DemoAccountModal: React.FC = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => void signOutSupabase()}
+                      onClick={async () => {
+                        await signOutSupabase();
+                        setIsDemoAccountModalOpen(false);
+                      }}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 hover:bg-emerald-100 text-[11px] font-bold shrink-0 cursor-pointer"
                     >
                       <LogOut className="w-3 h-3" />
@@ -232,132 +251,181 @@ export const DemoAccountModal: React.FC = () => {
             )}
           </div>
 
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <p className="leading-relaxed">
-              Pilih peran simulasi di bawah ini untuk menguji alur kerja antarmuka masing-masing persona (Superadmin Platform, Admin MTQ, dan Dewan Hakim).
-            </p>
-          </div>
-
-          {/* Group 1: Superadmin */}
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-              Persona: Superadmin Platform
-            </p>
-            <div className="space-y-1.5">
-              {users
-                .filter((u) => u.role === 'superadmin')
-                .map((u) => (
-                  <button
-                    key={u.id}
-                    onClick={() => handleSelectUser(u.id)}
-                    className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
-                      u.id === currentUser.id
-                        ? 'border-emerald-600 bg-emerald-50/70 shadow-xs'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center font-bold text-xs shrink-0">
-                        SA
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-slate-900">{u.name}</p>
-                        <p className="text-[11px] text-slate-500">
-                          {u.email} · Akses Multi-Tenant & Audit
-                        </p>
-                      </div>
-                    </div>
-                    {u.id === currentUser.id && (
-                      <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
-                        <Check className="w-3 h-3" />
-                        Aktif
-                      </span>
-                    )}
-                  </button>
-                ))}
+          {isLiveProductionMode ? (
+            <div className="p-4 bg-emerald-950 text-white rounded-xl border border-emerald-800 space-y-3">
+              <div className="flex items-start gap-2.5">
+                <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1 text-xs">
+                  <p className="font-extrabold text-emerald-100">
+                    Pergantian Persona Palsu Dinonaktifkan pada Mode Produksi
+                  </p>
+                  <p className="text-emerald-200/80 leading-relaxed">
+                    Sistem sedang berjalan dalam Mode Produksi Supabase. Peran aktif (
+                    <span className="font-bold text-white">{currentUser.role}</span>) dan akses
+                    tenant ditentukan sepenuhnya dari tabel <code className="font-mono">profiles</code>{' '}
+                    serta <code className="font-mono">tenant_memberships</code> yang diverifikasi RLS.
+                  </p>
+                </div>
+              </div>
+              <div className="pt-1 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    enterOfflineDemoSimulation();
+                    setIsDemoAccountModalOpen(false);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
+                >
+                  <FlaskConical className="w-3.5 h-3.5" />
+                  Beralih ke Mode Simulasi Demo Lokal
+                </button>
+              </div>
             </div>
-          </div>
-
-          {/* Group 2: Admin MTQ */}
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-              Persona: Administrator Event MTQ
-            </p>
-            <div className="space-y-1.5">
-              {users
-                .filter((u) => u.role === 'admin')
-                .map((u) => (
+          ) : (
+            <>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start justify-between gap-2.5 text-xs text-amber-900">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">
+                    Mode Simulasi Demo Lokal aktif. Pilih persona di bawah ini untuk menguji alur
+                    antarmuka secara offline tanpa menyentuh database produksi.
+                  </p>
+                </div>
+                {connectionInfo.isConfigured && (
                   <button
-                    key={u.id}
-                    onClick={() => handleSelectUser(u.id)}
-                    className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
-                      u.id === currentUser.id
-                        ? 'border-emerald-600 bg-emerald-50/70 shadow-xs'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
+                    type="button"
+                    onClick={() => {
+                      exitOfflineDemoSimulation();
+                      setIsDemoAccountModalOpen(false);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-800 hover:bg-emerald-900 text-white text-[11px] font-bold shrink-0 cursor-pointer"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs shrink-0">
-                        ADM
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-slate-900">{u.name}</p>
-                        <p className="text-[11px] text-slate-500">
-                          LPTQ Provinsi Jawa Barat · Pengelola Data, Babak & Kelulusan
-                        </p>
-                      </div>
-                    </div>
-                    {u.id === currentUser.id && (
-                      <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
-                        <Check className="w-3 h-3" />
-                        Aktif
-                      </span>
-                    )}
+                    Mode Produksi
                   </button>
-                ))}
-            </div>
-          </div>
+                )}
+              </div>
 
-          {/* Group 3: Dewan Hakim */}
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-              Persona: Dewan Hakim Penilai
-            </p>
-            <div className="space-y-1.5">
-              {users
-                .filter((u) => u.role === 'judge')
-                .map((u) => (
-                  <button
-                    key={u.id}
-                    onClick={() => handleSelectUser(u.id)}
-                    className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
-                      u.id === currentUser.id
-                        ? 'border-emerald-600 bg-emerald-50/70 shadow-xs'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center font-bold text-xs shrink-0">
-                        <Gavel className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-slate-900">{u.name}</p>
-                        <p className="text-[11px] text-slate-500">
-                          {u.judgeCategory} · {u.judgeField}
-                        </p>
-                      </div>
-                    </div>
-                    {u.id === currentUser.id && (
-                      <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
-                        <Check className="w-3 h-3" />
-                        Aktif
-                      </span>
-                    )}
-                  </button>
-                ))}
-            </div>
-          </div>
+              {/* Group 1: Superadmin */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Persona Simulasi: Superadmin Platform
+                </p>
+                <div className="space-y-1.5">
+                  {users
+                    .filter((u) => u.role === 'superadmin')
+                    .map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => handleSelectUser(u.id)}
+                        className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
+                          u.id === currentUser.id
+                            ? 'border-emerald-600 bg-emerald-50/70 shadow-xs'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center font-bold text-xs shrink-0">
+                            SA
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-900">{u.name}</p>
+                            <p className="text-[11px] text-slate-500">
+                              {u.email} · Akses Multi-Tenant & Audit
+                            </p>
+                          </div>
+                        </div>
+                        {u.id === currentUser.id && (
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                            <Check className="w-3 h-3" />
+                            Aktif
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              {/* Group 2: Admin MTQ */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Persona Simulasi: Administrator Event MTQ
+                </p>
+                <div className="space-y-1.5">
+                  {users
+                    .filter((u) => u.role === 'admin')
+                    .map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => handleSelectUser(u.id)}
+                        className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
+                          u.id === currentUser.id
+                            ? 'border-emerald-600 bg-emerald-50/70 shadow-xs'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs shrink-0">
+                            ADM
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-900">{u.name}</p>
+                            <p className="text-[11px] text-slate-500">
+                              LPTQ Provinsi Jawa Barat · Pengelola Data, Babak & Kelulusan
+                            </p>
+                          </div>
+                        </div>
+                        {u.id === currentUser.id && (
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                            <Check className="w-3 h-3" />
+                            Aktif
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              {/* Group 3: Dewan Hakim */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Persona Simulasi: Dewan Hakim Penilai
+                </p>
+                <div className="space-y-1.5">
+                  {users
+                    .filter((u) => u.role === 'judge')
+                    .map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => handleSelectUser(u.id)}
+                        className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
+                          u.id === currentUser.id
+                            ? 'border-emerald-600 bg-emerald-50/70 shadow-xs'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center font-bold text-xs shrink-0">
+                            <Gavel className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-900">{u.name}</p>
+                            <p className="text-[11px] text-slate-500">
+                              {u.judgeCategory} · {u.judgeField}
+                            </p>
+                          </div>
+                        </div>
+                        {u.id === currentUser.id && (
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                            <Check className="w-3 h-3" />
+                            Aktif
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">

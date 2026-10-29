@@ -41,6 +41,9 @@ export interface AuthenticatedSupabaseProfile {
   name: string;
   username: string;
   globalRole: 'superadmin' | 'admin' | 'judge';
+  hasProfileRow: boolean;
+  inactiveMembershipsCount: number;
+  verificationError?: string;
   memberships: Array<{
     tenantId: string;
     role: 'superadmin' | 'admin' | 'judge';
@@ -319,25 +322,35 @@ export const supabaseDataService = {
       return null;
     }
 
-    const { data: profileRow } = await client
+    const { data: profileRow, error: profileErr } = await client
       .from('profiles')
       .select('id, username, name, email, role')
       .eq('id', authUser.id)
       .maybeSingle();
 
-    const { data: membershipRows } = await client
+    const { data: allMembershipRows, error: membershipErr } = await client
       .from('tenant_memberships')
       .select('tenant_id, role, judge_category, judge_field, status')
-      .eq('profile_id', authUser.id)
-      .eq('status', 'Aktif');
+      .eq('profile_id', authUser.id);
 
-    const memberships = (membershipRows || []).map((m: Record<string, unknown>) => ({
+    const activeRows = (allMembershipRows || []).filter(
+      (m: Record<string, unknown>) => String(m.status || 'Aktif') === 'Aktif'
+    );
+    const inactiveCount = (allMembershipRows || []).filter(
+      (m: Record<string, unknown>) => String(m.status || '') === 'Nonaktif'
+    ).length;
+
+    const memberships = activeRows.map((m: Record<string, unknown>) => ({
       tenantId: String(m.tenant_id || ''),
       role: (m.role as 'superadmin' | 'admin' | 'judge') || 'judge',
       judgeCategory: m.judge_category ? String(m.judge_category) : undefined,
       judgeField: m.judge_field ? String(m.judge_field) : undefined,
       status: String(m.status || 'Aktif')
     }));
+
+    const verificationErrors: string[] = [];
+    if (profileErr) verificationErrors.push(`profiles: ${profileErr.message}`);
+    if (membershipErr) verificationErrors.push(`tenant_memberships: ${membershipErr.message}`);
 
     return {
       authUserId: authUser.id,
@@ -355,6 +368,9 @@ export const supabaseDataService = {
           'user'
       ),
       globalRole: ((profileRow?.role as string) || 'judge') as 'superadmin' | 'admin' | 'judge',
+      hasProfileRow: Boolean(profileRow && profileRow.id),
+      inactiveMembershipsCount: inactiveCount,
+      verificationError: verificationErrors.length > 0 ? verificationErrors.join('; ') : undefined,
       memberships
     };
   },
@@ -1948,5 +1964,619 @@ export const supabaseDataService = {
     });
 
     return !error;
+  },
+
+  async deleteKafilah(tenantId: string, kafilahId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ tenant_id: tenantId, kafilah_id: kafilahId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!,
+        validationErrors: uuidCheck.invalidFields
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('kafilahs')
+      .delete()
+      .eq('id', kafilahId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Kafilah berhasil dihapus dari database.' };
+  },
+
+  async updateParticipantRecord(
+    participant: Participant,
+    branchId?: string,
+    levelId?: string
+  ): Promise<RpcServiceResult> {
+    const effectiveBranchId = branchId || participant.branchId;
+    const uuidCheck = this.validateReferences({
+      id: participant.id,
+      tenant_id: participant.tenantId,
+      kafilah_id: participant.kafilahId,
+      branch_id: effectiveBranchId
+    });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!,
+        validationErrors: uuidCheck.invalidFields
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const fkCheck = await this.verifyDatabaseReferencesExist({
+      tenantId: participant.tenantId,
+      kafilahId: participant.kafilahId,
+      branchId: effectiveBranchId
+    });
+    if (!fkCheck.valid) {
+      return { success: false, mode: 'supabase_live', message: fkCheck.message! };
+    }
+
+    const { error } = await client
+      .from('participants')
+      .update({
+        kafilah_id: participant.kafilahId,
+        branch_id: effectiveBranchId,
+        level_id: levelId && isValidUuid(levelId) ? levelId : null,
+        participant_number: participant.participantId,
+        name: participant.name,
+        gender: participant.gender,
+        lottery_number: participant.lotteryNumber,
+        status: participant.status,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', participant.id)
+      .eq('tenant_id', participant.tenantId);
+
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+
+    await client
+      .from('stage_participations')
+      .update({
+        lottery_number: participant.lotteryNumber,
+        updated_at: new Date().toISOString()
+      })
+      .eq('participant_id', participant.id)
+      .eq('tenant_id', participant.tenantId);
+
+    return { success: true, mode: 'supabase_live', message: 'Data peserta berhasil diperbarui di database.' };
+  },
+
+  async deleteQuestion(tenantId: string, questionId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ tenant_id: tenantId, question_id: questionId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('questions')
+      .delete()
+      .eq('id', questionId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Paket soal dihapus dari database.' };
+  },
+
+  async unassignMaqraRecord(params: {
+    tenantId: string;
+    stageParticipationId: string;
+    questionId?: string;
+  }): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({
+      tenant_id: params.tenantId,
+      stage_participation_id: params.stageParticipationId,
+      ...(params.questionId ? { question_id: params.questionId } : {})
+    });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+
+    let deleteQuery = client
+      .from('assigned_maqras')
+      .delete()
+      .eq('tenant_id', params.tenantId)
+      .eq('stage_participation_id', params.stageParticipationId);
+
+    if (params.questionId && isValidUuid(params.questionId)) {
+      deleteQuery = deleteQuery.eq('question_id', params.questionId);
+    }
+
+    const { error } = await deleteQuery;
+    if (error) {
+      return { success: false, mode: 'supabase_live', message: error.message };
+    }
+
+    const { data: remainingRows } = await client
+      .from('assigned_maqras')
+      .select('id')
+      .eq('tenant_id', params.tenantId)
+      .eq('stage_participation_id', params.stageParticipationId);
+
+    if (!remainingRows || remainingRows.length === 0) {
+      await client
+        .from('stage_participations')
+        .update({
+          status: 'Maqra Belum Ditetapkan',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', params.stageParticipationId)
+        .eq('tenant_id', params.tenantId);
+    }
+
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message: 'Penetapan maqra berhasil dilepaskan dari database.'
+    };
+  },
+
+  async deleteJudgeAssignment(tenantId: string, assignmentId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ tenant_id: tenantId, assignment_id: assignmentId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('judge_assignments')
+      .delete()
+      .eq('id', assignmentId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Penugasan hakim berhasil dihapus dari database.' };
+  },
+
+  async upsertTenant(tenant: Tenant): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: tenant.id });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client.from('tenants').upsert({
+      id: tenant.id,
+      code: tenant.code,
+      name: tenant.name,
+      event_name: tenant.eventName,
+      region: tenant.region,
+      edition: tenant.edition || null,
+      period: tenant.period || null,
+      status: tenant.status,
+      updated_at: new Date().toISOString()
+    });
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Tenant tersimpan di Supabase.' };
+  },
+
+  async upsertStage(stage: CompetitionStage): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({
+      id: stage.id,
+      tenant_id: stage.tenantId,
+      ...(stage.branchId ? { branch_id: stage.branchId } : {})
+    });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const fkCheck = await this.verifyDatabaseReferencesExist({
+      tenantId: stage.tenantId,
+      branchId: stage.branchId && isValidUuid(stage.branchId) ? stage.branchId : undefined
+    });
+    if (!fkCheck.valid) {
+      return { success: false, mode: 'supabase_live', message: fkCheck.message! };
+    }
+
+    const { error } = await client.from('stages').upsert({
+      id: stage.id,
+      tenant_id: stage.tenantId,
+      branch_id: stage.branchId && isValidUuid(stage.branchId) ? stage.branchId : null,
+      name: stage.name,
+      stage_order: stage.order,
+      qualification_quota: stage.qualificationQuota,
+      qualification_method: stage.qualificationMethod || 'top_n',
+      status: stage.status === 'Selesai' ? 'Aktif' : stage.status,
+      is_finalized: false
+    });
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Konfigurasi babak tersimpan di Supabase.' };
+  },
+
+  async upsertBranch(tenantId: string, branch: GenericMasterItem): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: branch.id, tenant_id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client.from('branches').upsert({
+      id: branch.id,
+      tenant_id: tenantId,
+      code: branch.code,
+      name: branch.name,
+      description: branch.description || null,
+      status: branch.status
+    });
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Cabang lomba tersimpan di Supabase.' };
+  },
+
+  async deleteBranch(tenantId: string, branchId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: branchId, tenant_id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('branches')
+      .delete()
+      .eq('id', branchId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Cabang lomba berhasil dihapus dari database.' };
+  },
+
+  async upsertLevel(tenantId: string, level: GenericMasterItem): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: level.id, tenant_id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client.from('levels').upsert({
+      id: level.id,
+      tenant_id: tenantId,
+      code: level.code,
+      name: level.name,
+      description: level.description || null,
+      status: level.status
+    });
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Jenjang berhasil disimpan di Supabase.' };
+  },
+
+  async deleteLevel(tenantId: string, levelId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: levelId, tenant_id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('levels')
+      .delete()
+      .eq('id', levelId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Jenjang berhasil dihapus dari database.' };
+  },
+
+  async upsertErrorCategory(cat: ErrorCategory): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: cat.id, tenant_id: cat.tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client.from('error_categories').upsert({
+      id: cat.id,
+      tenant_id: cat.tenantId,
+      rubric_field_id: cat.fieldId && isValidUuid(cat.fieldId) ? cat.fieldId : null,
+      criterion_id: cat.criterionId && isValidUuid(cat.criterionId) ? cat.criterionId : null,
+      deduction_rule_id: cat.deductionRuleId && isValidUuid(cat.deductionRuleId) ? cat.deductionRuleId : null,
+      code: cat.code,
+      name: cat.name,
+      scope: cat.scope || null,
+      default_deduction: cat.defaultDeduction,
+      max_deduction: cat.maxDeduction ?? null,
+      method_type: cat.methodType || 'Pengurangan tetap',
+      status: cat.status || 'Aktif',
+      sort_order: cat.order ?? 1
+    });
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Kategori kesalahan tersimpan di Supabase.' };
+  },
+
+  async upsertRubricVersionWithFields(tenantId: string, rubric: RubricVersion): Promise<RpcServiceResult> {
+    const effectiveTenantId = rubric.tenantId && isValidUuid(rubric.tenantId) ? rubric.tenantId : tenantId;
+    const uuidCheck = this.validateReferences({ id: rubric.id, tenant_id: effectiveTenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+
+    const { error: rvError } = await client.from('rubric_versions').upsert({
+      id: rubric.id,
+      tenant_id: effectiveTenantId,
+      code: rubric.code,
+      name: rubric.name,
+      branch_code: rubric.branchCode || null,
+      branch_name: rubric.branchName || null,
+      version: rubric.version,
+      description: rubric.description || null,
+      official_source: rubric.officialSource || null,
+      starting_score: rubric.startingScore ?? 100,
+      status: rubric.status
+    });
+    if (rvError) return { success: false, mode: 'supabase_live', message: rvError.message };
+
+    for (let idx = 0; idx < (rubric.fields || []).length; idx++) {
+      const f = rubric.fields[idx];
+      const fieldId = isValidUuid(f.id) ? f.id : toDeterministicUuid(`${rubric.id}:field:${f.code}`);
+      const { error: rfError } = await client.from('rubric_fields').upsert({
+        id: fieldId,
+        rubric_version_id: rubric.id,
+        code: f.code,
+        name: f.name,
+        max_score: f.maxScore,
+        min_score: f.minScore ?? 0,
+        max_deduction: f.maxDeduction ?? null,
+        field_order: f.order ?? idx + 1,
+        status: f.status || 'Aktif',
+        description: f.description || null
+      });
+      if (rfError) return { success: false, mode: 'supabase_live', message: rfError.message };
+    }
+
+    return { success: true, mode: 'supabase_live', message: 'Versi rubrik & struktur bidang tersimpan di Supabase.' };
+  },
+
+  async updateRubricVersionStatus(
+    tenantId: string,
+    rubricId: string,
+    status: 'Draft' | 'Aktif' | 'Arsip'
+  ): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: rubricId, tenant_id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('rubric_versions')
+      .update({ status })
+      .eq('id', rubricId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: `Status rubrik diperbarui menjadi ${status}.` };
+  },
+
+  async upsertCompetitionRuleConfig(rule: CompetitionRuleConfig): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({
+      id: rule.id,
+      tenant_id: rule.tenantId,
+      ...(rule.branchId ? { branch_id: rule.branchId } : {}),
+      rubric_version_id: rule.rubricVersionId
+    });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const fkCheck = await this.verifyDatabaseReferencesExist({
+      tenantId: rule.tenantId,
+      branchId: rule.branchId && isValidUuid(rule.branchId) ? rule.branchId : undefined,
+      rubricVersionId: rule.rubricVersionId
+    });
+    if (!fkCheck.valid) {
+      return { success: false, mode: 'supabase_live', message: fkCheck.message! };
+    }
+    const { error } = await client.from('competition_rule_configs').upsert({
+      id: rule.id,
+      tenant_id: rule.tenantId,
+      branch_id: rule.branchId && isValidUuid(rule.branchId) ? rule.branchId : null,
+      branch_name: rule.branchName || null,
+      rubric_version_id: rule.rubricVersionId,
+      tie_break_order: rule.tieBreakOrder || ['total', 'Tajwid', 'Lagu', 'Fashahah'],
+      quota_per_stage: rule.quotaPerStage || { Penyisihan: 3, Final: 3 },
+      official_source: rule.officialSource || null,
+      is_verified_official: Boolean(rule.isVerifiedOfficial),
+      status: rule.status || 'Aktif'
+    });
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Konfigurasi aturan kompetisi tersimpan di Supabase.' };
+  },
+
+  async upsertUserAndMembership(params: {
+    tenantId: string;
+    user: User;
+  }): Promise<RpcServiceResult<{ profileId: string }>> {
+    const uuidCheck = this.validateReferences({ tenant_id: params.tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+
+    const profileIdArg = isValidUuid(params.user.id) ? params.user.id : null;
+    const { data, error } = await client.rpc('upsert_tenant_member_profile', {
+      p_tenant_id: params.tenantId,
+      p_profile_id: profileIdArg,
+      p_username: params.user.username,
+      p_name: params.user.name,
+      p_email: params.user.email,
+      p_role: params.user.role,
+      p_judge_category: params.user.judgeCategory || null,
+      p_judge_field: params.user.judgeField || null,
+      p_status: params.user.status || 'Aktif'
+    });
+
+    if (error) {
+      return { success: false, mode: 'supabase_live', message: error.message };
+    }
+
+    const realProfileId =
+      (data && typeof data === 'object' && 'profile_id' in data && String(data.profile_id)) ||
+      profileIdArg ||
+      params.user.id;
+
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message: 'Profil dan keanggotaan pengguna berhasil disimpan di database.',
+      data: { profileId: realProfileId }
+    };
+  },
+
+  subscribeToTenantRealtime(
+    tenantId: string,
+    onChange: (payload: { table: string; eventType: string }) => void
+  ): () => void {
+    const client = getActiveClient();
+    if (!this.isLive() || !client || !isValidUuid(tenantId) || typeof client.channel !== 'function') {
+      return () => {};
+    }
+
+    const channelName = `mtq-live-tenant-${tenantId}`;
+    const channel = client
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'judge_assessments',
+          filter: `tenant_id=eq.${tenantId}`
+        },
+        (payload: { eventType?: string }) => {
+          onChange({ table: 'judge_assessments', eventType: payload?.eventType || 'UPDATE' });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'stage_participations',
+          filter: `tenant_id=eq.${tenantId}`
+        },
+        (payload: { eventType?: string }) => {
+          onChange({ table: 'stage_participations', eventType: payload?.eventType || 'UPDATE' });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'stages',
+          filter: `tenant_id=eq.${tenantId}`
+        },
+        (payload: { eventType?: string }) => {
+          onChange({ table: 'stages', eventType: payload?.eventType || 'UPDATE' });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        if (typeof client.removeChannel === 'function') {
+          client.removeChannel(channel);
+        } else if (channel && typeof channel.unsubscribe === 'function') {
+          channel.unsubscribe();
+        }
+      } catch {
+        // Ignore cleanup errors on unmount
+      }
+    };
   }
 };

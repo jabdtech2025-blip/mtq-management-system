@@ -49,7 +49,7 @@ function createPgliteSupabaseAdapter(
   }
 
   function createQueryBuilder(table: string) {
-    let op: 'select' | 'insert' | 'upsert' | 'update' = 'select';
+    let op: 'select' | 'insert' | 'upsert' | 'update' | 'delete' = 'select';
     let payloadData: Record<string, unknown> | Array<Record<string, unknown>> = {};
     let conflictCols = 'id';
     const filters: string[] = [];
@@ -76,6 +76,10 @@ function createPgliteSupabaseAdapter(
       update(data: Record<string, unknown>) {
         op = 'update';
         payloadData = data;
+        return builder;
+      },
+      delete() {
+        op = 'delete';
         return builder;
       },
       eq(col: string, val: unknown) {
@@ -221,6 +225,12 @@ function createPgliteSupabaseAdapter(
               return { data: qRes.rows || [], error: null };
             }
 
+            if (op === 'delete') {
+              const sql = `DELETE FROM ${table} ${whereSql} RETURNING *;`;
+              const qRes = await pg.query(sql);
+              return { data: qRes.rows || [], error: null };
+            }
+
             return { data: null, error: null };
           });
 
@@ -295,6 +305,18 @@ function createPgliteSupabaseAdapter(
               ${formatSqlVal(args.p_summary)}::text,
               ${args.p_reason ? `${formatSqlVal(args.p_reason)}::text` : 'NULL::text'}
             ) AS res;`;
+          } else if (fnName === 'upsert_tenant_member_profile') {
+            sql = `SELECT upsert_tenant_member_profile(
+              ${formatSqlVal(args.p_tenant_id)}::uuid,
+              ${formatSqlVal(args.p_profile_id)}::uuid,
+              ${formatSqlVal(args.p_username)}::text,
+              ${formatSqlVal(args.p_name)}::text,
+              ${formatSqlVal(args.p_email)}::text,
+              ${formatSqlVal(args.p_role)}::text,
+              ${args.p_judge_category ? `${formatSqlVal(args.p_judge_category)}::text` : 'NULL::text'},
+              ${args.p_judge_field ? `${formatSqlVal(args.p_judge_field)}::text` : 'NULL::text'},
+              ${formatSqlVal(args.p_status || 'Aktif')}::text
+            ) AS res;`;
           } else {
             throw new Error(`Unsupported RPC: ${fnName}`);
           }
@@ -332,6 +354,10 @@ export async function runSupabaseTests(): Promise<{
   const schemaSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/schema.sql'), 'utf-8');
   const migrationSql = fs.readFileSync(
     path.resolve(process.cwd(), 'supabase/migrations/20261027_production_hardening.sql'),
+    'utf-8'
+  );
+  const hardening20261029Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261029_security_and_crud_hardening.sql'),
     'utf-8'
   );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
@@ -441,6 +467,8 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(schemaSql);
       await pg.exec(migrationSql);
       await pg.exec(seedSql);
+      // Verify idempotent incremental migration on top of already-seeded database
+      await pg.exec(hardening20261029Sql);
       await pg.exec(`
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
         GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
@@ -1010,6 +1038,303 @@ export async function runSupabaseTests(): Promise<{
       `reopen: ${reopenRes.success}, advancePenyisihan: ${advancePenyisihanRes.success}, simulatedFailBlocked: ${
         !simulatedFailedFinalAdvance.success && !finalStageBeforeSuccess.rows[0]?.is_finalized
       }, finalChampionship: ${advanceFinalChampionshipRes.success}, auditActions: ${Array.from(auditActions).join(',')}`
+    );
+
+    // =========================================================================
+    // 46. P0 SECURITY: Stage Ratification Bypass Blocked (Direct UPDATE on stages)
+    // =========================================================================
+    const stageSemifinalId = '44444444-4444-4444-8444-444444444402';
+    currentAuthUser = { id: adminUserId, email: 'admin@jabar.mtq.id' };
+    const createSemiStageRes = await supabaseDataService.upsertStage({
+      id: stageSemifinalId,
+      tenantId: tenantJabarId,
+      branchId: branchTilawahPutraId,
+      branchName: 'Tilawah Dewasa Putra',
+      name: 'Semifinal',
+      order: 2,
+      qualificationQuota: 3,
+      qualificationMethod: 'top_n',
+      status: 'Aktif',
+      isFinalized: false
+    });
+    let directStageFinalizeBlocked = false;
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        UPDATE stages
+        SET is_finalized = true, status = 'Selesai'
+        WHERE id = '${stageSemifinalId}';
+        COMMIT;
+      `);
+    } catch {
+      await pg.exec('ROLLBACK;');
+      directStageFinalizeBlocked = true;
+    }
+
+    const semifinalAfterBypassAttempt = await pg.query<{ is_finalized: boolean; status: string }>(
+      `SELECT is_finalized, status FROM stages WHERE id = '${stageSemifinalId}';`
+    );
+
+    assert(
+      '46. P0 Keamanan Babak: Menolak bypass pengesahan babak melalui UPDATE langsung pada tabel stages (is_finalized / status Selesai)',
+      createSemiStageRes.success === true &&
+        directStageFinalizeBlocked === true &&
+        semifinalAfterBypassAttempt.rows[0]?.is_finalized === false &&
+        semifinalAfterBypassAttempt.rows[0]?.status !== 'Selesai',
+      `createStage: ${createSemiStageRes.success}, directStageFinalizeBlocked: ${directStageFinalizeBlocked}, is_finalized: ${semifinalAfterBypassAttempt.rows[0]?.is_finalized}`
+    );
+
+    // =========================================================================
+    // 47. P0 SECURITY: Snapshot Insert Bypass Blocked (Direct INSERT on stage_result_snapshots)
+    // =========================================================================
+    let directSnapshotInsertBlocked = false;
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        INSERT INTO stage_result_snapshots (tenant_id, stage_id, branch_id, quota, tie_break_rule_used, finalized_by, rankings_snapshot)
+        VALUES ('${tenantJabarId}', '${stageSemifinalId}', '${branchTilawahPutraId}', 3, 'highest_tajwid', '${adminUserId}', '[]'::jsonb);
+        COMMIT;
+      `);
+    } catch {
+      await pg.exec('ROLLBACK;');
+      directSnapshotInsertBlocked = true;
+    }
+
+    assert(
+      '47. P0 Keamanan Snapshot Hasil: Menolak INSERT langsung ke stage_result_snapshots di luar transaksi RPC advance_stage_qualifiers',
+      directSnapshotInsertBlocked === true,
+      `directSnapshotInsertBlocked: ${directSnapshotInsertBlocked}`
+    );
+
+    // =========================================================================
+    // 48. P0 SECURITY: Server-Authoritative Score Calculation & Out-of-Quota Override Enforcement
+    // =========================================================================
+    // Verify that Penyisihan stage snapshot & participation stored the server-computed average (96.5 + 97.5)/2 = 97.00
+    const penyisihanSpScoreCheck = await pg.query<{ final_score: string; rank: number }>(
+      `SELECT final_score::text, rank FROM stage_participations WHERE id = '${penyisihanSpUuid}';`
+    );
+    const penyisihanSnapshotCheck = await pg.query<{ rankings_snapshot: Array<{ final_score: number; rank: number }> }>(
+      `SELECT rankings_snapshot FROM stage_result_snapshots WHERE stage_id = '${stagePenyisihanId}' ORDER BY created_at DESC LIMIT 1;`
+    );
+    const snapshotFirstEntry = penyisihanSnapshotCheck.rows[0]?.rankings_snapshot?.[0];
+
+    assert(
+      '48. P0 Integritas Nilai & Ranking Server-Authoritative: advance_stage_qualifiers menghitung rata-rata nilai murni dari tabel judge_assessments di PostgreSQL',
+      Number(penyisihanSpScoreCheck.rows[0]?.final_score) === 97 &&
+        penyisihanSpScoreCheck.rows[0]?.rank === 1 &&
+        Number(snapshotFirstEntry?.final_score) === 97 &&
+        Number(snapshotFirstEntry?.rank) === 1,
+      `spScore: ${penyisihanSpScoreCheck.rows[0]?.final_score}, snapshotScore: ${snapshotFirstEntry?.final_score}`
+    );
+
+    // =========================================================================
+    // 49. P1 SECURITY: Profile Self-Role Escalation Blocked & is_assigned_judge Caller Restriction
+    // =========================================================================
+    let selfRoleEscalationBlocked = false;
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${judge1UserId}', true);
+        UPDATE profiles SET role = 'superadmin' WHERE id = '${judge1UserId}';
+        COMMIT;
+      `);
+    } catch {
+      await pg.exec('ROLLBACK;');
+      selfRoleEscalationBlocked = true;
+    }
+
+    const judgeRoleAfterEscalationAttempt = await pg.query<{ role: string }>(
+      `SELECT role FROM profiles WHERE id = '${judge1UserId}';`
+    );
+
+    // Unassigned judge probing another judge's assignment via is_assigned_judge() must return false
+    await pg.exec(`
+      BEGIN;
+      SET LOCAL ROLE authenticated;
+      SELECT set_config('request.jwt.claim.sub', '${unassignedJudgeId}', true);
+    `);
+    const probeOtherJudgeRes = await pg.query<{ allowed: boolean }>(
+      `SELECT is_assigned_judge('${tenantJabarId}'::uuid, '${penyisihanSpUuid}'::uuid, '${judge1UserId}'::uuid) AS allowed;`
+    );
+    await pg.exec('COMMIT;');
+
+    assert(
+      '49. P1 Proteksi Eskalasi Role & Pembatasan Helper SECURITY DEFINER: Menolak perubahan role ke superadmin & membatasi pemanggilan is_assigned_judge lintas pengguna',
+      (selfRoleEscalationBlocked || judgeRoleAfterEscalationAttempt.rows[0]?.role === 'judge') &&
+        judgeRoleAfterEscalationAttempt.rows[0]?.role === 'judge' &&
+        probeOtherJudgeRes.rows[0]?.allowed === false,
+      `roleRemainedJudge: ${judgeRoleAfterEscalationAttempt.rows[0]?.role}, probeAllowed: ${probeOtherJudgeRes.rows[0]?.allowed}`
+    );
+
+    // =========================================================================
+    // 50. P1 COMPLETE CRUD & MUSHAF ANNOTATION PERSISTENCE
+    // =========================================================================
+    // Create a draft assessment on Semifinal with Mushaf annotations and verify persistence + hydration
+    currentAuthUser = { id: adminUserId, email: 'admin@jabar.mtq.id' };
+    const semifinalSpUuid = generateUuid();
+    await supabaseDataService.upsertParticipantWithStage({
+      participant: {
+        id: participantUuid,
+        tenantId: tenantJabarId,
+        participantId: 'MTQ-26-101',
+        name: 'Muhammad Farhan Al-Farisi (Updated)',
+        gender: 'Putra',
+        kafilahId: kafilahBandungId,
+        kafilahName: 'Kota Bandung',
+        branchId: branchTilawahPutraId,
+        branchName: 'Tilawah Dewasa Putra',
+        levelName: 'Ulya (Dewasa)',
+        lotteryNumber: 'A-101',
+        stageName: 'Semifinal',
+        status: 'Menunggu',
+        questionId: '',
+        assignedMaqra: 'Belum Ditetapkan',
+        pageNumber: 282
+      },
+      stageParticipation: {
+        id: semifinalSpUuid,
+        tenantId: tenantJabarId,
+        participantId: participantUuid,
+        stageId: stageSemifinalId,
+        stageName: 'Semifinal',
+        branchId: branchTilawahPutraId,
+        branchName: 'Tilawah Dewasa Putra',
+        lotteryNumber: 'A-101',
+        questionId: '',
+        assignedMaqra: 'Belum Ditetapkan',
+        pageNumber: 282,
+        status: 'Maqra Belum Ditetapkan'
+      }
+    });
+
+    const assignSemiMaqra = await supabaseDataService.assignMaqraRecord({
+      id: generateUuid(),
+      tenantId: tenantJabarId,
+      stageParticipationId: semifinalSpUuid,
+      questionId: questionPenyisihanId,
+      method: 'manual'
+    });
+    const semiAssignedMaqraId =
+      (assignSemiMaqra.data as { assignedMaqraId?: string })?.assignedMaqraId || '';
+
+    const semiAsgId = generateUuid();
+    await supabaseDataService.upsertJudgeAssignment({
+      id: semiAsgId,
+      tenantId: tenantJabarId,
+      stageId: stageSemifinalId,
+      stageName: 'Semifinal',
+      branchId: branchTilawahPutraId,
+      branchName: 'Tilawah Dewasa Putra',
+      judgeId: judge1UserId,
+      judgeName: 'KH. Ahmad Syahid',
+      judgeField: 'Bidang Tajwid'
+    });
+
+    // Save Mushaf annotations as Judge 1
+    currentAuthUser = { id: judge1UserId, email: 'hakim1@jabar.mtq.id' };
+    const semiAssessmentId = generateUuid();
+    const sampleAnnotations = [
+      {
+        id: 'ann-01',
+        tool: 'pen' as const,
+        color: '#ef4444',
+        size: 3,
+        page: 282,
+        points: [
+          { x: 0.25, y: 0.45 },
+          { x: 0.35, y: 0.55 }
+        ]
+      }
+    ];
+    const syncAnnotationRes = await supabaseDataService.syncAssessmentToRemote(
+      {
+        id: semiAssessmentId,
+        tenantId: tenantJabarId,
+        stageParticipationId: semifinalSpUuid,
+        stageId: stageSemifinalId,
+        stageName: 'Semifinal',
+        participantId: participantUuid,
+        judgeId: judge1UserId,
+        judgeName: 'KH. Ahmad Syahid',
+        judgeField: 'Bidang Tajwid',
+        questionId: questionPenyisihanId,
+        assignedMaqraId: semiAssignedMaqraId,
+        rubricVersion: 'RUBRIC-SENI-BACA-2025',
+        rubricVersionId: rubricSeniBacaId,
+        status: 'in_progress',
+        isLocked: false,
+        errorCounts: { MKH: 1 },
+        deductions: { MKH: 1.0 },
+        fieldScores: { TJW: 29, FSH: 28, SUR: 15, LGU: 25 },
+        totalDeductions: 3.0,
+        finalScore: 97.0,
+        annotations: sampleAnnotations,
+        note: 'Catatan tajwid halaman 282',
+        lastUpdated: '11:30 WIB'
+      },
+      semiAssignedMaqraId
+    );
+
+    const dbAnnotationQuery = await pg.query<{ annotations: any[] }>(
+      `SELECT annotations FROM judge_assessments WHERE id = '${semiAssessmentId}';`
+    );
+
+    // Test Admin CRUD operations (Level, ErrorCategory, User Provisioning RPC)
+    currentAuthUser = { id: adminUserId, email: 'admin@jabar.mtq.id' };
+    const newLevelId = generateUuid();
+    const levelCrudRes = await supabaseDataService.upsertLevel(tenantJabarId, {
+      id: newLevelId,
+      tenantId: tenantJabarId,
+      code: 'TST-LVL',
+      name: 'Jenjang Uji',
+      description: 'Deskripsi uji',
+      status: 'Aktif'
+    });
+    const deleteLevelRes = await supabaseDataService.deleteLevel(tenantJabarId, newLevelId);
+
+    const errorCatCrudRes = await supabaseDataService.upsertErrorCategory({
+      id: generateUuid(),
+      tenantId: tenantJabarId,
+      code: 'TST-ERR',
+      name: 'Kategori Kesalahan Uji',
+      scope: 'Tajwid',
+      defaultDeduction: 1.5,
+      methodType: 'Pengurangan tetap',
+      status: 'Aktif',
+      order: 99
+    });
+
+    const userProvisionRes = await supabaseDataService.upsertUserAndMembership({
+      tenantId: tenantJabarId,
+      user: {
+        id: unassignedJudgeId,
+        tenantId: tenantJabarId,
+        username: 'hakim_cadangan_updated',
+        name: 'Ust. Hakim Cadangan (Diperbarui)',
+        email: 'hakim3@jabar.mtq.id',
+        role: 'judge',
+        judgeCategory: 'Hakim Tajwid',
+        judgeField: 'Bidang Tajwid',
+        status: 'Aktif'
+      }
+    });
+
+    assert(
+      '50. P1 Persistensi Anotasi Mushaf & Operasi CRUD Lengkap: Menyimpan anotasi Mushaf (JSONB), master jenjang, kategori kesalahan, dan manajemen pengguna via RPC secara persisten di PostgreSQL',
+      syncAnnotationRes.success === true &&
+        Array.isArray(dbAnnotationQuery.rows[0]?.annotations) &&
+        dbAnnotationQuery.rows[0]?.annotations.length === 1 &&
+        dbAnnotationQuery.rows[0]?.annotations[0]?.id === 'ann-01' &&
+        levelCrudRes.success === true &&
+        deleteLevelRes.success === true &&
+        errorCatCrudRes.success === true &&
+        userProvisionRes.success === true,
+      `syncAnn: ${syncAnnotationRes.success}, annLen: ${dbAnnotationQuery.rows[0]?.annotations?.length}, levelCrud: ${levelCrudRes.success}, deleteLevel: ${deleteLevelRes.success}, errCat: ${errorCatCrudRes.success}, userRpc: ${userProvisionRes.success} (${userProvisionRes.message})`
     );
   } finally {
     supabaseDataService.setTestDatabaseClient(null);

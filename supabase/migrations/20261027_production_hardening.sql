@@ -234,10 +234,79 @@ CREATE TRIGGER trg_audit_logs_append_only
     BEFORE UPDATE OR DELETE ON audit_logs
     FOR EACH ROW EXECUTE FUNCTION public.enforce_append_only_records();
 
+CREATE OR REPLACE FUNCTION public.enforce_trusted_stage_snapshot_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF COALESCE(current_setting('mtq.rpc_stage_finalize_active', true), 'false') <> 'true' THEN
+        RAISE EXCEPTION 'Pelanggaran Keamanan: Pembuatan stage_result_snapshots secara langsung melalui Data API ditolak. Snapshot hasil resmi hanya dapat dibuat oleh transaksi advance_stage_qualifiers(...).';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_stage_snapshots_trusted_insert ON stage_result_snapshots;
+CREATE TRIGGER trg_stage_snapshots_trusted_insert
+    BEFORE INSERT ON stage_result_snapshots
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_trusted_stage_snapshot_insert();
+
 DROP TRIGGER IF EXISTS trg_stage_snapshots_append_only ON stage_result_snapshots;
 CREATE TRIGGER trg_stage_snapshots_append_only
     BEFORE UPDATE OR DELETE ON stage_result_snapshots
     FOR EACH ROW EXECUTE FUNCTION public.enforce_append_only_records();
+
+CREATE OR REPLACE FUNCTION public.enforce_stage_finalization_integrity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_rpc_stage_finalize BOOLEAN := COALESCE(current_setting('mtq.rpc_stage_finalize_active', true), 'false') = 'true';
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF (NEW.is_finalized = true OR NEW.status = 'Selesai' OR NEW.finalized_at IS NOT NULL OR NEW.finalized_by IS NOT NULL)
+           AND NOT v_rpc_stage_finalize THEN
+            RAISE EXCEPTION 'Pelanggaran Keamanan: Babak baru tidak dapat langsung dibuat dalam status selesai atau terfinalisasi tanpa prosedur pengesahan resmi.';
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.is_finalized = true THEN
+            RAISE EXCEPTION 'Pelanggaran Imutabilitas: Babak musabaqah yang sudah disahkan bersifat permanen dan tidak dapat dihapus.';
+        END IF;
+        RETURN OLD;
+    END IF;
+
+    IF TG_OP = 'UPDATE' THEN
+        IF OLD.is_finalized = true THEN
+            RAISE EXCEPTION 'Pelanggaran Imutabilitas: Babak musabaqah yang sudah disahkan secara resmi terkunci dan tidak dapat dimodifikasi.';
+        END IF;
+
+        IF (
+            NEW.is_finalized = true
+            OR NEW.status = 'Selesai'
+            OR NEW.finalized_at IS DISTINCT FROM OLD.finalized_at
+            OR NEW.finalized_by IS DISTINCT FROM OLD.finalized_by
+        ) AND NOT v_rpc_stage_finalize THEN
+            RAISE EXCEPTION 'Pelanggaran Keamanan: Pengesahan babak secara langsung melalui Data API ditolak. Gunakan prosedur resmi advance_stage_qualifiers(...).';
+        END IF;
+
+        RETURN NEW;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_stage_finalization_integrity ON stages;
+CREATE TRIGGER trg_enforce_stage_finalization_integrity
+    BEFORE INSERT OR UPDATE OR DELETE ON stages
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_stage_finalization_integrity();
 
 CREATE OR REPLACE FUNCTION public.enforce_rubric_field_immutability()
 RETURNS TRIGGER
@@ -273,6 +342,52 @@ CREATE TRIGGER trg_enforce_rubric_field_immutability
     FOR EACH ROW EXECUTE FUNCTION public.enforce_rubric_field_immutability();
 
 -- 5. SECURITY HELPER FUNCTIONS
+CREATE OR REPLACE FUNCTION is_superadmin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM profiles p
+        WHERE p.id = auth.uid() AND p.role = 'superadmin'
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION get_my_profile_role()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT p.role::text FROM profiles p WHERE p.id = auth.uid();
+$$;
+
+CREATE OR REPLACE FUNCTION public.enforce_profile_role_protection()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF NEW.role IS DISTINCT FROM OLD.role THEN
+        IF COALESCE(current_setting('mtq.rpc_role_admin_active', true), 'false') <> 'true'
+           AND NOT is_superadmin()
+           AND (auth.uid() IS NOT NULL OR COALESCE(current_setting('role', true), '') IN ('authenticated', 'anon')) THEN
+            RAISE EXCEPTION 'Pelanggaran Keamanan: Eskalasi atau perubahan peran (role) secara langsung melalui Data API ditolak.';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_profile_role_protection ON profiles;
+CREATE TRIGGER trg_enforce_profile_role_protection
+    BEFORE UPDATE ON profiles
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_profile_role_protection();
+
 CREATE OR REPLACE FUNCTION get_user_tenants()
 RETURNS TABLE (tenant_id UUID) 
 LANGUAGE sql 
@@ -281,7 +396,10 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
     SELECT tm.tenant_id FROM tenant_memberships tm
-    WHERE tm.profile_id = auth.uid() AND tm.status = 'Aktif';
+    WHERE tm.profile_id = auth.uid() AND tm.status = 'Aktif'
+    UNION
+    SELECT t.id FROM tenants t
+    WHERE is_superadmin() AND t.id <> '00000000-0000-0000-0000-000000000000'::uuid;
 $$;
 
 CREATE OR REPLACE FUNCTION is_tenant_admin(p_tenant_id UUID)
@@ -297,10 +415,7 @@ AS $$
           AND tm.profile_id = auth.uid()
           AND tm.role IN ('admin', 'superadmin')
           AND tm.status = 'Aktif'
-    ) OR EXISTS (
-        SELECT 1 FROM profiles p
-        WHERE p.id = auth.uid() AND p.role = 'superadmin'
-    );
+    ) OR is_superadmin();
 $$;
 
 CREATE OR REPLACE FUNCTION is_assigned_judge(
@@ -314,18 +429,22 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-    SELECT EXISTS (
-        SELECT 1
-        FROM stage_participations sp
-        JOIN stages s ON s.id = sp.stage_id
-        JOIN participants p ON p.id = sp.participant_id
-        JOIN judge_assignments ja ON ja.stage_id = sp.stage_id
-             AND ja.tenant_id = sp.tenant_id
-             AND (ja.branch_id IS NULL OR ja.branch_id = p.branch_id OR ja.branch_id = s.branch_id)
-        WHERE sp.id = p_stage_participation_id
-          AND sp.tenant_id = p_tenant_id
-          AND ja.judge_profile_id = p_judge_id
-          AND ja.status = 'Aktif'
+    SELECT (
+        auth.uid() IS NOT NULL
+        AND (p_judge_id = auth.uid() OR is_tenant_admin(p_tenant_id))
+        AND EXISTS (
+            SELECT 1
+            FROM stage_participations sp
+            JOIN stages s ON s.id = sp.stage_id
+            JOIN participants p ON p.id = sp.participant_id
+            JOIN judge_assignments ja ON ja.stage_id = sp.stage_id
+                 AND ja.tenant_id = sp.tenant_id
+                 AND (ja.branch_id IS NULL OR ja.branch_id = p.branch_id OR ja.branch_id = s.branch_id)
+            WHERE sp.id = p_stage_participation_id
+              AND sp.tenant_id = p_tenant_id
+              AND ja.judge_profile_id = p_judge_id
+              AND ja.status = 'Aktif'
+        )
     );
 $$;
 
@@ -334,6 +453,10 @@ DROP POLICY IF EXISTS "Users can view assigned tenants" ON tenants;
 DROP POLICY IF EXISTS tenants_select_policy ON tenants;
 CREATE POLICY tenants_select_policy ON tenants FOR SELECT
 USING (id IN (SELECT get_user_tenants()) OR id = '00000000-0000-0000-0000-000000000000'::uuid);
+
+DROP POLICY IF EXISTS tenants_insert_policy ON tenants;
+CREATE POLICY tenants_insert_policy ON tenants FOR INSERT
+WITH CHECK (is_superadmin());
 
 DROP POLICY IF EXISTS "Superadmins and tenant admins can update tenant" ON tenants;
 DROP POLICY IF EXISTS tenants_update_policy ON tenants;
@@ -345,8 +468,9 @@ DROP POLICY IF EXISTS "Users can view profiles in same tenant" ON profiles;
 DROP POLICY IF EXISTS profiles_select_policy ON profiles;
 CREATE POLICY profiles_select_policy ON profiles FOR SELECT
 USING (
-    id = auth.uid() OR 
-    id IN (
+    id = auth.uid()
+    OR is_superadmin()
+    OR id IN (
         SELECT tm.profile_id FROM tenant_memberships tm 
         WHERE tm.tenant_id IN (SELECT get_user_tenants())
     )
@@ -355,16 +479,16 @@ USING (
 DROP POLICY IF EXISTS "Users can update own profile without escalating role" ON profiles;
 DROP POLICY IF EXISTS profiles_update_policy ON profiles;
 CREATE POLICY profiles_update_policy ON profiles FOR UPDATE
-USING (id = auth.uid())
+USING (id = auth.uid() OR is_superadmin())
 WITH CHECK (
-    id = auth.uid()
-    AND role = (SELECT p.role FROM profiles p WHERE p.id = auth.uid())
+    (id = auth.uid() AND role = get_my_profile_role())
+    OR is_superadmin()
 );
 
 DROP POLICY IF EXISTS "Users can view memberships of their tenants" ON tenant_memberships;
 DROP POLICY IF EXISTS tenant_memberships_select_policy ON tenant_memberships;
 CREATE POLICY tenant_memberships_select_policy ON tenant_memberships FOR SELECT
-USING (tenant_id IN (SELECT get_user_tenants()));
+USING (profile_id = auth.uid() OR tenant_id IN (SELECT get_user_tenants()));
 
 DROP POLICY IF EXISTS "Tenant admins can manage tenant memberships" ON tenant_memberships;
 DROP POLICY IF EXISTS tenant_memberships_admin_policy ON tenant_memberships;
@@ -378,7 +502,7 @@ DECLARE
     strict_tenant_tables TEXT[] := ARRAY[
         'branches', 'levels', 'kafilahs', 'participants', 'questions',
         'assigned_maqras', 'error_categories', 'competition_rule_configs',
-        'stages', 'stage_participations', 'judge_assignments'
+        'stage_participations', 'judge_assignments'
     ];
 BEGIN
     FOREACH t IN ARRAY strict_tenant_tables
@@ -396,6 +520,43 @@ BEGIN
     END LOOP;
 END;
 $$;
+
+DROP POLICY IF EXISTS "Tenant members can view stages" ON stages;
+DROP POLICY IF EXISTS "Tenant admins can manage stages" ON stages;
+DROP POLICY IF EXISTS stages_admin_policy ON stages;
+DROP POLICY IF EXISTS stages_select_policy ON stages;
+DROP POLICY IF EXISTS stages_insert_policy ON stages;
+DROP POLICY IF EXISTS stages_update_policy ON stages;
+DROP POLICY IF EXISTS stages_delete_policy ON stages;
+
+CREATE POLICY stages_select_policy ON stages FOR SELECT
+USING (tenant_id IN (SELECT get_user_tenants()));
+
+CREATE POLICY stages_insert_policy ON stages FOR INSERT
+WITH CHECK (
+    is_tenant_admin(tenant_id)
+    AND is_finalized = false
+    AND status <> 'Selesai'
+);
+
+CREATE POLICY stages_update_policy ON stages FOR UPDATE
+USING (
+    is_tenant_admin(tenant_id)
+    AND is_finalized = false
+)
+WITH CHECK (
+    is_tenant_admin(tenant_id)
+    AND (
+        (is_finalized = false AND status <> 'Selesai')
+        OR COALESCE(current_setting('mtq.rpc_stage_finalize_active', true), 'false') = 'true'
+    )
+);
+
+CREATE POLICY stages_delete_policy ON stages FOR DELETE
+USING (
+    is_tenant_admin(tenant_id)
+    AND is_finalized = false
+);
 
 DROP POLICY IF EXISTS "Tenant members can view rubric versions" ON rubric_versions;
 DROP POLICY IF EXISTS "Tenant admins can manage rubric versions" ON rubric_versions;
@@ -553,7 +714,7 @@ WITH CHECK (
     AND is_assigned_judge(tenant_id, stage_participation_id, auth.uid())
 );
 
--- Stage Result Snapshots Policies (Append-Only Immutable)
+-- Stage Result Snapshots Policies (Append-Only Immutable & Trusted RPC Insert Only)
 DROP POLICY IF EXISTS "Tenant members can view snapshots" ON stage_result_snapshots;
 DROP POLICY IF EXISTS "Tenant members can view stage_result_snapshots" ON stage_result_snapshots;
 DROP POLICY IF EXISTS "Admins can insert stage result snapshots" ON stage_result_snapshots;
@@ -565,7 +726,10 @@ CREATE POLICY stage_result_snapshots_select_policy ON stage_result_snapshots FOR
 USING (tenant_id IN (SELECT get_user_tenants()));
 
 CREATE POLICY stage_result_snapshots_insert_policy ON stage_result_snapshots FOR INSERT
-WITH CHECK (is_tenant_admin(tenant_id));
+WITH CHECK (
+    COALESCE(current_setting('mtq.rpc_stage_finalize_active', true), 'false') = 'true'
+    AND is_tenant_admin(tenant_id)
+);
 
 -- Audit Logs Policies (Append-Only Immutable)
 DROP POLICY IF EXISTS "Tenant members can view audit logs" ON audit_logs;
@@ -813,6 +977,8 @@ DECLARE
     v_unassigned_maqra_count INT;
     v_incomplete_count INT;
     v_invalid_participant_count INT;
+    v_unjustified_override_count INT;
+    v_authoritative_snapshot JSONB;
     v_now TIMESTAMPTZ := now();
 BEGIN
     v_actor_id := auth.uid();
@@ -820,7 +986,7 @@ BEGIN
         RAISE EXCEPTION 'Otorisasi ditolak: Permintaan tidak memiliki sesi autentikasi.';
     END IF;
 
-    SELECT * INTO v_stage FROM stages WHERE id = p_stage_id;
+    SELECT * INTO v_stage FROM stages WHERE id = p_stage_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Babak musabaqah tidak ditemukan.';
     END IF;
@@ -933,7 +1099,7 @@ BEGIN
     END IF;
 
     IF p_next_stage_id IS NOT NULL THEN
-        SELECT * INTO v_next_stage FROM stages WHERE id = p_next_stage_id;
+        SELECT * INTO v_next_stage FROM stages WHERE id = p_next_stage_id FOR UPDATE;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'Babak lanjutan tidak ditemukan.';
         END IF;
@@ -945,28 +1111,81 @@ BEGIN
         END IF;
     END IF;
 
+    PERFORM set_config('mtq.rpc_stage_finalize_active', 'true', true);
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
+
+    WITH participant_scores AS (
+        SELECT
+            sp.id AS stage_participation_id,
+            sp.participant_id,
+            sp.lottery_number,
+            ROUND(AVG(jass.final_score)::numeric, 2) AS computed_score,
+            (
+                SELECT (snap.elem ->> 'rank')::int
+                FROM jsonb_array_elements(
+                    CASE
+                        WHEN p_rankings_snapshot IS NOT NULL AND jsonb_typeof(p_rankings_snapshot) = 'array'
+                        THEN p_rankings_snapshot
+                        ELSE '[]'::jsonb
+                    END
+                ) AS snap(elem)
+                WHERE (snap.elem ->> 'participant_id') = sp.participant_id::text
+                  AND (snap.elem ->> 'rank') ~ '^[0-9]+$'
+                LIMIT 1
+            ) AS client_tie_break_rank
+        FROM stage_participations sp
+        JOIN judge_assessments jass
+          ON jass.stage_participation_id = sp.id
+         AND jass.tenant_id = sp.tenant_id
+         AND jass.status = 'finalized'
+         AND jass.is_locked = true
+        WHERE sp.stage_id = p_stage_id
+          AND sp.tenant_id = v_stage.tenant_id
+        GROUP BY sp.id, sp.participant_id, sp.lottery_number
+    ),
+    ranked_scores AS (
+        SELECT
+            ps.stage_participation_id,
+            ps.participant_id,
+            ps.computed_score,
+            ROW_NUMBER() OVER (
+                ORDER BY
+                    ps.computed_score DESC,
+                    COALESCE(ps.client_tie_break_rank, 999999) ASC,
+                    ps.lottery_number ASC NULLS LAST,
+                    ps.participant_id ASC
+            )::int AS authoritative_rank
+        FROM participant_scores ps
+    )
+    UPDATE stage_participations sp
+    SET final_score = rs.computed_score,
+        rank = rs.authoritative_rank
+    FROM ranked_scores rs
+    WHERE sp.id = rs.stage_participation_id;
+
+    SELECT COUNT(*) INTO v_unjustified_override_count
+    FROM stage_participations sp
+    WHERE sp.stage_id = p_stage_id
+      AND sp.tenant_id = v_stage.tenant_id
+      AND sp.participant_id = ANY(p_qualified_participant_ids)
+      AND sp.rank > v_stage.qualification_quota
+      AND LENGTH(TRIM(COALESCE(p_override_reasons ->> sp.participant_id::text, ''))) < 5;
+
+    IF v_unjustified_override_count > 0 THEN
+        RAISE EXCEPTION 'Pengesahan babak ditolak: Peserta yang diloloskan di luar kuota peringkat wajib disertai alasan override atau tie-break minimal 5 karakter.';
+    END IF;
+
     UPDATE stage_participations sp
     SET is_qualified = (sp.participant_id = ANY(p_qualified_participant_ids)),
         status = 'Lengkap',
         qualification_reason = COALESCE(
-            p_override_reasons ->> sp.participant_id::text,
+            NULLIF(TRIM(p_override_reasons ->> sp.participant_id::text), ''),
             CASE WHEN sp.participant_id = ANY(p_qualified_participant_ids) THEN 'Lolos Kuota Peringkat' ELSE 'Tidak Masuk Kuota' END
         ),
         finalized_at = v_now,
         updated_at = v_now
     WHERE sp.stage_id = p_stage_id
       AND sp.tenant_id = v_stage.tenant_id;
-
-    IF p_rankings_snapshot IS NOT NULL AND jsonb_typeof(p_rankings_snapshot) = 'array' THEN
-        UPDATE stage_participations sp
-        SET final_score = COALESCE((snap.elem ->> 'final_score')::numeric(6,2), sp.final_score),
-            rank = COALESCE((snap.elem ->> 'rank')::int, sp.rank)
-        FROM jsonb_array_elements(p_rankings_snapshot) AS snap(elem)
-        WHERE sp.stage_id = p_stage_id
-          AND sp.tenant_id = v_stage.tenant_id
-          AND (snap.elem ->> 'participant_id') IS NOT NULL
-          AND sp.participant_id::text = (snap.elem ->> 'participant_id');
-    END IF;
 
     UPDATE participants p
     SET status = CASE
@@ -1016,6 +1235,26 @@ BEGIN
         END LOOP;
     END IF;
 
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'participant_id', sp.participant_id,
+                'participant_name', p.name,
+                'lottery_number', sp.lottery_number,
+                'final_score', sp.final_score,
+                'rank', sp.rank,
+                'is_qualified', sp.is_qualified,
+                'qualification_reason', sp.qualification_reason
+            )
+            ORDER BY sp.rank ASC
+        ),
+        '[]'::jsonb
+    ) INTO v_authoritative_snapshot
+    FROM stage_participations sp
+    JOIN participants p ON p.id = sp.participant_id
+    WHERE sp.stage_id = p_stage_id
+      AND sp.tenant_id = v_stage.tenant_id;
+
     SELECT * INTO v_rule
     FROM competition_rule_configs crc
     WHERE crc.tenant_id = v_stage.tenant_id
@@ -1041,11 +1280,9 @@ BEGIN
             v_rule.rubric_version_id,
             COALESCE(array_to_string(v_rule.tie_break_order, ' > '), 'total > Tajwid > Lagu > Fashahah'),
             v_actor_id,
-            COALESCE(p_rankings_snapshot, '[]'::jsonb)
+            v_authoritative_snapshot
         );
     END IF;
-
-    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
 
     INSERT INTO audit_logs (tenant_id, actor_id, actor_name, action, target, summary, reason, outcome)
     VALUES (
@@ -1071,7 +1308,8 @@ BEGIN
                 'Babak berhasil difinalisasi dan peserta lolos telah didaftarkan ke babak berikutnya.'
             ELSE
                 'Hasil kejuaraan babak final berhasil disahkan dan dikunci secara permanen di database.'
-        END
+        END,
+        'rankings_snapshot', v_authoritative_snapshot
     );
 END;
 $$;
@@ -1138,7 +1376,159 @@ BEGIN
 END;
 $$;
 
--- 8. EXPLICIT RPC EXECUTION PERMISSIONS
+CREATE OR REPLACE FUNCTION upsert_tenant_member_profile(
+    p_tenant_id UUID,
+    p_profile_id UUID,
+    p_username TEXT,
+    p_name TEXT,
+    p_email TEXT,
+    p_role TEXT,
+    p_judge_category TEXT DEFAULT NULL,
+    p_judge_field TEXT DEFAULT NULL,
+    p_status TEXT DEFAULT 'Aktif'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_actor_id UUID;
+    v_actor RECORD;
+    v_target_id UUID;
+    v_clean_role TEXT;
+    v_clean_status TEXT;
+BEGIN
+    v_actor_id := auth.uid();
+    IF v_actor_id IS NULL THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Sesi tidak terautentikasi.';
+    END IF;
+
+    IF NOT is_tenant_admin(p_tenant_id) THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Hanya Administrator Tenant atau Superadmin yang dapat mengelola keanggotaan pengguna.';
+    END IF;
+
+    v_clean_role := LOWER(TRIM(COALESCE(p_role, 'judge')));
+    IF v_clean_role NOT IN ('judge', 'admin', 'superadmin') THEN
+        RAISE EXCEPTION 'Peran pengguna tidak valid: %', v_clean_role;
+    END IF;
+
+    IF v_clean_role = 'superadmin' AND NOT is_superadmin() THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Hanya Superadmin yang dapat menetapkan peran superadmin.';
+    END IF;
+
+    v_clean_status := CASE WHEN p_status = 'Nonaktif' THEN 'Nonaktif' ELSE 'Aktif' END;
+
+    SELECT p.id INTO v_target_id
+    FROM profiles p
+    WHERE (p_profile_id IS NOT NULL AND p.id = p_profile_id)
+       OR (NULLIF(TRIM(p_email), '') IS NOT NULL AND LOWER(p.email) = LOWER(TRIM(p_email)))
+       OR (NULLIF(TRIM(p_username), '') IS NOT NULL AND LOWER(p.username) = LOWER(TRIM(p_username)))
+    LIMIT 1;
+
+    IF v_target_id IS NULL AND NULLIF(TRIM(p_email), '') IS NOT NULL THEN
+        SELECT u.id INTO v_target_id
+        FROM auth.users u
+        WHERE LOWER(u.email) = LOWER(TRIM(p_email))
+        LIMIT 1;
+    END IF;
+
+    IF v_target_id IS NULL AND p_profile_id IS NOT NULL THEN
+        SELECT u.id INTO v_target_id
+        FROM auth.users u
+        WHERE u.id = p_profile_id
+        LIMIT 1;
+    END IF;
+
+    IF v_target_id IS NULL THEN
+        RAISE EXCEPTION 'Pengguna belum terdaftar di Supabase Auth (auth.users). Daftarkan akun email pengguna terlebih dahulu melalui autentikasi sebelum memetakan keanggotaan tenant.';
+    END IF;
+
+    PERFORM set_config('mtq.rpc_role_admin_active', 'true', true);
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
+
+    INSERT INTO profiles (id, username, name, email, role, updated_at)
+    VALUES (
+        v_target_id,
+        COALESCE(NULLIF(TRIM(p_username), ''), 'user_' || SUBSTRING(v_target_id::text FROM 1 FOR 8)),
+        COALESCE(NULLIF(TRIM(p_name), ''), 'Pengguna MTQ'),
+        NULLIF(TRIM(p_email), ''),
+        CASE WHEN is_superadmin() AND v_clean_role = 'superadmin' THEN 'superadmin'
+             WHEN v_clean_role = 'admin' THEN 'admin'
+             ELSE 'judge'
+        END,
+        now()
+    )
+    ON CONFLICT (id) DO UPDATE
+    SET username = COALESCE(NULLIF(TRIM(EXCLUDED.username), ''), profiles.username),
+        name = COALESCE(NULLIF(TRIM(EXCLUDED.name), ''), profiles.name),
+        email = COALESCE(NULLIF(TRIM(EXCLUDED.email), ''), profiles.email),
+        role = CASE
+            WHEN profiles.role = 'superadmin' AND NOT is_superadmin() THEN 'superadmin'
+            ELSE EXCLUDED.role
+        END,
+        updated_at = now();
+
+    INSERT INTO tenant_memberships (
+        tenant_id,
+        profile_id,
+        role,
+        judge_category,
+        judge_field,
+        status
+    )
+    VALUES (
+        p_tenant_id,
+        v_target_id,
+        v_clean_role,
+        NULLIF(TRIM(p_judge_category), ''),
+        NULLIF(TRIM(p_judge_field), ''),
+        v_clean_status
+    )
+    ON CONFLICT (tenant_id, profile_id) DO UPDATE
+    SET role = EXCLUDED.role,
+        judge_category = EXCLUDED.judge_category,
+        judge_field = EXCLUDED.judge_field,
+        status = EXCLUDED.status;
+
+    SELECT * INTO v_actor FROM profiles WHERE id = v_actor_id;
+
+    INSERT INTO audit_logs (tenant_id, actor_id, actor_name, action, target, summary, outcome)
+    VALUES (
+        p_tenant_id,
+        v_actor_id,
+        COALESCE(v_actor.name, 'Admin') || ' (' || COALESCE(v_actor.role, 'admin') || ')',
+        'USER_MEMBERSHIP_UPSERTED',
+        'Profile ID: ' || v_target_id::text,
+        'Pemetaan profil & keanggotaan ' || COALESCE(p_name, '') || ' dengan peran ' || v_clean_role || ' (' || v_clean_status || ')',
+        'Success'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'profile_id', v_target_id,
+        'role', v_clean_role,
+        'status', v_clean_status
+    );
+END;
+$$;
+
+-- 8. EXPLICIT RPC & SECURITY HELPER EXECUTION PERMISSIONS
+REVOKE EXECUTE ON FUNCTION is_superadmin() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION is_superadmin() TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION get_my_profile_role() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION get_my_profile_role() TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION get_user_tenants() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION get_user_tenants() TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION is_tenant_admin(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION is_tenant_admin(UUID) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION is_assigned_judge(UUID, UUID, UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION is_assigned_judge(UUID, UUID, UUID) TO authenticated;
+
 REVOKE EXECUTE ON FUNCTION finalize_judge_assessment(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION finalize_judge_assessment(UUID) TO authenticated;
 
@@ -1150,4 +1540,8 @@ GRANT EXECUTE ON FUNCTION advance_stage_qualifiers(UUID, UUID, UUID[], JSONB, JS
 
 REVOKE EXECUTE ON FUNCTION append_admin_audit_log(UUID, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION append_admin_audit_log(UUID, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION upsert_tenant_member_profile(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION upsert_tenant_member_profile(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+
 
