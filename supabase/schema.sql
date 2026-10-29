@@ -1669,7 +1669,13 @@ BEGIN
         RAISE EXCEPTION 'Tindakan audit (action) wajib diisi.';
     END IF;
 
-    IF v_clean_action IN ('ASSESSMENT_FINALIZED', 'ASSESSMENT_REOPENED', 'STAGE_FINALIZED', 'CHAMPIONSHIP_FINALIZED') THEN
+    IF v_clean_action IN (
+        'ASSESSMENT_FINALIZED',
+        'ASSESSMENT_REOPENED',
+        'STAGE_FINALIZED',
+        'CHAMPIONSHIP_FINALIZED',
+        'INITIAL_SUPERADMIN_BOOTSTRAPPED'
+    ) THEN
         RAISE EXCEPTION 'Pelanggaran Keamanan: Tindakan sistem % hanya dapat dicatat oleh prosedur transaksi utamanya.', v_clean_action;
     END IF;
 
@@ -1713,18 +1719,24 @@ CREATE OR REPLACE FUNCTION upsert_tenant_member_profile(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, auth, pg_temp
 AS $$
 DECLARE
     v_actor_id UUID;
     v_actor RECORD;
     v_target_id UUID;
+    v_auth_email TEXT;
     v_clean_role TEXT;
     v_clean_status TEXT;
+    v_clean_username TEXT;
 BEGIN
     v_actor_id := auth.uid();
     IF v_actor_id IS NULL THEN
         RAISE EXCEPTION 'Otorisasi ditolak: Sesi tidak terautentikasi.';
+    END IF;
+
+    IF p_tenant_id IS NULL OR NOT EXISTS (SELECT 1 FROM public.tenants WHERE id = p_tenant_id) THEN
+        RAISE EXCEPTION 'Tenant tujuan tidak ditemukan atau tidak valid.';
     END IF;
 
     IF NOT is_tenant_admin(p_tenant_id) THEN
@@ -1742,41 +1754,62 @@ BEGIN
 
     v_clean_status := CASE WHEN p_status = 'Nonaktif' THEN 'Nonaktif' ELSE 'Aktif' END;
 
-    -- Cari profil yang sudah ada berdasarkan ID, email, atau username, atau tautkan dari auth.users
-    SELECT p.id INTO v_target_id
-    FROM profiles p
-    WHERE (p_profile_id IS NOT NULL AND p.id = p_profile_id)
-       OR (NULLIF(TRIM(p_email), '') IS NOT NULL AND LOWER(p.email) = LOWER(TRIM(p_email)))
-       OR (NULLIF(TRIM(p_username), '') IS NOT NULL AND LOWER(p.username) = LOWER(TRIM(p_username)))
-    LIMIT 1;
-
-    IF v_target_id IS NULL AND NULLIF(TRIM(p_email), '') IS NOT NULL THEN
-        SELECT u.id INTO v_target_id
-        FROM auth.users u
-        WHERE LOWER(u.email) = LOWER(TRIM(p_email))
-        LIMIT 1;
-    END IF;
-
-    IF v_target_id IS NULL AND p_profile_id IS NOT NULL THEN
-        SELECT u.id INTO v_target_id
+    -- Prioritaskan pencarian di auth.users berdasarkan ID atau Email agar retry pasca-undangan selalu sinkron
+    IF p_profile_id IS NOT NULL THEN
+        SELECT u.id, u.email INTO v_target_id, v_auth_email
         FROM auth.users u
         WHERE u.id = p_profile_id
         LIMIT 1;
     END IF;
 
+    IF v_target_id IS NULL AND NULLIF(TRIM(p_email), '') IS NOT NULL THEN
+        SELECT u.id, u.email INTO v_target_id, v_auth_email
+        FROM auth.users u
+        WHERE LOWER(u.email) = LOWER(TRIM(p_email))
+        LIMIT 1;
+    END IF;
+
+    -- Fallback ke tabel profiles jika sudah terpetakan sebelumnya
     IF v_target_id IS NULL THEN
-        RAISE EXCEPTION 'Pengguna belum terdaftar di Supabase Auth (auth.users). Daftarkan akun email pengguna terlebih dahulu melalui autentikasi sebelum memetakan keanggotaan tenant.';
+        SELECT p.id, p.email INTO v_target_id, v_auth_email
+        FROM public.profiles p
+        WHERE (p_profile_id IS NOT NULL AND p.id = p_profile_id)
+           OR (NULLIF(TRIM(p_email), '') IS NOT NULL AND LOWER(p.email) = LOWER(TRIM(p_email)))
+           OR (NULLIF(TRIM(p_username), '') IS NOT NULL AND LOWER(p.username) = LOWER(TRIM(p_username)))
+        LIMIT 1;
+    END IF;
+
+    IF v_target_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_USER_NOT_FOUND: Pengguna (%) belum terdaftar di Supabase Auth (auth.users). Gunakan layanan undangan akun (Edge Function admin-provision-user) atau daftarkan email di Supabase Authentication terlebih dahulu.', COALESCE(NULLIF(TRIM(p_email), ''), NULLIF(TRIM(p_username), ''), 'tanpa-identitas');
+    END IF;
+
+    -- Cegah admin tenant biasa memodifikasi akun milik Superadmin
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_target_id AND role = 'superadmin') AND NOT is_superadmin() THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Administrator Tenant tidak memiliki wewenang untuk mengubah profil atau keanggotaan Superadmin.';
+    END IF;
+
+    v_clean_username := COALESCE(
+        NULLIF(TRIM(p_username), ''),
+        'user_' || SUBSTRING(v_target_id::text FROM 1 FOR 8)
+    );
+
+    IF EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE LOWER(p.username) = LOWER(v_clean_username)
+          AND p.id <> v_target_id
+    ) THEN
+        v_clean_username := v_clean_username || '_' || SUBSTRING(v_target_id::text FROM 1 FOR 4);
     END IF;
 
     PERFORM set_config('mtq.rpc_role_admin_active', 'true', true);
     PERFORM set_config('mtq.rpc_audit_active', 'true', true);
 
-    INSERT INTO profiles (id, username, name, email, role, updated_at)
+    INSERT INTO public.profiles (id, username, name, email, role, updated_at)
     VALUES (
         v_target_id,
-        COALESCE(NULLIF(TRIM(p_username), ''), 'user_' || SUBSTRING(v_target_id::text FROM 1 FOR 8)),
+        v_clean_username,
         COALESCE(NULLIF(TRIM(p_name), ''), 'Pengguna MTQ'),
-        NULLIF(TRIM(p_email), ''),
+        COALESCE(NULLIF(TRIM(p_email), ''), v_auth_email),
         CASE WHEN is_superadmin() AND v_clean_role = 'superadmin' THEN 'superadmin'
              WHEN v_clean_role = 'admin' THEN 'admin'
              ELSE 'judge'
@@ -1784,16 +1817,21 @@ BEGIN
         now()
     )
     ON CONFLICT (id) DO UPDATE
-    SET username = COALESCE(NULLIF(TRIM(EXCLUDED.username), ''), profiles.username),
-        name = COALESCE(NULLIF(TRIM(EXCLUDED.name), ''), profiles.name),
-        email = COALESCE(NULLIF(TRIM(EXCLUDED.email), ''), profiles.email),
+    SET username = COALESCE(NULLIF(TRIM(EXCLUDED.username), ''), public.profiles.username),
+        name = COALESCE(NULLIF(TRIM(EXCLUDED.name), ''), public.profiles.name),
+        email = COALESCE(NULLIF(TRIM(EXCLUDED.email), ''), public.profiles.email),
         role = CASE
-            WHEN profiles.role = 'superadmin' AND NOT is_superadmin() THEN 'superadmin'
+            WHEN public.profiles.role = 'superadmin' AND NOT is_superadmin() THEN 'superadmin'
+            WHEN is_superadmin() AND v_clean_role = 'superadmin' THEN 'superadmin'
+            WHEN public.profiles.role = 'admin' AND v_clean_role = 'judge' AND p_tenant_id <> (
+                SELECT tm.tenant_id FROM public.tenant_memberships tm
+                WHERE tm.profile_id = v_target_id AND tm.role = 'admin' AND tm.status = 'Aktif' LIMIT 1
+            ) THEN 'admin'
             ELSE EXCLUDED.role
         END,
         updated_at = now();
 
-    INSERT INTO tenant_memberships (
+    INSERT INTO public.tenant_memberships (
         tenant_id,
         profile_id,
         role,
@@ -1815,9 +1853,9 @@ BEGIN
         judge_field = EXCLUDED.judge_field,
         status = EXCLUDED.status;
 
-    SELECT * INTO v_actor FROM profiles WHERE id = v_actor_id;
+    SELECT * INTO v_actor FROM public.profiles WHERE id = v_actor_id;
 
-    INSERT INTO audit_logs (tenant_id, actor_id, actor_name, action, target, summary, outcome)
+    INSERT INTO public.audit_logs (tenant_id, actor_id, actor_name, action, target, summary, outcome)
     VALUES (
         p_tenant_id,
         v_actor_id,
@@ -1831,8 +1869,162 @@ BEGIN
     RETURN jsonb_build_object(
         'success', true,
         'profile_id', v_target_id,
+        'email', COALESCE(NULLIF(TRIM(p_email), ''), v_auth_email),
         'role', v_clean_role,
         'status', v_clean_status
+    );
+END;
+$$;
+
+-- RPC 6: Mekanisme Bootstrap Superadmin Pertama (One-Time Guarded RPC / SQL Function)
+CREATE OR REPLACE FUNCTION public.bootstrap_first_superadmin(
+    p_target_email TEXT DEFAULT NULL,
+    p_initial_tenant_id UUID DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, pg_temp
+AS $$
+DECLARE
+    v_caller_uid UUID;
+    v_caller_role TEXT;
+    v_auth_user RECORD;
+    v_target_tenant_id UUID;
+    v_username TEXT;
+    v_display_name TEXT;
+    v_tenant_rec RECORD;
+BEGIN
+    v_caller_uid := auth.uid();
+    v_caller_role := COALESCE(current_setting('role', true), '');
+
+    IF v_caller_uid IS NULL AND v_caller_role IN ('anon', 'authenticated') THEN
+        RAISE EXCEPTION 'Otorisasi Bootstrap Ditolak: Fungsi ini tidak dapat dipanggil oleh sesi anonim.';
+    END IF;
+
+    LOCK TABLE public.profiles IN SHARE ROW EXCLUSIVE MODE;
+
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE role = 'superadmin') THEN
+        RAISE EXCEPTION 'Bootstrap Ditolak: Akun Superadmin pertama sudah terdaftar di sistem. Mekanisme bootstrap satu kali telah terkunci permanen.';
+    END IF;
+
+    IF NULLIF(TRIM(p_target_email), '') IS NOT NULL THEN
+        SELECT u.id, u.email, u.raw_user_meta_data
+        INTO v_auth_user
+        FROM auth.users u
+        WHERE LOWER(u.email) = LOWER(TRIM(p_target_email))
+        LIMIT 1;
+    ELSIF v_caller_uid IS NOT NULL THEN
+        SELECT u.id, u.email, u.raw_user_meta_data
+        INTO v_auth_user
+        FROM auth.users u
+        WHERE u.id = v_caller_uid
+        LIMIT 1;
+    ELSE
+        RAISE EXCEPTION 'Parameter p_target_email wajib diisi saat menjalankan bootstrap_first_superadmin dari SQL Editor.';
+    END IF;
+
+    IF v_auth_user.id IS NULL THEN
+        RAISE EXCEPTION 'Bootstrap Gagal: Akun email (%) belum ditemukan di auth.users. Buat pengguna terlebih dahulu melalui Supabase Authentication -> Users.', COALESCE(p_target_email, 'UID saat ini');
+    END IF;
+
+    IF v_caller_uid IS NOT NULL AND v_caller_uid <> v_auth_user.id THEN
+        RAISE EXCEPTION 'Otorisasi Bootstrap Ditolak: Sesi autentikasi aktif hanya diizinkan melakukan bootstrap untuk akun miliknya sendiri.';
+    END IF;
+
+    v_display_name := COALESCE(
+        NULLIF(TRIM(v_auth_user.raw_user_meta_data->>'name'), ''),
+        NULLIF(TRIM(v_auth_user.raw_user_meta_data->>'full_name'), ''),
+        INITCAP(SPLIT_PART(v_auth_user.email, '@', 1)),
+        'Superadmin LPTQ'
+    );
+
+    v_username := COALESCE(
+        NULLIF(TRIM(v_auth_user.raw_user_meta_data->>'username'), ''),
+        LOWER(REGEXP_REPLACE(SPLIT_PART(v_auth_user.email, '@', 1), '[^a-zA-Z0-9_]', '_', 'g'))
+    );
+
+    IF EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE LOWER(p.username) = LOWER(v_username)
+          AND p.id <> v_auth_user.id
+    ) THEN
+        v_username := v_username || '_' || SUBSTRING(v_auth_user.id::text FROM 1 FOR 4);
+    END IF;
+
+    IF p_initial_tenant_id IS NOT NULL AND EXISTS (SELECT 1 FROM public.tenants WHERE id = p_initial_tenant_id) THEN
+        v_target_tenant_id := p_initial_tenant_id;
+    ELSE
+        SELECT t.id INTO v_target_tenant_id
+        FROM public.tenants t
+        WHERE t.id <> '00000000-0000-0000-0000-000000000000'::uuid
+          AND t.status = 'Aktif'
+        ORDER BY t.created_at ASC
+        LIMIT 1;
+
+        IF v_target_tenant_id IS NULL THEN
+            SELECT t.id INTO v_target_tenant_id
+            FROM public.tenants t
+            ORDER BY t.created_at ASC
+            LIMIT 1;
+        END IF;
+    END IF;
+
+    IF v_target_tenant_id IS NULL THEN
+        RAISE EXCEPTION 'Bootstrap Gagal: Belum ada data tenant di tabel public.tenants. Jalankan schema.sql / seed.sql terlebih dahulu.';
+    END IF;
+
+    PERFORM set_config('mtq.rpc_role_admin_active', 'true', true);
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
+
+    INSERT INTO public.profiles (id, username, name, email, role, updated_at)
+    VALUES (
+        v_auth_user.id,
+        v_username,
+        v_display_name,
+        v_auth_user.email,
+        'superadmin',
+        now()
+    )
+    ON CONFLICT (id) DO UPDATE
+    SET role = 'superadmin',
+        email = COALESCE(EXCLUDED.email, public.profiles.email),
+        name = COALESCE(NULLIF(TRIM(public.profiles.name), ''), EXCLUDED.name),
+        username = COALESCE(NULLIF(TRIM(public.profiles.username), ''), EXCLUDED.username),
+        updated_at = now();
+
+    FOR v_tenant_rec IN
+        SELECT t.id
+        FROM public.tenants t
+        WHERE t.id = v_target_tenant_id
+           OR (t.id <> '00000000-0000-0000-0000-000000000000'::uuid AND t.status = 'Aktif')
+    LOOP
+        INSERT INTO public.tenant_memberships (tenant_id, profile_id, role, status)
+        VALUES (v_tenant_rec.id, v_auth_user.id, 'superadmin', 'Aktif')
+        ON CONFLICT (tenant_id, profile_id) DO UPDATE
+        SET role = 'superadmin',
+            status = 'Aktif';
+    END LOOP;
+
+    INSERT INTO public.audit_logs (tenant_id, actor_id, actor_name, action, target, summary, outcome)
+    VALUES (
+        v_target_tenant_id,
+        v_auth_user.id,
+        v_display_name || ' (superadmin)',
+        'INITIAL_SUPERADMIN_BOOTSTRAPPED',
+        'Profile ID: ' || v_auth_user.id::text,
+        'Promosi satu kali (one-time bootstrap) akun Superadmin pertama sistem untuk ' || v_auth_user.email,
+        'Success'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'profile_id', v_auth_user.id,
+        'email', v_auth_user.email,
+        'username', v_username,
+        'role', 'superadmin',
+        'initial_tenant_id', v_target_tenant_id,
+        'message', 'Akun Superadmin pertama berhasil di-bootstrap dan diikat ke tenant operasional.'
     );
 END;
 $$;
@@ -1867,5 +2059,9 @@ GRANT EXECUTE ON FUNCTION append_admin_audit_log(UUID, TEXT, TEXT, TEXT, TEXT, T
 
 REVOKE EXECUTE ON FUNCTION upsert_tenant_member_profile(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION upsert_tenant_member_profile(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.bootstrap_first_superadmin(TEXT, UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bootstrap_first_superadmin(TEXT, UUID) TO authenticated;
+
 
 

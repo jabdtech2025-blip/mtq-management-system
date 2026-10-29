@@ -13,6 +13,13 @@ export interface Tenant {
 
 export type UserRole = 'admin' | 'judge' | 'superadmin';
 
+export type UserProvisioningStatus =
+  | 'Mengundang...'
+  | 'Menunggu Verifikasi'
+  | 'Aktif'
+  | 'Nonaktif'
+  | 'Gagal / Perlu Tindakan Admin';
+
 export interface User {
   id: string;
   tenantId: string;
@@ -21,6 +28,8 @@ export interface User {
   name: string;
   role: UserRole;
   status?: 'Aktif' | 'Nonaktif';
+  provisioningStatus?: UserProvisioningStatus;
+  provisioningMessage?: string;
   judgeCategory?: string;
   judgeField?: string;
   assignedBranch?: string;

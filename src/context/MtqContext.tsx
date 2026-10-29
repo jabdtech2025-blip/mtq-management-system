@@ -40,7 +40,12 @@ import {
 import { calculateAssessmentScore, getActiveRubricFields } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
 import { supabaseDataService, AuthenticatedSupabaseProfile } from '../services/supabaseDataService';
-import { SupabaseConnectionInfo, supabase } from '../lib/supabaseClient';
+import {
+  SupabaseConnectionInfo,
+  AccessGateReason,
+  evaluateWorkspaceAccessGate,
+  supabase
+} from '../lib/supabaseClient';
 import { generateUuid, toDeterministicUuid, isValidUuid } from '../utils/uuid';
 import {
   OFFICIAL_SENI_BACA_RUBRIC,
@@ -78,8 +83,9 @@ interface MtqContextType {
   users: User[];
   currentUser: User;
   setCurrentUserId: (id: string) => void;
-  addUser: (user: Omit<User, 'id'>) => void;
-  updateUser: (id: string, updated: Partial<User>) => void;
+  addUser: (user: Omit<User, 'id'>) => Promise<{ success: boolean; message: string }>;
+  updateUser: (id: string, updated: Partial<User>) => Promise<{ success: boolean; message: string }>;
+  retryUserProvisioning: (id: string) => Promise<{ success: boolean; message: string }>;
   toggleUserStatus: (id: string) => void;
 
   kafilahs: Kafilah[];
@@ -285,19 +291,19 @@ interface MtqContextType {
   dataSourceMode: 'demo_local' | 'supabase_live' | 'supabase_error';
   workspaceError: string | null;
   isOfflineDemoSimulation: boolean;
+  isLiveSupabaseMode: boolean;
   isLiveAccessAuthorized: boolean;
-  accessGateReason:
-    | 'unauthenticated'
-    | 'profile_missing'
-    | 'membership_empty'
-    | 'membership_inactive'
-    | 'query_error'
-    | null;
+  accessGateReason: AccessGateReason;
+  isPasswordRecoveryMode: boolean;
+  setIsPasswordRecoveryMode: (active: boolean) => void;
   enterOfflineDemoSimulation: () => void;
   exitOfflineDemoSimulation: () => Promise<void>;
   refreshSupabaseConnection: () => Promise<SupabaseConnectionInfo>;
   signInWithSupabase: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
   signOutSupabase: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
+  completePasswordReset: (newPassword: string) => Promise<{ success: boolean; message: string }>;
+  bootstrapFirstSuperadmin: (targetEmail: string) => Promise<{ success: boolean; message: string }>;
 }
 
 const MtqContext = createContext<MtqContextType | undefined>(undefined);
@@ -609,8 +615,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
   const [lastSyncTime, setLastSyncTime] = useState<string>('13:14:18 WIB');
   const [isDemoAccountModalOpen, setIsDemoAccountModalOpen] = useState<boolean>(false);
+  const [isPasswordRecoveryMode, setIsPasswordRecoveryMode] = useState<boolean>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.location?.hash) {
+        return window.location.hash.includes('type=recovery');
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  });
 
-  const isLiveSupabaseMode = supabaseDataService.isLive() && !isOfflineDemoSimulation;
+  // Fail-closed default: produksi maupun pengembangan wajib mode live kecuali simulasi demo lokal diaktifkan eksplisit
+  const isLiveSupabaseMode = !isOfflineDemoSimulation;
   const isLiveDbActive =
     isLiveSupabaseMode && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated;
 
@@ -763,35 +780,16 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [competitionRules, isLiveSupabaseMode]);
 
-  const accessGateReason:
-    | 'unauthenticated'
-    | 'profile_missing'
-    | 'membership_empty'
-    | 'membership_inactive'
-    | 'query_error'
-    | null = (() => {
-    if (!isLiveSupabaseMode) return null;
-    if (!connectionInfo.isAuthenticated || !authenticatedProfile) {
-      return 'unauthenticated';
-    }
-    if (authenticatedProfile.verificationError) {
-      return 'query_error';
-    }
-    if (!authenticatedProfile.hasProfileRow) {
-      return 'profile_missing';
-    }
-    if (
-      authenticatedProfile.memberships.length === 0 &&
-      authenticatedProfile.globalRole !== 'superadmin'
-    ) {
-      return authenticatedProfile.inactiveMembershipsCount > 0
-        ? 'membership_inactive'
-        : 'membership_empty';
-    }
-    return null;
-  })();
+  const accessGateDecision = evaluateWorkspaceAccessGate({
+    isOfflineDemoSimulation,
+    connectionInfo,
+    authenticatedProfile,
+    dataSourceMode,
+    workspaceError
+  });
 
-  const isLiveAccessAuthorized = !isLiveSupabaseMode || accessGateReason === null;
+  const accessGateReason: AccessGateReason = accessGateDecision.reason;
+  const isLiveAccessAuthorized: boolean = accessGateDecision.isAuthorized;
 
   const currentTenant = tenants.find((t) => t.id === currentTenantId) || tenants[0];
 
@@ -817,6 +815,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: authenticatedProfile.name,
           role: verifiedRole,
           status: 'Aktif',
+          provisioningStatus: 'Aktif',
           judgeCategory: matchedMembership?.judgeCategory,
           judgeField: matchedMembership?.judgeField
         };
@@ -828,7 +827,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         email: authenticatedProfile?.email || '',
         name: authenticatedProfile?.name || 'Sesi Belum Terautentikasi',
         role: 'judge',
-        status: 'Nonaktif'
+        status: 'Nonaktif',
+        provisioningStatus: 'Nonaktif'
       };
     }
     return users.find((u) => u.id === currentUserId) || users[0];
@@ -844,9 +844,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const enterOfflineDemoSimulation = () => {
-    try {
-      localStorage.setItem('mtq_offline_demo_simulation_v4', 'true');
-    } catch {}
     setIsOfflineDemoSimulation(true);
     setDataSourceMode('demo_local');
     setWorkspaceError(null);
@@ -881,7 +878,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.removeItem('mtq_offline_demo_simulation_v4');
     } catch {}
     setIsOfflineDemoSimulation(false);
-    setDataSourceMode('supabase_live');
+    setDataSourceMode(supabaseDataService.isLive() ? 'supabase_live' : 'supabase_error');
     await refreshSupabaseConnection();
   };
 
@@ -956,7 +953,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         primaryMembership?.tenantId ||
         (effectiveRole === 'superadmin' ? 'platform' : currentTenantId);
 
-      if (primaryMembership?.tenantId && (!isValidUuid(currentTenantId) || !profile.memberships.some((m) => m.tenantId === currentTenantId))) {
+      if (
+        primaryMembership?.tenantId &&
+        (!isValidUuid(currentTenantId) || !profile.memberships.some((m) => m.tenantId === currentTenantId))
+      ) {
         targetTenantId = primaryMembership.tenantId;
         setCurrentTenantId(primaryMembership.tenantId);
       } else if (primaryMembership?.tenantId && isValidUuid(currentTenantId)) {
@@ -973,6 +973,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: profile.name,
           role: effectiveRole,
           status: 'Aktif',
+          provisioningStatus: 'Aktif',
           judgeCategory: primaryMembership?.judgeCategory,
           judgeField: primaryMembership?.judgeField
         };
@@ -1040,9 +1041,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } else {
       setAuthenticatedProfile(null);
-      if (supabaseDataService.isLive() && !isOfflineDemoSimulation) {
+      if (!isOfflineDemoSimulation) {
         setDataSourceMode('supabase_error');
         setWorkspaceError(info.lastError || info.statusLabel);
+        setKafilahs([]);
+        setStages([]);
+        setQuestions([]);
+        setParticipants([]);
+        setStageParticipations([]);
+        setJudgeAssignments([]);
+        setAssessments([]);
+        setStageSnapshots([]);
       } else {
         setDataSourceMode('demo_local');
         setWorkspaceError(null);
@@ -1068,6 +1077,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const signOutSupabase = async (): Promise<void> => {
     await supabaseDataService.signOut();
     setAuthenticatedProfile(null);
+    setIsPasswordRecoveryMode(false);
     setKafilahs([]);
     setStages([]);
     setQuestions([]);
@@ -1080,13 +1090,53 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await refreshSupabaseConnection();
   };
 
+  const requestPasswordReset = async (
+    email: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const res = await supabaseDataService.requestPasswordReset(email);
+    return { success: res.success, message: res.message };
+  };
+
+  const completePasswordReset = async (
+    newPassword: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const res = await supabaseDataService.updatePasswordWithRecoverySession(newPassword);
+    if (res.success) {
+      setIsPasswordRecoveryMode(false);
+      if (typeof window !== 'undefined' && window.history?.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+      await refreshSupabaseConnection();
+    }
+    return { success: res.success, message: res.message };
+  };
+
+  const bootstrapFirstSuperadmin = async (
+    targetEmail: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const res = await supabaseDataService.bootstrapFirstSuperadmin({
+      targetEmail,
+      initialTenantId: isValidUuid(currentTenantId) ? currentTenantId : undefined
+    });
+    if (res.success) {
+      await refreshSupabaseConnection();
+    }
+    return { success: res.success, message: res.message };
+  };
+
   useEffect(() => {
-    if (supabaseDataService.isLive() && !isOfflineDemoSimulation) {
+    if (!isOfflineDemoSimulation) {
       void refreshSupabaseConnection();
     }
     if (supabase && !isOfflineDemoSimulation) {
-      const { data: sub } = supabase.auth.onAuthStateChange(() => {
-        void refreshSupabaseConnection();
+      const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          setIsPasswordRecoveryMode(true);
+        }
+        // Gunakan setTimeout(..., 0) agar tidak terjadi race condition / deadlock di dalam lock internal Supabase Auth
+        setTimeout(() => {
+          void refreshSupabaseConnection();
+        }, 0);
       });
       return () => {
         sub.subscription.unsubscribe();
@@ -1737,6 +1787,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           lastUpdated: nowTime
         };
 
+    const prevAssessmentsSnapshot = assessments;
+    const prevSpSnapshot = stageParticipations;
+
     setAssessments((prev) => {
       const others = prev.filter((a) => a.id !== initializedAsm.id);
       return [...others, initializedAsm];
@@ -1751,6 +1804,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      setSyncStatus('Menyimpan ke database...');
       const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
       void supabaseDataService
         .syncAssessmentToRemote(
@@ -1768,14 +1822,31 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           { stageParticipation: sp, participant: part }
         )
         .then((res) => {
-          if (res.success && res.data?.assignedMaqraId) {
-            setAssessments((prev) =>
-              prev.map((a) =>
-                a.id === initializedAsm.id ? { ...a, assignedMaqraId: res.data!.assignedMaqraId } : a
-              )
-            );
+          if (res.success) {
+            setSyncStatus('Lembar Penilaian Tersimpan di Database');
+            setLastSyncTime(getWibTime());
+            if (res.data?.assignedMaqraId) {
+              setAssessments((prev) =>
+                prev.map((a) =>
+                  a.id === initializedAsm.id ? { ...a, assignedMaqraId: res.data!.assignedMaqraId } : a
+                )
+              );
+            }
+          } else {
+            setSyncStatus(`Gagal Menyimpan Lembar Nilai: ${res.message}`);
+            setAssessments(prevAssessmentsSnapshot);
+            setStageParticipations(prevSpSnapshot);
           }
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'Kesalahan jaringan';
+          setSyncStatus(`Gagal Menyimpan Lembar Nilai: ${msg}`);
+          setAssessments(prevAssessmentsSnapshot);
+          setStageParticipations(prevSpSnapshot);
         });
+    } else {
+      setSyncStatus('Mode Simulasi Lokal (Tersimpan di Browser)');
+      setLastSyncTime(nowTime);
     }
 
     return {
@@ -1832,6 +1903,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    const prevAssessmentsSnapshot = assessments;
+    const prevSpSnapshot = stageParticipations;
+    const prevParticipantsSnapshot = participants;
+
     // Get or create stage participation
     let sp = stageParticipations.find(
       (item) =>
@@ -1873,7 +1948,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const nowTime = getWibTime();
-    setSyncStatus('Menyimpan...');
 
     const targetJudge = users.find((u) => u.id === judgeId) || currentUser;
     const currentCounts = existing ? { ...existing.errorCounts } : {};
@@ -1942,34 +2016,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [...others, updatedAssessment];
     });
 
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
-      const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
-      void supabaseDataService
-        .syncAssessmentToRemote(
-          {
-            ...updatedAssessment,
-            id: toDeterministicUuid(updatedAssessment.id),
-            tenantId: toDeterministicUuid(currentTenantId),
-            stageParticipationId: toDeterministicUuid(sp.id),
-            judgeId: toDeterministicUuid(judgeId),
-            rubricVersionId: toDeterministicUuid(activeRubric.id),
-            questionId: toDeterministicUuid(targetQuestionId),
-            assignedMaqraId: matchedMaqraItem?.id
-          },
-          matchedMaqraItem?.id,
-          { stageParticipation: sp, participant: part }
-        )
-        .then((res) => {
-          if (res.success && res.data?.assignedMaqraId) {
-            setAssessments((prev) =>
-              prev.map((a) =>
-                a.id === updatedAssessment.id ? { ...a, assignedMaqraId: res.data!.assignedMaqraId } : a
-              )
-            );
-          }
-        });
-    }
-
     // Update stage participation status to Berlangsung
     setStageParticipations((prev) =>
       prev.map((item) =>
@@ -2004,12 +2050,53 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
     }
 
-    setSyncStatus(
-      supabaseDataService.isLive()
-        ? supabaseDataService.getConnectionStatus().statusLabel
-        : 'Mode Lokal (Tersimpan di Browser)'
-    );
-    setLastSyncTime(nowTime);
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+      setSyncStatus('Menyimpan ke database...');
+      const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
+      void supabaseDataService
+        .syncAssessmentToRemote(
+          {
+            ...updatedAssessment,
+            id: toDeterministicUuid(updatedAssessment.id),
+            tenantId: toDeterministicUuid(currentTenantId),
+            stageParticipationId: toDeterministicUuid(sp.id),
+            judgeId: toDeterministicUuid(judgeId),
+            rubricVersionId: toDeterministicUuid(activeRubric.id),
+            questionId: toDeterministicUuid(targetQuestionId),
+            assignedMaqraId: matchedMaqraItem?.id
+          },
+          matchedMaqraItem?.id,
+          { stageParticipation: sp, participant: part }
+        )
+        .then((res) => {
+          if (res.success) {
+            setSyncStatus('Tersimpan di Database');
+            setLastSyncTime(getWibTime());
+            if (res.data?.assignedMaqraId) {
+              setAssessments((prev) =>
+                prev.map((a) =>
+                  a.id === updatedAssessment.id ? { ...a, assignedMaqraId: res.data!.assignedMaqraId } : a
+                )
+              );
+            }
+          } else {
+            setSyncStatus(`Gagal Menyimpan ke Database: ${res.message}`);
+            setAssessments(prevAssessmentsSnapshot);
+            setStageParticipations(prevSpSnapshot);
+            setParticipants(prevParticipantsSnapshot);
+          }
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'Kesalahan jaringan';
+          setSyncStatus(`Gagal Menyimpan ke Database: ${msg}`);
+          setAssessments(prevAssessmentsSnapshot);
+          setStageParticipations(prevSpSnapshot);
+          setParticipants(prevParticipantsSnapshot);
+        });
+    } else {
+      setSyncStatus('Mode Simulasi Lokal (Tersimpan di Browser)');
+      setLastSyncTime(nowTime);
+    }
   };
 
   /**
@@ -2051,6 +2138,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ) {
       return;
     }
+
+    const prevAssessmentsSnapshot = assessments;
+    const prevSpSnapshot = stageParticipations;
 
     let sp = stageParticipations.find(
       (item) =>
@@ -2132,7 +2222,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [...others, updatedSheet];
     });
 
-    if (isLiveDbActive && activeRubric) {
+    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated && activeRubric) {
       const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
       void supabaseDataService
         .syncAssessmentToRemote(
@@ -2162,14 +2252,18 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           } else {
             setSyncStatus(`Gagal Menyimpan Anotasi: ${res.message}`);
+            setAssessments(prevAssessmentsSnapshot);
+            setStageParticipations(prevSpSnapshot);
           }
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'Kesalahan jaringan';
+          setSyncStatus(`Gagal Menyimpan Anotasi: ${msg}`);
+          setAssessments(prevAssessmentsSnapshot);
+          setStageParticipations(prevSpSnapshot);
         });
     } else {
-      setSyncStatus(
-        supabaseDataService.isLive()
-          ? supabaseDataService.getConnectionStatus().statusLabel
-          : 'Mode Lokal (Tersimpan di Browser)'
-      );
+      setSyncStatus('Mode Simulasi Lokal (Tersimpan di Browser)');
       setLastSyncTime(nowTime);
     }
   };
@@ -3887,64 +3981,135 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // User & Judge Management
-  const addUser = (userData: Omit<User, 'id'>) => {
+  const addUser = async (
+    userData: Omit<User, 'id'>
+  ): Promise<{ success: boolean; message: string }> => {
     const newUser: User = {
       ...userData,
-      id: generateUuid()
+      id: generateUuid(),
+      provisioningStatus: isLiveDbActive ? 'Mengundang...' : 'Aktif'
     };
     setUsers((prev) => [...prev, newUser]);
+
     if (isLiveDbActive) {
       const targetTenantUuid = toDeterministicUuid(
         newUser.tenantId && newUser.tenantId !== 'platform' ? newUser.tenantId : currentTenantId
       );
-      setSyncStatus('Memetakan profil & keanggotaan di database...');
-      void supabaseDataService
-        .upsertUserAndMembership({
-          tenantId: targetTenantUuid,
-          user: newUser
-        })
-        .then((res) => {
-          if (!res.success) {
-            setSyncStatus(`Gagal Memetakan Pengguna: ${res.message}`);
-            setUsers((prev) => prev.filter((u) => u.id !== newUser.id));
-          } else {
-            setSyncStatus('Keanggotaan Pengguna Tersimpan di Database');
-            if (res.data?.profileId) {
-              setUsers((prev) =>
-                prev.map((u) => (u.id === newUser.id ? { ...u, id: res.data!.profileId } : u))
-              );
-            }
-          }
-        });
+      setSyncStatus('Memetakan profil & mengundang pengguna di Supabase...');
+      const res = await supabaseDataService.upsertUserAndMembership({
+        tenantId: targetTenantUuid,
+        user: newUser
+      });
+
+      if (!res.success) {
+        setSyncStatus(`Perlu Tindakan Admin: ${res.message}`);
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === newUser.id
+              ? {
+                  ...u,
+                  id: res.data?.profileId || u.id,
+                  provisioningStatus: 'Gagal / Perlu Tindakan Admin',
+                  provisioningMessage: res.message
+                }
+              : u
+          )
+        );
+        return { success: false, message: res.message };
+      }
+
+      setSyncStatus(res.message || 'Keanggotaan Pengguna Tersimpan di Database');
+      setLastSyncTime(getWibTime());
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === newUser.id
+            ? {
+                ...u,
+                id: res.data?.profileId || u.id,
+                provisioningStatus: res.data?.provisioningStatus || 'Aktif',
+                provisioningMessage: res.message
+              }
+            : u
+        )
+      );
+      return { success: true, message: res.message };
     }
+
+    return {
+      success: true,
+      message: 'Pengguna berhasil ditambahkan pada mode simulasi lokal.'
+    };
   };
 
-  const updateUser = (id: string, updated: Partial<User>) => {
+  const updateUser = async (
+    id: string,
+    updated: Partial<User>
+  ): Promise<{ success: boolean; message: string }> => {
     const existing = users.find((u) => u.id === id);
-    if (!existing) return;
-    const merged: User = { ...existing, ...updated };
-    setUsers((prev) =>
-      prev.map((u) => (u.id === id ? merged : u))
-    );
+    if (!existing) {
+      return { success: false, message: 'Pengguna tidak ditemukan.' };
+    }
+    const merged: User = {
+      ...existing,
+      ...updated,
+      provisioningStatus: isLiveDbActive ? 'Mengundang...' : existing.provisioningStatus || 'Aktif'
+    };
+    setUsers((prev) => prev.map((u) => (u.id === id ? merged : u)));
+
     if (isLiveDbActive) {
       const targetTenantUuid = toDeterministicUuid(
         merged.tenantId && merged.tenantId !== 'platform' ? merged.tenantId : currentTenantId
       );
       setSyncStatus('Memperbarui keanggotaan pengguna di database...');
-      void supabaseDataService
-        .upsertUserAndMembership({
-          tenantId: targetTenantUuid,
-          user: merged
-        })
-        .then((res) => {
-          if (!res.success) {
-            setSyncStatus(`Gagal Memperbarui Pengguna: ${res.message}`);
-            setUsers((prev) => prev.map((u) => (u.id === id ? existing : u)));
-          } else {
-            setSyncStatus('Profil & Keanggotaan Diperbarui di Database');
-          }
-        });
+      const res = await supabaseDataService.upsertUserAndMembership({
+        tenantId: targetTenantUuid,
+        user: merged
+      });
+
+      if (!res.success) {
+        setSyncStatus(`Gagal Memperbarui Pengguna: ${res.message}`);
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === id
+              ? {
+                  ...merged,
+                  provisioningStatus: 'Gagal / Perlu Tindakan Admin',
+                  provisioningMessage: res.message
+                }
+              : u
+          )
+        );
+        return { success: false, message: res.message };
+      }
+
+      setSyncStatus('Profil & Keanggotaan Diperbarui di Database');
+      setLastSyncTime(getWibTime());
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === id
+            ? {
+                ...merged,
+                id: res.data?.profileId || merged.id,
+                provisioningStatus: res.data?.provisioningStatus || 'Aktif',
+                provisioningMessage: res.message
+              }
+            : u
+        )
+      );
+      return { success: true, message: res.message };
     }
+
+    return { success: true, message: 'Data pengguna diperbarui di mode simulasi lokal.' };
+  };
+
+  const retryUserProvisioning = async (
+    id: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const existing = users.find((u) => u.id === id);
+    if (!existing) {
+      return { success: false, message: 'Pengguna tidak ditemukan.' };
+    }
+    return updateUser(id, { status: existing.status });
   };
 
   const toggleUserStatus = (id: string) => {
@@ -4695,6 +4860,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUserId: setSafeCurrentUserId,
         addUser,
         updateUser,
+        retryUserProvisioning,
         toggleUserStatus,
         kafilahs: kafilahs.filter((k) => k.tenantId === currentTenantId),
         participants: participants.filter((p) => p.tenantId === currentTenantId),
@@ -4777,13 +4943,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dataSourceMode,
         workspaceError,
         isOfflineDemoSimulation,
+        isLiveSupabaseMode,
         isLiveAccessAuthorized,
         accessGateReason,
+        isPasswordRecoveryMode,
+        setIsPasswordRecoveryMode,
         enterOfflineDemoSimulation,
         exitOfflineDemoSimulation,
         refreshSupabaseConnection,
         signInWithSupabase,
-        signOutSupabase
+        signOutSupabase,
+        requestPasswordReset,
+        completePasswordReset,
+        bootstrapFirstSuperadmin
       }}
     >
       {children}

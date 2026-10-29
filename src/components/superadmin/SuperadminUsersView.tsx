@@ -16,11 +16,23 @@ import { useMtq } from '../../context/MtqContext';
 import { User, UserRole } from '../../types/mtq';
 
 export const SuperadminUsersView: React.FC = () => {
-  const { users, addUser, updateUser, toggleUserStatus, tenants } = useMtq();
+  const {
+    users,
+    addUser,
+    updateUser,
+    retryUserProvisioning,
+    requestPasswordReset,
+    tenants,
+    isLiveSupabaseMode
+  } = useMtq();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('Semua Peran');
   const [selectedTenantFilter, setSelectedTenantFilter] = useState('Semua Tenant');
+  const [operationBanner, setOperationBanner] = useState<{
+    type: 'success' | 'warning' | 'error';
+    message: string;
+  } | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,26 +95,35 @@ export const SuperadminUsersView: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName || !formUsername) return;
+    setOperationBanner(null);
 
     if (editingUser) {
-      updateUser(editingUser.id, {
+      const res = await updateUser(editingUser.id, {
         name: formName,
         username: formUsername,
         email: formEmail,
         role: formRole,
         tenantId: formRole === 'superadmin' ? 'platform' : formTenantId
       });
+      setOperationBanner({
+        type: res.success ? 'success' : 'warning',
+        message: res.message
+      });
     } else {
-      addUser({
+      const res = await addUser({
         name: formName,
         username: formUsername,
         email: formEmail,
         role: formRole,
         tenantId: formRole === 'superadmin' ? 'platform' : formTenantId,
         status: 'Aktif'
+      });
+      setOperationBanner({
+        type: res.success ? 'success' : 'warning',
+        message: res.message
       });
     }
 
@@ -115,11 +136,34 @@ export const SuperadminUsersView: React.FC = () => {
     setTargetTenantId(otherTenant ? otherTenant.id : tenants[0]?.id || '');
   };
 
-  const handleConfirmReassign = () => {
+  const handleConfirmReassign = async () => {
     if (reassignModalUser && targetTenantId) {
-      updateUser(reassignModalUser.id, { tenantId: targetTenantId });
+      const res = await updateUser(reassignModalUser.id, { tenantId: targetTenantId });
+      setOperationBanner({
+        type: res.success ? 'success' : 'warning',
+        message: res.message
+      });
       setReassignModalUser(null);
     }
+  };
+
+  const handleRetryProvisioning = async (userId: string) => {
+    setOperationBanner(null);
+    const res = await retryUserProvisioning(userId);
+    setOperationBanner({
+      type: res.success ? 'success' : 'error',
+      message: res.message
+    });
+  };
+
+  const handleSendPasswordReset = async (email?: string) => {
+    if (!email) return;
+    setOperationBanner(null);
+    const res = await requestPasswordReset(email);
+    setOperationBanner({
+      type: res.success ? 'success' : 'error',
+      message: res.message
+    });
   };
 
   return (
@@ -148,6 +192,26 @@ export const SuperadminUsersView: React.FC = () => {
           <span>Tambah Akun Baru</span>
         </button>
       </div>
+
+      {operationBanner && (
+        <div
+          className={`rounded-xl p-3.5 flex items-center justify-between gap-3 text-xs border ${
+            operationBanner.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : operationBanner.type === 'warning'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}
+        >
+          <span>{operationBanner.message}</span>
+          <button
+            onClick={() => setOperationBanner(null)}
+            className="text-slate-500 hover:text-slate-800 font-bold px-2 py-0.5"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -193,84 +257,117 @@ export const SuperadminUsersView: React.FC = () => {
       {/* Users Table */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[760px] text-xs">
+          <table className="w-full text-left border-collapse min-w-[780px] text-xs">
             <thead>
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
                 <th className="px-5 py-3">Nama Pengguna</th>
                 <th className="px-4 py-3">Username & Email</th>
                 <th className="px-4 py-3">Peran</th>
                 <th className="px-4 py-3">Penyelenggara MTQ (Tenant)</th>
-                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Status & Provisioning</th>
                 <th className="px-5 py-3 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredUsers.map((u) => (
-                <tr key={u.id} className="hover:bg-slate-50/70">
-                  <td className="px-5 py-3.5">
-                    <p className="font-bold text-slate-900">{u.name}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{u.judgeCategory || ''}</p>
-                  </td>
-                  <td className="px-4 py-3.5 font-mono text-slate-600">
-                    <p>{u.username}</p>
-                    <p className="text-[10px] text-slate-400">{u.email || '-'}</p>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span
-                      className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold ${
-                        u.role === 'superadmin'
-                          ? 'bg-purple-100 text-purple-800'
-                          : u.role === 'admin'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-blue-100 text-blue-800'
-                      }`}
-                    >
-                      {u.role === 'superadmin'
-                        ? 'Superadmin'
-                        : u.role === 'admin'
-                        ? 'Admin MTQ'
-                        : 'Dewan Hakim'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <p className="font-semibold text-slate-800">{getTenantName(u.tenantId)}</p>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                        u.status !== 'Nonaktif'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : 'bg-slate-100 text-slate-500'
-                      }`}
-                    >
-                      {u.status !== 'Nonaktif' ? (
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                      ) : (
-                        <XCircle className="w-3 h-3 text-slate-400" />
-                      )}
-                      <span>{u.status !== 'Nonaktif' ? 'Aktif' : 'Nonaktif'}</span>
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-right space-x-2">
-                    {u.role !== 'superadmin' && (
-                      <button
-                        onClick={() => handleOpenReassign(u)}
-                        className="px-2 py-1 text-xs text-purple-800 hover:bg-purple-50 font-semibold rounded"
-                        title="Pindahkan Tenant"
+              {filteredUsers.map((u) => {
+                const provStatus =
+                  u.provisioningStatus || (u.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif');
+                return (
+                  <tr key={u.id} className="hover:bg-slate-50/70">
+                    <td className="px-5 py-3.5">
+                      <p className="font-bold text-slate-900">{u.name}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{u.judgeCategory || ''}</p>
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-slate-600">
+                      <p>{u.username}</p>
+                      <p className="text-[10px] text-slate-400">{u.email || '-'}</p>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span
+                        className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                          u.role === 'superadmin'
+                            ? 'bg-purple-100 text-purple-800'
+                            : u.role === 'admin'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}
                       >
-                        Pindah MTQ
+                        {u.role === 'superadmin'
+                          ? 'Superadmin'
+                          : u.role === 'admin'
+                          ? 'Admin MTQ'
+                          : 'Dewan Hakim'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <p className="font-semibold text-slate-800">{getTenantName(u.tenantId)}</p>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="space-y-1">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            provStatus === 'Aktif'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : provStatus === 'Menunggu Verifikasi' || provStatus === 'Mengundang...'
+                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                              : provStatus === 'Gagal / Perlu Tindakan Admin'
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {provStatus === 'Aktif' ? (
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          ) : (
+                            <XCircle className="w-3 h-3 text-current" />
+                          )}
+                          <span>{provStatus}</span>
+                        </span>
+                        {u.provisioningMessage && (
+                          <p className="text-[10px] text-slate-500 max-w-xs leading-snug">
+                            {u.provisioningMessage}
+                          </p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                      {provStatus === 'Gagal / Perlu Tindakan Admin' && (
+                        <button
+                          onClick={() => handleRetryProvisioning(u.id)}
+                          className="px-2 py-1 text-[10px] font-bold bg-amber-100 text-amber-900 hover:bg-amber-200 rounded"
+                          title="Coba Ulang Provisioning"
+                        >
+                          Coba Ulang
+                        </button>
+                      )}
+                      {u.email && isLiveSupabaseMode && (
+                        <button
+                          onClick={() => handleSendPasswordReset(u.email)}
+                          className="px-2 py-1 text-[10px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded"
+                          title="Kirim Email Reset Kata Sandi"
+                        >
+                          Reset Sandi
+                        </button>
+                      )}
+                      {u.role !== 'superadmin' && (
+                        <button
+                          onClick={() => handleOpenReassign(u)}
+                          className="px-2 py-1 text-xs text-purple-800 hover:bg-purple-50 font-semibold rounded"
+                          title="Pindahkan Tenant"
+                        >
+                          Pindah MTQ
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleOpenEdit(u)}
+                        className="p-1.5 text-slate-500 hover:text-purple-800 hover:bg-purple-50 rounded"
+                        title="Edit Akun"
+                      >
+                        <Pencil className="w-3.5 h-3.5 inline" />
                       </button>
-                    )}
-                    <button
-                      onClick={() => handleOpenEdit(u)}
-                      className="p-1.5 text-slate-500 hover:text-purple-800 hover:bg-purple-50 rounded"
-                      title="Edit Akun"
-                    >
-                      <Pencil className="w-3.5 h-3.5 inline" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

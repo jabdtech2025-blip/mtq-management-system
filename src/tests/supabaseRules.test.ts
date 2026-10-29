@@ -5,7 +5,8 @@ import {
   supabase,
   isSupabaseConfigured,
   getSupabaseConnectionInfo,
-  setRuntimeSupabaseConnectionState
+  setRuntimeSupabaseConnectionState,
+  evaluateWorkspaceAccessGate
 } from '../lib/supabaseClient';
 import { supabaseDataService } from '../services/supabaseDataService';
 import { DEFAULT_COMPETITION_RULES, INITIAL_RUBRIC_VERSIONS } from '../services/competitionRules';
@@ -260,6 +261,19 @@ function createPgliteSupabaseAdapter(
       },
       async signOut() {
         return { error: null };
+      },
+      async resetPasswordForEmail(email: string, opts?: { redirectTo?: string }) {
+        if (!email || !email.includes('@')) {
+          return { data: null, error: { message: 'Invalid email' } };
+        }
+        return { data: { email, redirectTo: opts?.redirectTo }, error: null };
+      },
+      async updateUser(attrs: { password?: string }) {
+        const user = getActiveUser();
+        if (!user) {
+          return { data: null, error: { message: 'Auth session missing' } };
+        }
+        return { data: { user: { id: user.id, email: user.email, updated: Boolean(attrs.password) } }, error: null };
       }
     },
     from(table: string) {
@@ -306,9 +320,10 @@ function createPgliteSupabaseAdapter(
               ${args.p_reason ? `${formatSqlVal(args.p_reason)}::text` : 'NULL::text'}
             ) AS res;`;
           } else if (fnName === 'upsert_tenant_member_profile') {
+            const profIdSql = args.p_profile_id ? `${formatSqlVal(args.p_profile_id)}::uuid` : 'NULL::uuid';
             sql = `SELECT upsert_tenant_member_profile(
               ${formatSqlVal(args.p_tenant_id)}::uuid,
-              ${formatSqlVal(args.p_profile_id)}::uuid,
+              ${profIdSql},
               ${formatSqlVal(args.p_username)}::text,
               ${formatSqlVal(args.p_name)}::text,
               ${formatSqlVal(args.p_email)}::text,
@@ -317,6 +332,12 @@ function createPgliteSupabaseAdapter(
               ${args.p_judge_field ? `${formatSqlVal(args.p_judge_field)}::text` : 'NULL::text'},
               ${formatSqlVal(args.p_status || 'Aktif')}::text
             ) AS res;`;
+          } else if (fnName === 'bootstrap_first_superadmin') {
+            const targetEmailSql = args.p_target_email ? `${formatSqlVal(args.p_target_email)}::text` : 'NULL::text';
+            const initTenantSql = args.p_initial_tenant_id
+              ? `${formatSqlVal(args.p_initial_tenant_id)}::uuid`
+              : 'NULL::uuid';
+            sql = `SELECT bootstrap_first_superadmin(${targetEmailSql}, ${initTenantSql}) AS res;`;
           } else {
             throw new Error(`Unsupported RPC: ${fnName}`);
           }
@@ -358,6 +379,10 @@ export async function runSupabaseTests(): Promise<{
   );
   const hardening20261029Sql = fs.readFileSync(
     path.resolve(process.cwd(), 'supabase/migrations/20261029_security_and_crud_hardening.sql'),
+    'utf-8'
+  );
+  const provisioning20261030Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261030_auth_provisioning_and_bootstrap.sql'),
     'utf-8'
   );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
@@ -467,8 +492,9 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(schemaSql);
       await pg.exec(migrationSql);
       await pg.exec(seedSql);
-      // Verify idempotent incremental migration on top of already-seeded database
+      // Verify idempotent incremental migrations on top of already-seeded database
       await pg.exec(hardening20261029Sql);
+      await pg.exec(provisioning20261030Sql);
       await pg.exec(`
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
         GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
@@ -1335,6 +1361,371 @@ export async function runSupabaseTests(): Promise<{
         errorCatCrudRes.success === true &&
         userProvisionRes.success === true,
       `syncAnn: ${syncAnnotationRes.success}, annLen: ${dbAnnotationQuery.rows[0]?.annotations?.length}, levelCrud: ${levelCrudRes.success}, deleteLevel: ${deleteLevelRes.success}, errCat: ${errorCatCrudRes.success}, userRpc: ${userProvisionRes.success} (${userProvisionRes.message})`
+    );
+
+    // =========================================================================
+    // 51. P0 FAIL-CLOSED ACCESS GATE (PRODUCTION & LIVE MODE)
+    // =========================================================================
+    const baseConnectedInfo = {
+      isConfigured: true,
+      state: 'connected_authenticated' as const,
+      mode: 'supabase_live' as const,
+      isDatabaseReady: true,
+      isAuthenticated: true,
+      endpointHost: 'project.supabase.co',
+      statusLabel: 'Terhubung',
+      lastError: null
+    };
+    const validAuthProfile = {
+      authUserId: adminUserId,
+      globalRole: 'admin' as const,
+      hasProfileRow: true,
+      inactiveMembershipsCount: 0,
+      memberships: [{ tenantId: tenantJabarId, role: 'admin', status: 'Aktif' }]
+    };
+
+    const gateUnconfigured = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: {
+        ...baseConnectedInfo,
+        isConfigured: false,
+        state: 'unconfigured',
+        isDatabaseReady: false,
+        isAuthenticated: false
+      },
+      authenticatedProfile: null
+    });
+    const gateChecking = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: {
+        ...baseConnectedInfo,
+        state: 'checking',
+        isDatabaseReady: false,
+        isAuthenticated: false
+      },
+      authenticatedProfile: null
+    });
+    const gateSchemaMissing = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: {
+        ...baseConnectedInfo,
+        state: 'schema_missing',
+        isDatabaseReady: false
+      },
+      authenticatedProfile: null
+    });
+    const gateConnError = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: {
+        ...baseConnectedInfo,
+        state: 'connection_error',
+        isDatabaseReady: false
+      },
+      authenticatedProfile: validAuthProfile
+    });
+    const gateUnauthenticated = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: {
+        ...baseConnectedInfo,
+        state: 'connected_unauthenticated',
+        isAuthenticated: false
+      },
+      authenticatedProfile: null
+    });
+    const gateQueryError = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: baseConnectedInfo,
+      authenticatedProfile: {
+        ...validAuthProfile,
+        hasProfileRow: false,
+        verificationError: 'Timeout querying profiles'
+      }
+    });
+    const gateProfileMissing = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: baseConnectedInfo,
+      authenticatedProfile: {
+        ...validAuthProfile,
+        hasProfileRow: false,
+        memberships: []
+      }
+    });
+    const gateMembershipEmpty = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: baseConnectedInfo,
+      authenticatedProfile: {
+        ...validAuthProfile,
+        memberships: []
+      }
+    });
+    const gateMembershipInactive = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: baseConnectedInfo,
+      authenticatedProfile: {
+        ...validAuthProfile,
+        inactiveMembershipsCount: 1,
+        memberships: [{ tenantId: tenantJabarId, role: 'admin', status: 'Nonaktif' }]
+      }
+    });
+    const gateHydrationError = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: baseConnectedInfo,
+      authenticatedProfile: validAuthProfile,
+      dataSourceMode: 'supabase_error',
+      workspaceError: 'Failed to load workspace'
+    });
+    const gateAuthorized = evaluateWorkspaceAccessGate({
+      isOfflineDemoSimulation: false,
+      connectionInfo: baseConnectedInfo,
+      authenticatedProfile: validAuthProfile,
+      dataSourceMode: 'supabase_live',
+      workspaceError: null
+    });
+
+    assert(
+      '51. P0 Fail-Closed Access Gate: Menolak akses tanpa autentikasi pada seluruh kondisi gagal (unconfigured, schema_missing, error, unauthenticated, profile_missing, membership_empty, membership_inactive, query_error, hydration_error)',
+      !gateUnconfigured.isAuthorized &&
+        gateUnconfigured.reason === 'supabase_unconfigured' &&
+        !gateChecking.isAuthorized &&
+        gateChecking.reason === 'connection_checking' &&
+        !gateSchemaMissing.isAuthorized &&
+        gateSchemaMissing.reason === 'schema_missing' &&
+        !gateConnError.isAuthorized &&
+        gateConnError.reason === 'connection_error' &&
+        !gateUnauthenticated.isAuthorized &&
+        gateUnauthenticated.reason === 'unauthenticated' &&
+        !gateQueryError.isAuthorized &&
+        gateQueryError.reason === 'query_error' &&
+        !gateProfileMissing.isAuthorized &&
+        gateProfileMissing.reason === 'profile_missing' &&
+        !gateMembershipEmpty.isAuthorized &&
+        gateMembershipEmpty.reason === 'membership_empty' &&
+        !gateMembershipInactive.isAuthorized &&
+        gateMembershipInactive.reason === 'membership_inactive' &&
+        !gateHydrationError.isAuthorized &&
+        gateHydrationError.reason === 'workspace_hydration_error' &&
+        gateAuthorized.isAuthorized &&
+        gateAuthorized.reason === null,
+      `unconf: ${gateUnconfigured.reason}, unauth: ${gateUnauthenticated.reason}, profMissing: ${gateProfileMissing.reason}, auth: ${gateAuthorized.isAuthorized}`
+    );
+
+    // =========================================================================
+    // 52. P0 FIRST SUPERADMIN BOOTSTRAP & SECOND-BOOTSTRAP LOCK
+    // =========================================================================
+    const bootstrapUserId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1';
+    const secondCandidateId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2';
+    await pg.exec(`
+      INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+        ('${bootstrapUserId}', 'superadmin@nasional.mtq.id', '{"name": "Dr. H. Superadmin Utama", "username": "superadmin_utama"}'::jsonb),
+        ('${secondCandidateId}', 'second@nasional.mtq.id', '{"name": "Kandidat Kedua", "username": "kandidat_dua"}'::jsonb)
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
+    // Ensure 0 superadmins exist before bootstrap
+    const preSuperadminCount = await pg.query<{ cnt: string }>(
+      `SELECT COUNT(*)::text AS cnt FROM profiles WHERE role = 'superadmin';`
+    );
+
+    // Bootstrap first superadmin as authenticated bootstrapUserId
+    currentAuthUser = { id: bootstrapUserId, email: 'superadmin@nasional.mtq.id' };
+    const firstBootstrapRes = await supabaseDataService.bootstrapFirstSuperadmin({
+      targetEmail: 'superadmin@nasional.mtq.id',
+      initialTenantId: tenantJabarId
+    });
+
+    // Attempt second bootstrap from another user — MUST FAIL with BOOTSTRAP_LOCKED
+    currentAuthUser = { id: secondCandidateId, email: 'second@nasional.mtq.id' };
+    const secondBootstrapRes = await supabaseDataService.bootstrapFirstSuperadmin({
+      targetEmail: 'second@nasional.mtq.id',
+      initialTenantId: tenantJabarId
+    });
+
+    // Verify audit log entry INITIAL_SUPERADMIN_BOOTSTRAPPED exists and cannot be spoofed via append_admin_audit_log
+    const bootstrapAuditCheck = await pg.query<{ cnt: string }>(
+      `SELECT COUNT(*)::text AS cnt FROM audit_logs WHERE action = 'INITIAL_SUPERADMIN_BOOTSTRAPPED' AND actor_id = '${bootstrapUserId}';`
+    );
+
+    currentAuthUser = { id: adminUserId, email: 'admin@jabar.mtq.id' };
+    const spoofBootstrapAuditRes = await adapter.rpc('append_admin_audit_log', {
+      p_tenant_id: tenantJabarId,
+      p_action: 'INITIAL_SUPERADMIN_BOOTSTRAPPED',
+      p_target: 'Spoofed Superadmin',
+      p_summary: 'Attempted to spoof bootstrap log'
+    });
+
+    assert(
+      '52. P0 Bootstrap Superadmin Pertama Sekali Pakai: Berhasil saat belum ada superadmin, mencatat INITIAL_SUPERADMIN_BOOTSTRAPPED di audit_logs, dan menolak percobaan bootstrap kedua maupun pemalsuan log',
+      Number(preSuperadminCount.rows[0]?.cnt) === 0 &&
+        firstBootstrapRes.success === true &&
+        secondBootstrapRes.success === false &&
+        Number(bootstrapAuditCheck.rows[0]?.cnt) === 1 &&
+        spoofBootstrapAuditRes.error !== null,
+      `firstBootstrap: ${firstBootstrapRes.success} (${firstBootstrapRes.message}), secondBootstrap: ${secondBootstrapRes.success} (${secondBootstrapRes.message}), auditCnt: ${bootstrapAuditCheck.rows[0]?.cnt}, spoofErr: ${spoofBootstrapAuditRes.error?.message}`
+    );
+
+    // =========================================================================
+    // 53. P0 EMAIL-BASED ACCOUNT PROVISIONING & PARTIAL FAILURE RECOVERY
+    // =========================================================================
+    const invitedAuthUserId = 'ffffffff-ffff-4fff-8fff-fffffffffff1';
+    await pg.exec(`
+      INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+        ('${invitedAuthUserId}', 'hakim.baru@jabar.mtq.id', '{"name": "KH. Hakim Baru", "username": "hakim_baru"}'::jsonb)
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
+    currentAuthUser = { id: adminUserId, email: 'admin@jabar.mtq.id' };
+    // Simulate admin provisioning a user whose auth.users row exists (e.g., created by invite or partial failure)
+    // using a synthetic local ID that does NOT match invitedAuthUserId: RPC must resolve by email!
+    const syntheticFrontendId = 'usr-local-temp-999';
+    const provisionByEmailRes = await supabaseDataService.upsertUserAndMembership({
+      tenantId: tenantJabarId,
+      user: {
+        id: syntheticFrontendId,
+        tenantId: tenantJabarId,
+        username: 'hakim_baru',
+        name: 'KH. Hakim Baru, M.Ag',
+        email: 'hakim.baru@jabar.mtq.id',
+        role: 'judge',
+        judgeCategory: 'Hakim 3',
+        judgeField: 'Bidang Suara',
+        status: 'Aktif'
+      }
+    });
+
+    // Retry the exact same provisioning call — must be idempotent without duplicating profiles or memberships
+    const retryProvisionByEmailRes = await supabaseDataService.upsertUserAndMembership({
+      tenantId: tenantJabarId,
+      user: {
+        id: syntheticFrontendId,
+        tenantId: tenantJabarId,
+        username: 'hakim_baru',
+        name: 'KH. Hakim Baru, M.Ag (Retry Updated)',
+        email: 'hakim.baru@jabar.mtq.id',
+        role: 'judge',
+        judgeCategory: 'Hakim 3',
+        judgeField: 'Bidang Suara & Lagu',
+        status: 'Aktif'
+      }
+    });
+
+    const resolvedProfileCheck = await pg.query<{ id: string; name: string; cnt: string }>(
+      `SELECT id::text, name, (SELECT COUNT(*)::text FROM tenant_memberships WHERE profile_id = '${invitedAuthUserId}' AND tenant_id = '${tenantJabarId}') AS cnt FROM profiles WHERE id = '${invitedAuthUserId}';`
+    );
+
+    // Tenant admin attempting to escalate a user to superadmin via upsert_tenant_member_profile MUST FAIL
+    const adminEscalateToSuperadmin = await adapter.rpc('upsert_tenant_member_profile', {
+      p_tenant_id: tenantJabarId,
+      p_profile_id: invitedAuthUserId,
+      p_username: 'hakim_baru',
+      p_name: 'Escalated Superadmin',
+      p_email: 'hakim.baru@jabar.mtq.id',
+      p_role: 'superadmin',
+      p_judge_category: null,
+      p_judge_field: null,
+      p_status: 'Aktif'
+    });
+
+    assert(
+      '53. P0 Provisioning Akun Berbasis Email & Pemulihan Kegagalan Parsial: Menautkan auth.users berdasarkan email secara idempoten saat retry tanpa duplikasi dan menolak eskalasi ke superadmin oleh admin tenant',
+      provisionByEmailRes.success === true &&
+        provisionByEmailRes.data?.profileId === invitedAuthUserId &&
+        retryProvisionByEmailRes.success === true &&
+        resolvedProfileCheck.rows[0]?.id === invitedAuthUserId &&
+        resolvedProfileCheck.rows[0]?.name === 'KH. Hakim Baru, M.Ag (Retry Updated)' &&
+        Number(resolvedProfileCheck.rows[0]?.cnt) === 1 &&
+        adminEscalateToSuperadmin.error !== null,
+      `provSuccess: ${provisionByEmailRes.success}, resolvedId: ${provisionByEmailRes.data?.profileId}, retrySuccess: ${retryProvisionByEmailRes.success}, membershipCnt: ${resolvedProfileCheck.rows[0]?.cnt}, escalateErr: ${adminEscalateToSuperadmin.error?.message}`
+    );
+
+    // =========================================================================
+    // 54. P0 PASSWORD RESET & REDIRECT URL VALIDATION
+    // =========================================================================
+    const validHttpsRedirect = supabaseDataService.validateRedirectUrl('https://mtq-nasional.id/reset');
+    const validLocalRedirect = supabaseDataService.validateRedirectUrl('http://localhost:3000/');
+    const invalidHttpExternalRedirect = supabaseDataService.validateRedirectUrl('http://evil-phishing.com/steal');
+    const invalidProtocolRedirect = supabaseDataService.validateRedirectUrl('javascript:alert(1)');
+
+    const badEmailReset = await supabaseDataService.requestPasswordReset(
+      'bukan-email',
+      'https://mtq-nasional.id'
+    );
+    const badRedirectReset = await supabaseDataService.requestPasswordReset(
+      'admin@jabar.mtq.id',
+      'http://insecure-external.org/reset'
+    );
+    const validPasswordResetReq = await supabaseDataService.requestPasswordReset(
+      'admin@jabar.mtq.id',
+      'https://mtq-nasional.id'
+    );
+
+    const shortPasswordUpdate = await supabaseDataService.updatePasswordWithRecoverySession('12345');
+    const validPasswordUpdate = await supabaseDataService.updatePasswordWithRecoverySession('SandiBaruAman2026!');
+
+    assert(
+      '54. P0 Alur Reset Kata Sandi & Validasi Redirect Aman: Menolak URL redirect eksternal non-HTTPS, menolak email tidak valid/sandi pendek, dan memproses pemulihan kata sandi secara aman',
+      validHttpsRedirect.valid === true &&
+        validLocalRedirect.valid === true &&
+        invalidHttpExternalRedirect.valid === false &&
+        invalidProtocolRedirect.valid === false &&
+        badEmailReset.success === false &&
+        badRedirectReset.success === false &&
+        validPasswordResetReq.success === true &&
+        shortPasswordUpdate.success === false &&
+        validPasswordUpdate.success === true,
+      `httpsValid: ${validHttpsRedirect.valid}, httpExtValid: ${invalidHttpExternalRedirect.valid}, validReset: ${validPasswordResetReq.success}, validPassUpdate: ${validPasswordUpdate.success}`
+    );
+
+    // =========================================================================
+    // 55. P1 AUTOSAVE PERSISTENCE FAILURE DETECTION (NO FALSE SAVED CLAIM)
+    // =========================================================================
+    const failingAssessmentClient = createPgliteSupabaseAdapter(
+      pg,
+      () => ({ id: judge1UserId, email: 'hakim1@jabar.mtq.id' }),
+      { forceFailTable: 'judge_assessments' }
+    );
+    supabaseDataService.setTestDatabaseClient(failingAssessmentClient);
+
+    const failedAutosaveRes = await supabaseDataService.syncAssessmentToRemote(
+      {
+        id: semiAssessmentId,
+        tenantId: tenantJabarId,
+        stageParticipationId: semifinalSpUuid,
+        stageId: stageSemifinalId,
+        stageName: 'Semifinal',
+        participantId: participantUuid,
+        judgeId: judge1UserId,
+        judgeName: 'KH. Ahmad Syahid',
+        judgeField: 'Bidang Tajwid',
+        questionId: questionPenyisihanId,
+        assignedMaqraId: semiAssignedMaqraId,
+        rubricVersion: 'RUBRIC-SENI-BACA-2025',
+        rubricVersionId: rubricSeniBacaId,
+        status: 'in_progress',
+        isLocked: false,
+        errorCounts: { MKH: 3 },
+        deductions: { MKH: 3.0 },
+        fieldScores: { TJW: 27, FSH: 28, SUR: 15, LGU: 25 },
+        totalDeductions: 5.0,
+        finalScore: 95.0,
+        annotations: sampleAnnotations,
+        note: 'Percobaan simpan saat jaringan gagal',
+        lastUpdated: '11:35 WIB'
+      },
+      semiAssignedMaqraId
+    );
+
+    // Restore working client and verify database still holds the previous valid score (97.0)
+    supabaseDataService.setTestDatabaseClient(adapter);
+    const scoreAfterFailedAutosave = await pg.query<{ final_score: string }>(
+      `SELECT final_score::text FROM judge_assessments WHERE id = '${semiAssessmentId}';`
+    );
+
+    assert(
+      '55. P1 Kejujuran Status Autosave & Rollback Saat Gagal: Menolak klaim tersimpan saat operasi database gagal dan menjaga konsistensi skor di database',
+      failedAutosaveRes.success === false &&
+        Boolean(failedAutosaveRes.message) &&
+        Number(scoreAfterFailedAutosave.rows[0]?.final_score) === 97,
+      `failedAutosaveSuccess: ${failedAutosaveRes.success}, msg: ${failedAutosaveRes.message}, dbScore: ${scoreAfterFailedAutosave.rows[0]?.final_score}`
     );
   } finally {
     supabaseDataService.setTestDatabaseClient(null);

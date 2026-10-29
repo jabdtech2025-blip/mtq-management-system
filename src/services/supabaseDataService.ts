@@ -116,6 +116,12 @@ export const supabaseDataService = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setTestDatabaseClient(client: any | null): void {
     injectedDatabaseClient = client;
+    setRuntimeSupabaseConnectionState({
+      isTestClientActive: Boolean(client),
+      state: client ? 'checking' : isSupabaseConfigured() ? 'checking' : 'unconfigured',
+      isDatabaseReady: false,
+      lastError: null
+    });
   },
 
   getConnectionStatus(): SupabaseConnectionInfo {
@@ -417,6 +423,196 @@ export const supabaseDataService = {
   },
 
   /**
+   * Memvalidasi bahwa URL redirect (untuk reset password / undangan) aman, berada pada origin yang sama,
+   * atau menggunakan HTTPS yang valid (mencegah open-redirect).
+   */
+  validateRedirectUrl(candidateUrl?: string): { valid: boolean; url: string; reason?: string } {
+    const fallbackOrigin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost:3000';
+    const raw = (candidateUrl || fallbackOrigin).trim();
+
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        return {
+          valid: false,
+          url: fallbackOrigin,
+          reason: 'Protokol URL redirect harus http: atau https:.'
+        };
+      }
+      const isLocalhost =
+        parsed.hostname === 'localhost' ||
+        parsed.hostname === '127.0.0.1' ||
+        parsed.hostname.endsWith('.local');
+      if (parsed.protocol === 'http:' && !isLocalhost) {
+        return {
+          valid: false,
+          url: fallbackOrigin,
+          reason: 'URL redirect produksi non-localhost wajib menggunakan HTTPS.'
+        };
+      }
+      if (
+        typeof window !== 'undefined' &&
+        window.location?.origin &&
+        parsed.origin !== window.location.origin
+      ) {
+        return {
+          valid: false,
+          url: window.location.origin,
+          reason: 'Redirect lintas domain (cross-origin) ditolak demi keamanan.'
+        };
+      }
+      return { valid: true, url: parsed.toString() };
+    } catch {
+      return {
+        valid: false,
+        url: fallbackOrigin,
+        reason: 'Format URL redirect tidak valid.'
+      };
+    }
+  },
+
+  /**
+   * Mengirimkan email instruksi pemulihan / reset kata sandi melalui Supabase Auth.
+   */
+  async requestPasswordReset(
+    email: string,
+    customRedirectUrl?: string
+  ): Promise<{ success: boolean; message: string }> {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return {
+        success: false,
+        message: 'Masukkan alamat email yang valid untuk menerima tautan pemulihan kata sandi.'
+      };
+    }
+
+    const redirectValidation = this.validateRedirectUrl(customRedirectUrl);
+    if (!redirectValidation.valid) {
+      return {
+        success: false,
+        message: `Permintaan reset kata sandi ditolak: ${redirectValidation.reason}`
+      };
+    }
+
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: false,
+        message: 'Layanan Supabase Auth belum terhubung.'
+      };
+    }
+
+    const { error } = await client.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: redirectValidation.url
+    });
+
+    if (error) {
+      return {
+        success: false,
+        message: `Gagal mengirim email pemulihan kata sandi: ${error.message}`
+      };
+    }
+
+    return {
+      success: true,
+      message: `Tautan pemulihan kata sandi telah dikirim ke ${cleanEmail}. Periksa kotak masuk atau folder spam Anda.`
+    };
+  },
+
+  /**
+   * Memperbarui kata sandi pengguna menggunakan sesi recovery resmi dari Supabase Auth.
+   */
+  async updatePasswordWithRecoverySession(
+    newPassword: string
+  ): Promise<{ success: boolean; message: string }> {
+    if (!newPassword || newPassword.length < 8) {
+      return {
+        success: false,
+        message: 'Kata sandi baru minimal harus terdiri dari 8 karakter.'
+      };
+    }
+
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: false,
+        message: 'Layanan Supabase Auth belum terhubung.'
+      };
+    }
+
+    const { data: sessionData } = await client.auth.getSession();
+    if (!sessionData?.session?.user?.id) {
+      return {
+        success: false,
+        message:
+          'Sesi pemulihan kata sandi tidak ditemukan atau telah kedaluwarsa. Silakan minta ulang tautan reset kata sandi.'
+      };
+    }
+
+    const { error } = await client.auth.updateUser({
+      password: newPassword
+    });
+
+    if (error) {
+      return {
+        success: false,
+        message: `Gagal memperbarui kata sandi: ${error.message}`
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Kata sandi Anda berhasil diperbarui. Anda kini dapat mengakses workspace MTQ.'
+    };
+  },
+
+  /**
+   * Menjalankan prosedur bootstrap superadmin pertama satu kali (`bootstrap_first_superadmin`).
+   * Hanya berhasil jika belum ada satu pun baris `profiles` dengan `role = 'superadmin'`.
+   */
+  async bootstrapFirstSuperadmin(params?: {
+    targetEmail?: string;
+    initialTenantId?: string;
+  }): Promise<RpcServiceResult<{ profileId: string; email: string; initialTenantId: string }>> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: false,
+        mode: 'local_offline_fallback',
+        message: 'Layanan Supabase belum dikonfigurasi.'
+      };
+    }
+
+    const cleanTenantId =
+      params?.initialTenantId && isValidUuid(params.initialTenantId) ? params.initialTenantId : null;
+
+    const { data, error } = await client.rpc('bootstrap_first_superadmin', {
+      p_target_email: params?.targetEmail ? params.targetEmail.trim().toLowerCase() : null,
+      p_initial_tenant_id: cleanTenantId
+    });
+
+    if (error) {
+      return {
+        success: false,
+        mode: 'supabase_live',
+        message: error.message
+      };
+    }
+
+    await this.verifyDatabaseConnection();
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message:
+        'Bootstrap Superadmin Pertama berhasil dijalankan. Akun Anda kini terdaftar sebagai Superadmin Platform dan tercatat di audit_logs.',
+      data: data as { profileId: string; email: string; initialTenantId: string }
+    };
+  },
+
+  /**
    * Mengambil seluruh data operasional, rubrik, dan master untuk tenant aktif dari Supabase
    * dengan pemeriksaan error eksplisit untuk setiap tabel.
    */
@@ -552,15 +748,18 @@ export const supabaseDataService = {
     const users: User[] = (membershipsRes.data || []).map((m: Record<string, unknown>) => {
       const prof = (m.profiles || {}) as Record<string, unknown>;
       const profileId = String(m.profile_id || prof.id || '');
+      const statusVal = ((m.status as string) || 'Aktif') as 'Aktif' | 'Nonaktif';
       return {
         id: profileId,
         tenantId: String(m.tenant_id || tenantUuid),
         username: String(prof.username || prof.email || profileId),
         name: String(prof.name || 'Pengguna MTQ'),
+        email: prof.email ? String(prof.email) : undefined,
         role: ((m.role as string) || (prof.role as string) || 'judge') as 'superadmin' | 'admin' | 'judge',
         judgeCategory: m.judge_category ? String(m.judge_category) : undefined,
         judgeField: m.judge_field ? String(m.judge_field) : undefined,
-        status: ((m.status as string) || 'Aktif') as 'Aktif' | 'Nonaktif'
+        status: statusVal,
+        provisioningStatus: statusVal === 'Aktif' ? 'Aktif' : 'Nonaktif'
       };
     });
 
@@ -2473,7 +2672,13 @@ export const supabaseDataService = {
   async upsertUserAndMembership(params: {
     tenantId: string;
     user: User;
-  }): Promise<RpcServiceResult<{ profileId: string }>> {
+    preferEdgeInvite?: boolean;
+  }): Promise<
+    RpcServiceResult<{
+      profileId: string;
+      provisioningStatus: 'Mengundang...' | 'Menunggu Verifikasi' | 'Aktif' | 'Nonaktif' | 'Gagal / Perlu Tindakan Admin';
+    }>
+  > {
     const uuidCheck = this.validateReferences({ tenant_id: params.tenantId });
     if (!uuidCheck.valid) {
       return {
@@ -2482,38 +2687,149 @@ export const supabaseDataService = {
         message: uuidCheck.message!
       };
     }
+
+    const cleanEmail = (params.user.email || '').trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: 'Alamat email pengguna wajib diisi dengan format yang valid untuk penautan akun Supabase Auth.'
+      };
+    }
+
     const client = getActiveClient();
     if (!this.isLive() || !client) {
-      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+      return {
+        success: false,
+        mode: 'local_offline_fallback',
+        message: 'Mode lokal aktif.'
+      };
     }
 
     const profileIdArg = isValidUuid(params.user.id) ? params.user.id : null;
-    const { data, error } = await client.rpc('upsert_tenant_member_profile', {
-      p_tenant_id: params.tenantId,
-      p_profile_id: profileIdArg,
-      p_username: params.user.username,
-      p_name: params.user.name,
-      p_email: params.user.email,
-      p_role: params.user.role,
-      p_judge_category: params.user.judgeCategory || null,
-      p_judge_field: params.user.judgeField || null,
-      p_status: params.user.status || 'Aktif'
-    });
+    const cleanStatus = params.user.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif';
 
-    if (error) {
-      return { success: false, mode: 'supabase_live', message: error.message };
+    // 1. Coba tautkan/perbarui melalui RPC upsert_tenant_member_profile (mendukung resolusi email di auth.users & retry-safe)
+    if (!params.preferEdgeInvite) {
+      const { data, error } = await client.rpc('upsert_tenant_member_profile', {
+        p_tenant_id: params.tenantId,
+        p_profile_id: profileIdArg,
+        p_username: params.user.username,
+        p_name: params.user.name,
+        p_email: cleanEmail,
+        p_role: params.user.role,
+        p_judge_category: params.user.judgeCategory || null,
+        p_judge_field: params.user.judgeField || null,
+        p_status: cleanStatus
+      });
+
+      if (!error) {
+        const realProfileId =
+          (data && typeof data === 'object' && 'profile_id' in data && String(data.profile_id)) ||
+          profileIdArg ||
+          params.user.id;
+
+        return {
+          success: true,
+          mode: 'supabase_live',
+          message: `Profil dan keanggotaan ${params.user.name} (${cleanEmail}) berhasil ditautkan di database.`,
+          data: {
+            profileId: realProfileId,
+            provisioningStatus: cleanStatus
+          }
+        };
+      }
+
+      const isMissingAuthUser =
+        error.message.includes('AUTH_USER_NOT_FOUND') ||
+        error.message.toLowerCase().includes('belum terdaftar di supabase auth');
+
+      if (!isMissingAuthUser) {
+        return {
+          success: false,
+          mode: 'supabase_live',
+          message: error.message,
+          data: {
+            profileId: params.user.id,
+            provisioningStatus: 'Gagal / Perlu Tindakan Admin'
+          }
+        };
+      }
     }
 
-    const realProfileId =
-      (data && typeof data === 'object' && 'profile_id' in data && String(data.profile_id)) ||
-      profileIdArg ||
-      params.user.id;
+    // 2. Jika akun belum ada di auth.users, panggil layanan server-side Supabase Edge Function `admin-provision-user`
+    if (client.functions && typeof client.functions.invoke === 'function') {
+      try {
+        const redirectCheck = this.validateRedirectUrl();
+        const { data: fnData, error: fnError } = await client.functions.invoke('admin-provision-user', {
+          body: {
+            tenantId: params.tenantId,
+            profileId: profileIdArg,
+            username: params.user.username,
+            name: params.user.name,
+            email: cleanEmail,
+            role: params.user.role,
+            judgeCategory: params.user.judgeCategory || null,
+            judgeField: params.user.judgeField || null,
+            status: cleanStatus,
+            redirectTo: redirectCheck.valid ? redirectCheck.url : undefined
+          }
+        });
+
+        const responseObj = (fnData || {}) as Record<string, unknown>;
+        if (!fnError && responseObj.success === true) {
+          const resolvedId = String(responseObj.profileId || profileIdArg || params.user.id);
+          const isInvited = responseObj.provisioningState === 'invited';
+          return {
+            success: true,
+            mode: 'supabase_live',
+            message: String(
+              responseObj.message ||
+                `Undangan akun email ${cleanEmail} berhasil dikirim dan keanggotaan tenant telah diikat.`
+            ),
+            data: {
+              profileId: resolvedId,
+              provisioningStatus: isInvited ? 'Menunggu Verifikasi' : cleanStatus
+            }
+          };
+        }
+
+        const fnErrMessage =
+          (typeof responseObj.error === 'string' && responseObj.error) ||
+          (fnError instanceof Error ? fnError.message : String(fnError || 'Edge Function tidak merespons'));
+
+        return {
+          success: false,
+          mode: 'supabase_live',
+          message: `Akun ${cleanEmail} belum terdaftar di auth.users dan layanan Edge Function admin-provision-user belum aktif atau menolak permintaan (${fnErrMessage}). Undang email tersebut melalui Supabase Dashboard -> Authentication -> Users -> Invite User (atau deploy Edge Function admin-provision-user), lalu klik tombol Coba Ulang (Retry).`,
+          data: {
+            profileId: String(responseObj.authUserId || params.user.id),
+            provisioningStatus: 'Gagal / Perlu Tindakan Admin'
+          }
+        };
+      } catch (err) {
+        return {
+          success: false,
+          mode: 'supabase_live',
+          message: `Gagal memanggil layanan undangan server-side untuk ${cleanEmail}: ${
+            err instanceof Error ? err.message : 'Unknown error'
+          }. Undang pengguna di Supabase Authentication terlebih dahulu lalu tekan Coba Ulang (Retry).`,
+          data: {
+            profileId: params.user.id,
+            provisioningStatus: 'Gagal / Perlu Tindakan Admin'
+          }
+        };
+      }
+    }
 
     return {
-      success: true,
+      success: false,
       mode: 'supabase_live',
-      message: 'Profil dan keanggotaan pengguna berhasil disimpan di database.',
-      data: { profileId: realProfileId }
+      message: `Pengguna (${cleanEmail}) belum terdaftar di Supabase Auth (auth.users). Daftarkan/undang akun email di Supabase Authentication terlebih dahulu atau aktifkan Edge Function admin-provision-user, kemudian tekan Coba Ulang.`,
+      data: {
+        profileId: params.user.id,
+        provisioningStatus: 'Gagal / Perlu Tindakan Admin'
+      }
     };
   },
 
