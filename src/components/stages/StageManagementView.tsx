@@ -6,6 +6,7 @@ import {
   Clock,
   ArrowRight,
   Pencil,
+  Trash2,
   X,
   AlertCircle
 } from 'lucide-react';
@@ -13,15 +14,26 @@ import { useMtq } from '../../context/MtqContext';
 import { CompetitionStage } from '../../types/mtq';
 
 export const StageManagementView: React.FC = () => {
-  const { stages, addStage, updateStage, participants, assessments, setCurrentView, currentTenant } = useMtq();
+  const {
+    stages,
+    addStage,
+    updateStage,
+    deleteStage,
+    cabangList,
+    participants,
+    assessments,
+    setCurrentView,
+    currentTenant
+  } = useMtq();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStage, setEditingStage] = useState<CompetitionStage | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Form states
   const [formName, setFormName] = useState('');
   const [formOrder, setFormOrder] = useState<number>(stages.length + 1);
-  const [formBranch, setFormBranch] = useState('Tilawah Dewasa Putra');
+  const [formBranch, setFormBranch] = useState(cabangList[0]?.name || 'Tilawah Dewasa Putra');
   const [formQuota, setFormQuota] = useState<number>(3);
   const [formStatus, setFormStatus] = useState<'Menunggu' | 'Aktif' | 'Selesai'>('Menunggu');
 
@@ -29,7 +41,7 @@ export const StageManagementView: React.FC = () => {
     setEditingStage(null);
     setFormName('');
     setFormOrder(stages.length + 1);
-    setFormBranch('Tilawah Dewasa Putra');
+    setFormBranch(cabangList[0]?.name || 'Tilawah Dewasa Putra');
     setFormQuota(3);
     setFormStatus('Menunggu');
     setIsModalOpen(true);
@@ -57,6 +69,7 @@ export const StageManagementView: React.FC = () => {
         qualificationQuota: Number(formQuota),
         status: formStatus
       });
+      setFeedback({ type: 'success', message: `Konfigurasi Babak "${formName}" berhasil diperbarui.` });
     } else {
       addStage({
         name: formName,
@@ -67,9 +80,18 @@ export const StageManagementView: React.FC = () => {
         qualificationMethod: 'top_n',
         isFinalized: false
       });
+      setFeedback({ type: 'success', message: `Babak "${formName}" berhasil ditambahkan.` });
     }
 
     setIsModalOpen(false);
+  };
+
+  const handleDeleteStage = (s: CompetitionStage) => {
+    const res = deleteStage(s.id);
+    setFeedback({
+      type: res.success ? 'success' : 'error',
+      message: res.message
+    });
   };
 
   return (
@@ -96,9 +118,36 @@ export const StageManagementView: React.FC = () => {
         </div>
       </div>
 
+      {/* Feedback Banner */}
+      {feedback && (
+        <div
+          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-semibold ${
+            feedback.type === 'success'
+              ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+              : 'bg-rose-50 text-rose-900 border-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-700" />
+            )}
+            <span>{feedback.message}</span>
+          </div>
+          <button
+            onClick={() => setFeedback(null)}
+            className="p-1 hover:opacity-75 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Stage Progression Flow Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {stages
+          .slice()
           .sort((a, b) => a.order - b.order)
           .map((stg) => {
             const stageParticipants = participants.filter((p) => p.stageName === stg.name);
@@ -157,7 +206,7 @@ export const StageManagementView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-end">
+                <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-end gap-2">
                   <button
                     onClick={() => handleOpenEdit(stg)}
                     className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-slate-50 rounded text-xs inline-flex items-center gap-1 cursor-pointer font-medium"
@@ -169,14 +218,6 @@ export const StageManagementView: React.FC = () => {
               </div>
             );
           })}
-      </div>
-
-      {/* Operational Explanation */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3 text-xs text-slate-600">
-        <AlertCircle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-        <p className="leading-relaxed">
-          <strong>Alur Musabaqah Bertingkat:</strong> Peserta yang berhak maju ke babak berikutnya diseleksi berdasarkan pemeringkatan agregat nilai dewan hakim setelah babak aktif difinalisasi pada menu <em>Hasil & Kelulusan</em>. Peserta yang lolos akan dibuatkan rekam jejak babak baru dengan paket maqra dan penugasan juri yang independen.
-        </p>
       </div>
 
       {/* Add / Edit Stage Modal */}
@@ -235,13 +276,24 @@ export const StageManagementView: React.FC = () => {
 
               <div>
                 <label className="font-bold text-slate-600 block mb-1">Cabang Musabaqah</label>
-                <input
-                  type="text"
+                <select
                   value={formBranch}
                   onChange={(e) => setFormBranch(e.target.value)}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-                />
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                >
+                  {Array.from(
+                    new Set([
+                      ...cabangList.map((c) => c.name),
+                      ...stages.map((s) => s.branchName),
+                      formBranch
+                    ].filter(Boolean))
+                  ).map((br) => (
+                    <option key={br} value={br}>
+                      {br}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>

@@ -198,7 +198,7 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* Discrete Prototype Demo Switcher Footer */}
-      <div className="p-3 border-t border-slate-200 bg-slate-50/70 space-y-2">
+      <div className="p-3 border-t border-slate-200 bg-white space-y-2 shrink-0 sticky bottom-0 z-10">
         <button
           onClick={() => setIsDemoAccountModalOpen(true)}
           className="w-full text-left p-2 rounded-xl bg-white border border-slate-200/90 hover:border-emerald-500 hover:bg-emerald-50/40 transition-all flex items-center justify-between"

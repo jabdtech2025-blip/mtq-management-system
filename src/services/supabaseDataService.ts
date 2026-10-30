@@ -2551,6 +2551,49 @@ export const supabaseDataService = {
     return { success: true, mode: 'supabase_live', message: 'Tenant tersimpan di Supabase.' };
   },
 
+  async deleteTenant(tenantId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+
+    try {
+      await client.from('tenant_memberships').delete().eq('tenant_id', tenantId);
+    } catch {}
+
+    const { error } = await client.from('tenants').delete().eq('id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Penyelenggara MTQ berhasil dihapus dari database.' };
+  },
+
+  async deleteUser(userId: string): Promise<RpcServiceResult> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+
+    if (isValidUuid(userId)) {
+      try {
+        await client.from('tenant_memberships').delete().eq('profile_id', userId);
+      } catch {}
+
+      const { error } = await client.from('profiles').delete().eq('id', userId);
+      if (error) {
+        return { success: false, mode: 'supabase_live', message: error.message };
+      }
+    }
+
+    return { success: true, mode: 'supabase_live', message: 'Akun pengguna berhasil dihapus dari database.' };
+  },
+
   async upsertStage(stage: CompetitionStage): Promise<RpcServiceResult> {
     const uuidCheck = this.validateReferences({
       id: stage.id,
@@ -2747,9 +2790,11 @@ export const supabaseDataService = {
     });
     if (rvError) return { success: false, mode: 'supabase_live', message: rvError.message };
 
+    const activeFieldIds: string[] = [];
     for (let idx = 0; idx < (rubric.fields || []).length; idx++) {
       const f = rubric.fields[idx];
       const fieldId = isValidUuid(f.id) ? f.id : toDeterministicUuid(`${rubric.id}:field:${f.code}`);
+      activeFieldIds.push(fieldId);
       const { error: rfError } = await client.from('rubric_fields').upsert({
         id: fieldId,
         rubric_version_id: rubric.id,
@@ -2765,7 +2810,40 @@ export const supabaseDataService = {
       if (rfError) return { success: false, mode: 'supabase_live', message: rfError.message };
     }
 
+    // Hapus bidang yang telah dihapus dari daftar rubric.fields
+    if (activeFieldIds.length > 0) {
+      await client
+        .from('rubric_fields')
+        .delete()
+        .eq('rubric_version_id', rubric.id)
+        .not('id', 'in', `(${activeFieldIds.join(',')})`);
+    } else {
+      await client.from('rubric_fields').delete().eq('rubric_version_id', rubric.id);
+    }
+
     return { success: true, mode: 'supabase_live', message: 'Versi rubrik & struktur bidang tersimpan di Supabase.' };
+  },
+
+  async deleteRubricVersion(tenantId: string, rubricId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: rubricId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    await client.from('rubric_fields').delete().eq('rubric_version_id', rubricId);
+    const { error } = await client
+      .from('rubric_versions')
+      .delete()
+      .eq('id', rubricId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Versi rubrik berhasil dihapus dari database.' };
   },
 
   async updateRubricVersionStatus(
@@ -2834,6 +2912,50 @@ export const supabaseDataService = {
     });
     if (error) return { success: false, mode: 'supabase_live', message: error.message };
     return { success: true, mode: 'supabase_live', message: 'Konfigurasi aturan kompetisi tersimpan di Supabase.' };
+  },
+
+  async deleteCompetitionRuleConfig(tenantId: string, ruleId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: ruleId, tenant_id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('competition_rule_configs')
+      .delete()
+      .eq('id', ruleId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Konfigurasi aturan kompetisi berhasil dihapus dari database.' };
+  },
+
+  async deleteStage(tenantId: string, stageId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: stageId, tenant_id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('stages')
+      .delete()
+      .eq('id', stageId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Babak musabaqah berhasil dihapus dari database.' };
   },
 
   async upsertUserAndMembership(params: {

@@ -280,24 +280,26 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
-      {/* Stage Overall Status Banner (Clean White, No Shield Icon) */}
-      <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-extrabold text-sm text-slate-900">{stageStatusBadge.label}</span>
+      {/* Stage Overall Status Banner (Shown ONLY when incomplete or boundary tie exists) */}
+      {(!allAssessmentsFinalized || incompleteParticipants.length > 0 || hasBoundaryTie) && (
+        <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-sm text-slate-900">{stageStatusBadge.label}</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">{stageStatusBadge.description}</p>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">{stageStatusBadge.description}</p>
-        </div>
 
-        {!allAssessmentsFinalized && (
-          <button
-            onClick={() => setCurrentView('rekap_nilai')}
-            className="self-start sm:self-auto text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors shrink-0 border border-slate-200 cursor-pointer"
-          >
-            Tinjau di Rekap Nilai →
-          </button>
-        )}
-      </div>
+          {!allAssessmentsFinalized && (
+            <button
+              onClick={() => setCurrentView('rekap_nilai')}
+              className="self-start sm:self-auto text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors shrink-0 border border-slate-200 cursor-pointer"
+            >
+              Tinjau di Rekap Nilai →
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Stage Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

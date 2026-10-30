@@ -62,13 +62,8 @@ export const TopHeader: React.FC = () => {
         </div>
       </div>
 
-      {/* Right: Honest Prototype Status Indicator & Profile */}
+      {/* Right: Profile */}
       <div className="flex items-center gap-3 sm:gap-4">
-        {/* Honest storage indicator */}
-        <div className="hidden md:flex items-center gap-1.5 text-xs text-slate-500 font-medium bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200">
-          <Database className="w-3.5 h-3.5 text-emerald-600" />
-          <span>{syncStatus}</span>
-        </div>
 
         {/* Profile Card with Quick Demo Account Modal trigger */}
         <button

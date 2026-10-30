@@ -34,7 +34,9 @@ export const BankSoalView: React.FC = () => {
     removeQuestionFromParticipant,
     conductLotteryDraw,
     commitLotteryDrawResults,
-    stages
+    stages,
+    cabangList,
+    jenjangList
   } = useMtq();
 
   const [activeTab, setActiveTab] = useState<'daftar_soal' | 'penetapan_soal'>('daftar_soal');
@@ -45,7 +47,7 @@ export const BankSoalView: React.FC = () => {
   // Preview Modal
   const [previewQuestion, setPreviewQuestion] = useState<Question | null>(null);
   const [previewCurrentPageIndex, setPreviewCurrentPageIndex] = useState<number>(0);
-  const [previewViewMode, setPreviewViewMode] = useState<'single' | 'gallery'>('single');
+  const [previewViewMode, setPreviewViewMode] = useState<'single' | 'gallery'>('gallery');
   const [previewZoom, setPreviewZoom] = useState<number>(100);
 
   // Manual Assign Modal
@@ -101,6 +103,34 @@ export const BankSoalView: React.FC = () => {
       return matchesSearch && matchesBranch && matchesStage;
     });
   }, [questions, searchQuery, selectedBranch, selectedStage]);
+
+  // Options for Cabang & Jenjang dropdown in Add/Edit Maqra Modal
+  const branchAndLevelOptions = useMemo(() => {
+    const set = new Set<string>();
+    cabangList.forEach((c) => {
+      if (c.name) set.add(c.name);
+      jenjangList.forEach((j) => {
+        if (c.name && j.name) {
+          set.add(`${c.name} ${j.name}`);
+        }
+      });
+    });
+    questions.forEach((q) => {
+      if (q.branchAndLevel) set.add(q.branchAndLevel);
+    });
+    participants.forEach((p) => {
+      if (p.branchName && p.levelName) {
+        set.add(`${p.branchName} ${p.levelName}`);
+      }
+      if (p.branchName) {
+        set.add(p.branchName);
+      }
+    });
+    if (formBranch) {
+      set.add(formBranch);
+    }
+    return Array.from(set).filter(Boolean);
+  }, [cabangList, jenjangList, questions, participants, formBranch]);
 
   // Assigned Maqra Rows for Tab 2 (Setiap satu maqra satu baris)
   const assignedMaqraRows = useMemo(() => {
@@ -827,181 +857,49 @@ export const BankSoalView: React.FC = () => {
         </div>
       )}
 
-      {/* Multi-Page Mushaf Preview Modal */}
+      {/* Mushaf Preview Modal (Mode Halaman Tanpa Space Kanan/Kiri/Atas/Bawah & Tanpa Footer) */}
       {previewQuestion && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 z-50">
-          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]">
             {/* Header */}
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div>
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
+              <div className="min-w-0 pr-2">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono font-bold text-xs text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded">
+                  <span className="font-mono font-bold text-xs text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded shrink-0">
                     {previewQuestion.code}
                   </span>
-                  <h3 className="font-extrabold text-sm text-slate-900 truncate max-w-sm">
+                  <h3 className="font-extrabold text-sm text-slate-900 truncate">
                     {previewQuestion.title}
                   </h3>
                 </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  QS. {previewQuestion.surahName} [{previewQuestion.surahNumber}]: {previewQuestion.startAyah} - {previewQuestion.endAyah} · Total {previewPages.length} Halaman Mushaf
+                <p className="text-xs text-slate-500 mt-0.5 truncate">
+                  QS. {previewQuestion.surahName} [{previewQuestion.surahNumber}]: {previewQuestion.startAyah} - {previewQuestion.endAyah} · {previewPages.length} Halaman Mushaf
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                {/* View Mode Toggle */}
-                <div className="hidden sm:flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-semibold">
-                  <button
-                    onClick={() => setPreviewViewMode('single')}
-                    className={`px-2.5 py-1 rounded-md transition-colors ${
-                      previewViewMode === 'single'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Tunggal
-                  </button>
-                  <button
-                    onClick={() => setPreviewViewMode('gallery')}
-                    className={`px-2.5 py-1 rounded-md transition-colors ${
-                      previewViewMode === 'gallery'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Semua Halaman
-                  </button>
-                </div>
-
-                {/* Zoom Controls */}
-                <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5">
-                  <button
-                    onClick={() => setPreviewZoom((z) => Math.max(60, z - 15))}
-                    className="p-1 rounded hover:bg-slate-100 text-slate-600"
-                    title="Perkecil"
-                  >
-                    <ZoomOut className="w-3.5 h-3.5" />
-                  </button>
-                  <span className="text-[11px] font-mono text-slate-600 px-1">{previewZoom}%</span>
-                  <button
-                    onClick={() => setPreviewZoom((z) => Math.min(160, z + 15))}
-                    className="p-1 rounded hover:bg-slate-100 text-slate-600"
-                    title="Perbesar"
-                  >
-                    <ZoomIn className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <button
-                  onClick={() => setPreviewQuestion(null)}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg ml-1"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Page navigation bar for multi-page */}
-            {previewPages.length > 1 && previewViewMode === 'single' && (
-              <div className="bg-emerald-50/70 border-b border-emerald-100 px-4 py-2 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5 overflow-x-auto">
-                  <span className="text-slate-500 font-medium mr-1">Pilih Halaman:</span>
-                  {previewPages.map((pageNum, idx) => (
-                    <button
-                      key={pageNum}
-                      onClick={() => setPreviewCurrentPageIndex(idx)}
-                      className={`px-2.5 py-0.5 rounded font-mono font-bold transition-all ${
-                        previewCurrentPageIndex === idx
-                          ? 'bg-emerald-800 text-white shadow-2xs'
-                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      Hal. {pageNum}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0 ml-2">
-                  <button
-                    onClick={() =>
-                      setPreviewCurrentPageIndex((idx) => Math.max(0, idx - 1))
-                    }
-                    disabled={previewCurrentPageIndex === 0}
-                    className="p-1 rounded bg-white border border-slate-200 text-slate-700 disabled:opacity-30"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="font-semibold text-slate-700 px-1 font-mono text-[11px]">
-                    {previewCurrentPageIndex + 1} / {previewPages.length}
-                  </span>
-                  <button
-                    onClick={() =>
-                      setPreviewCurrentPageIndex((idx) =>
-                        Math.min(previewPages.length - 1, idx + 1)
-                      )
-                    }
-                    disabled={previewCurrentPageIndex === previewPages.length - 1}
-                    className="p-1 rounded bg-white border border-slate-200 text-slate-700 disabled:opacity-30"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Mushaf Viewer Content */}
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-100 flex flex-col items-center gap-6">
-              {previewViewMode === 'single' ? (
-                // Single page display
-                <div
-                  style={{ width: `${Math.round(540 * (previewZoom / 100))}px` }}
-                  className="bg-white p-2 shadow-lg rounded-sm border border-slate-300"
-                >
-                  <div className="text-center pb-1 text-[10px] font-mono text-slate-400">
-                    Standar Mushaf Madinah · Halaman {previewPages[previewCurrentPageIndex]}
-                  </div>
-                  <img
-                    src={`https://android.quran.com/data/width_1260/page${String(
-                      previewPages[previewCurrentPageIndex] || 305
-                    ).padStart(3, '0')}.png`}
-                    alt={`Mushaf Halaman ${previewPages[previewCurrentPageIndex]}`}
-                    className="w-full h-auto block select-none"
-                  />
-                </div>
-              ) : (
-                // Gallery vertical scroll display
-                previewPages.map((pageNum, idx) => (
-                  <div
-                    key={pageNum}
-                    style={{ width: `${Math.round(540 * (previewZoom / 100))}px` }}
-                    className="bg-white p-2 shadow-lg rounded-sm border border-slate-300"
-                  >
-                    <div className="flex items-center justify-between pb-1 px-1 text-[10px] font-mono text-slate-400 border-b border-slate-100 mb-1">
-                      <span>Bagian {idx + 1} dari {previewPages.length}</span>
-                      <span>Mushaf Hal. {pageNum}</span>
-                    </div>
-                    <img
-                      src={`https://android.quran.com/data/width_1260/page${String(
-                        pageNum
-                      ).padStart(3, '0')}.png`}
-                      alt={`Mushaf Halaman ${pageNum}`}
-                      className="w-full h-auto block select-none"
-                    />
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="p-3 border-t border-slate-200 bg-white flex items-center justify-between">
-              <span className="text-[11px] text-slate-500">
-                Pencetakan Mushaf Madinah 15 Baris (Mujamma' Malik Fahd)
-              </span>
               <button
                 onClick={() => setPreviewQuestion(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg"
+                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200/70 rounded-lg shrink-0 transition-colors cursor-pointer"
+                title="Tutup Pratinjau"
+                aria-label="Tutup Pratinjau"
               >
-                Tutup Pratinjau
+                <X className="w-5 h-5" />
               </button>
+            </div>
+
+            {/* Mushaf Viewer Content - Zero Padding Left/Right/Top/Bottom */}
+            <div className="flex-1 overflow-y-auto p-0 m-0 bg-white flex flex-col items-stretch">
+              {previewPages.map((pageNum) => (
+                <div key={pageNum} className="w-full p-0 m-0 bg-white">
+                  <img
+                    src={`https://android.quran.com/data/width_1260/page${String(
+                      pageNum
+                    ).padStart(3, '0')}.png`}
+                    alt={`Mushaf Halaman ${pageNum}`}
+                    className="w-full h-auto block select-none m-0 p-0"
+                  />
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -1573,13 +1471,18 @@ export const BankSoalView: React.FC = () => {
                   <label className="text-[11px] font-bold text-slate-600 block mb-1">
                     Cabang & Jenjang
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={formBranch}
                     onChange={(e) => setFormBranch(e.target.value)}
                     required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  />
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                  >
+                    {branchAndLevelOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="text-[11px] font-bold text-slate-600 block mb-1">

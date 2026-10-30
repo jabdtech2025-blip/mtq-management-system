@@ -6,19 +6,20 @@ test.describe('E2E: Gerbang Autentikasi Produksi & Fitur Sign-Up Pengguna Baru',
     await clearStorageAndOpenGate(page);
   });
 
-  test('01. Menampilkan Gerbang Keamanan Fail-Closed & Status Koneksi Supabase', async ({ page }) => {
+  test('01. Menampilkan Gerbang Login Bersih & Tombol Besar Mode Simulasi Lokal', async ({ page }) => {
     // Verifikasi branding dan judul sistem
     await expect(page.getByText('Sistem Manajemen & Penilaian MTQ')).toBeVisible();
     await expect(page.getByText(/Gerbang Keamanan Produksi MTQ/i)).toBeVisible();
-    await expect(page.getByText(/Status Koneksi Supabase/i)).toBeVisible();
+    await expect(page.getByText(/Wajib autentikasi Supabase Auth & verifikasi keanggotaan tenant aktif/i)).toBeVisible();
 
-    // Verifikasi tombol pengecekan koneksi
-    const checkConnBtn = page.getByRole('button', { name: /Cek Koneksi/i });
-    await expect(checkConnBtn).toBeVisible();
+    // Verifikasi antarmuka login bersih: tidak menampilkan status teknis koneksi database atau peringatan gangguan
+    await expect(page.getByText(/Status Koneksi Supabase/i)).not.toBeVisible();
+    await expect(page.getByRole('button', { name: /Cek Koneksi/i })).not.toBeVisible();
+    await expect(page.getByText(/Evaluasi Tanpa Akun Database\?/i)).not.toBeVisible();
 
-    // Verifikasi area simulasi demo lokal tetap tersedia sebagai escape hatch resmi
-    await expect(page.getByText(/Evaluasi Tanpa Akun Database\?/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: /Mode Simulasi Lokal/i })).toBeVisible();
+    // Verifikasi tombol besar berwarna hijau muda "Mode Simulasi Lokal"
+    const demoSimBtn = page.getByRole('button', { name: 'Mode Simulasi Lokal', exact: true });
+    await expect(demoSimBtn).toBeVisible();
   });
 
   test('02. Beralih Antara Tab "Masuk (Login)" dan "Daftar Akun Baru (Sign Up)"', async ({ page }) => {

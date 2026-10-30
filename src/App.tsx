@@ -373,43 +373,6 @@ const AuthenticationGateView: React.FC = () => {
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Connection Status Bar */}
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-emerald-700 shrink-0" />
-                <span className="text-xs font-bold text-slate-900">
-                  Status Koneksi Supabase
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={isSubmitting}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
-              >
-                <RefreshCw className={`w-3 h-3 ${isSubmitting ? 'animate-spin' : ''}`} />
-                Cek Koneksi
-              </button>
-            </div>
-            <p className="text-xs font-medium text-slate-700">{connectionInfo.statusLabel}</p>
-            {connectionInfo.state === 'schema_missing' && (
-              <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-900">
-                Endpoint Supabase aktif, tetapi tabel inti belum ditemukan. Jalankan{' '}
-                <code className="font-mono bg-amber-100 px-1 rounded">supabase/schema.sql</code> dan{' '}
-                <code className="font-mono bg-amber-100 px-1 rounded">supabase/seed.sql</code> pada
-                SQL Editor Supabase.
-              </div>
-            )}
-            {connectionInfo.lastError && connectionInfo.state !== 'schema_missing' && (
-              <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded-lg">
-                Detail: {connectionInfo.lastError}
-              </p>
-            )}
-          </div>
-
-          {renderConnectionBlockBanner()}
-
           {/* Diagnostic Alert if authenticated but missing profile/membership */}
           {renderAccessDiagnostic()}
 
@@ -765,27 +728,16 @@ const AuthenticationGateView: React.FC = () => {
             </div>
           )}
 
-          {/* Explicit Offline Demo Simulation Escape Hatch */}
+          {/* Mode Simulasi Lokal Button */}
           <div className="pt-4 border-t border-slate-200">
-            <div className="p-3.5 rounded-xl bg-amber-50/80 border border-amber-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-1.5 text-xs font-extrabold text-amber-950">
-                  <FlaskConical className="w-4 h-4 text-amber-700 shrink-0" />
-                  <span>Evaluasi Tanpa Akun Database?</span>
-                </div>
-                <p className="text-[11px] text-amber-900 leading-relaxed">
-                  Gunakan Mode Simulasi Demo Lokal yang terisolasi sepenuhnya dari database produksi.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={enterOfflineDemoSimulation}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shrink-0 cursor-pointer transition-all"
-              >
-                <span>Mode Simulasi Lokal</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={enterOfflineDemoSimulation}
+              className="w-full py-3.5 px-4 rounded-xl bg-emerald-100 hover:bg-emerald-200 active:scale-[0.99] text-emerald-950 font-bold text-sm sm:text-base border border-emerald-300 flex items-center justify-center gap-2 shadow-sm cursor-pointer transition-all"
+            >
+              <FlaskConical className="w-5 h-5 text-emerald-800" />
+              <span>Mode Simulasi Lokal</span>
+            </button>
           </div>
         </div>
       </div>

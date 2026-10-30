@@ -137,7 +137,7 @@ export const RekapNilaiView: React.FC = () => {
 
       return matchesSearch && matchesStage && matchesKafilah && matchesStatus;
     });
-  }, [participants, searchQuery, selectedStage, selectedKafilah, selectedStatus, getParticipantProgress]);
+  }, [participants, searchQuery, selectedStage, selectedKafilah, selectedStatus, getParticipantProgress, assessments]);
 
   const getJudgeAssessment = (
     participantId: string,
@@ -354,8 +354,8 @@ export const RekapNilaiView: React.FC = () => {
                 <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 px-4 py-2.5 border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
                   Identitas Peserta
                 </th>
-                <th className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50 text-slate-700 min-w-[190px]">
-                  Babak & Maqra
+                <th className="px-2 py-2.5 border-r border-slate-200 text-center bg-slate-50 text-slate-700 w-28 max-w-[120px]">
+                  Maqra / Soal
                 </th>
                 {activeJudges.map((j) => (
                   <th
@@ -381,7 +381,7 @@ export const RekapNilaiView: React.FC = () => {
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[10px] font-semibold uppercase">
                 <th className="sticky left-0 z-20 bg-slate-50 px-4 py-2 w-16">Undian</th>
                 <th className="sticky left-16 z-20 bg-slate-50 px-4 py-2 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">Nama & Grup</th>
-                <th className="px-3 py-2 border-r border-slate-200 text-center">Maqra / Soal</th>
+                <th className="px-2 py-2 border-r border-slate-200 text-center w-28 max-w-[120px]">Maqra / Soal</th>
 
                 {activeJudges.map((j) => (
                   <React.Fragment key={j.id}>
@@ -517,14 +517,9 @@ export const RekapNilaiView: React.FC = () => {
                           </p>
                         </td>
                         <td className="px-3 py-3 border-r border-slate-200 text-center">
-                          <div className="inline-block text-center max-w-[220px]">
-                            <span className="font-mono text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mr-1">
-                              {q.code}
-                            </span>
-                            <span className="text-slate-800 font-medium text-[11px] truncate block">
-                              {q.title}
-                            </span>
-                          </div>
+                          <span className="font-mono text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block">
+                            {q.code}
+                          </span>
                         </td>
                         {activeJudges.map((j) => {
                           const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
@@ -623,14 +618,9 @@ export const RekapNilaiView: React.FC = () => {
 
                             {/* Maqra Specific Column */}
                             <td className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50/30">
-                              <div className="inline-flex items-center gap-1.5 max-w-[240px]">
-                                <span className="font-mono text-[10px] font-bold text-emerald-800 bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-200 shrink-0">
-                                  Maqra {qIdx + 1}
-                                </span>
-                                <span className="text-slate-800 font-semibold text-[11px] truncate">
-                                  [{q.code}] {q.title}
-                                </span>
-                              </div>
+                              <span className="font-mono text-xs font-bold text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded border border-emerald-200 inline-block">
+                                {q.code}
+                              </span>
                             </td>
 
                             {/* Scores for this specific maqra */}
@@ -709,7 +699,7 @@ export const RekapNilaiView: React.FC = () => {
                           Akumulasi Peserta #{p.lotteryNumber}
                         </td>
                         <td className="px-3 py-2 text-center text-emerald-950 font-bold text-[11px] border-r border-slate-200">
-                          Rata-Rata Keseluruhan ({stageQuestions.length} Maqra)
+                          Total Maqra {stageQuestions.length}
                         </td>
                         {activeJudges.map((j) => {
                           const judgeScores = stageQuestions

@@ -22,7 +22,8 @@ import {
   Menu,
   ShieldCheck,
   Check,
-  RefreshCw
+  RefreshCw,
+  Hand
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { CanvasStroke, NormalizedPoint, AssignedMaqraItem } from '../../types/mtq';
@@ -102,9 +103,11 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   const isFinalized = currentAssessment?.status === 'finalized';
 
-  // Canvas drawing state
+  // Canvas & Image refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const prevPageRef = useRef<number | null>(null);
 
   const [currentPage, setCurrentPage] = useState<number>(
     activeQuestionObj?.pageStart || activeQuestionObj?.pageNumber || currentParticipant?.pageNumber || 305
@@ -115,7 +118,8 @@ export const PenilaianDualPanelView: React.FC = () => {
   const [imageLoaded, setImageLoaded] = useState<boolean>(false);
   const [imageLoadError, setImageLoadError] = useState<boolean>(false);
 
-  const [activeTool, setActiveTool] = useState<'pen' | 'marker' | 'eraser'>('pen');
+  // Default tool is 'scroll' (bukan pena coretan) agar hakim dapat scroll mushaf dengan bebas kecuali memilih mode coretan
+  const [activeTool, setActiveTool] = useState<'scroll' | 'pen' | 'marker' | 'eraser'>('scroll');
   const [activeColor, setActiveColor] = useState<string>('#dc2626'); // Red for Tajwid Jali
   const [strokeSize, setStrokeSize] = useState<number>(3);
   const [strokes, setStrokes] = useState<CanvasStroke[]>([]);
@@ -139,16 +143,19 @@ export const PenilaianDualPanelView: React.FC = () => {
   const [imageSourceIndex, setImageSourceIndex] = useState<number>(0);
   const currentImageUrl = imageSources[imageSourceIndex] || imageSources[0];
 
-  // Load participant's assessment and page when switching participants, questions, or judges
+  // Reset drawing state when switching participant, judge, stage, or question (TANPA mereset imageLoaded agar mushaf tidak loading terus!)
   useEffect(() => {
-    if (currentParticipant) {
-      setImageLoaded(false);
-      setImageLoadError(false);
-      setImageSourceIndex(0);
-      setIsDrawing(false);
-      setCurrentStroke([]);
+    setIsDrawing(false);
+    setCurrentStroke([]);
+  }, [currentParticipant?.id, activeJudgeId, activeStageName, activeQuestionId]);
 
-      // Load strokes strictly for active question, judge, and stage
+  // Synchronize strokes from assessment state when not actively drawing (TANPA mereset imageLoaded!)
+  useEffect(() => {
+    if (!currentParticipant) {
+      setStrokes([]);
+      return;
+    }
+    if (!isDrawing) {
       const asm = getJudgeAssessment(
         currentParticipant.id,
         activeJudgeId,
@@ -156,10 +163,8 @@ export const PenilaianDualPanelView: React.FC = () => {
         activeQuestionId
       );
       setStrokes(asm?.annotations || []);
-    } else {
-      setStrokes([]);
     }
-  }, [currentParticipant?.id, activeJudgeId, activeStageName, activeQuestionId, assessments]);
+  }, [currentParticipant?.id, activeJudgeId, activeStageName, activeQuestionId, assessments, isDrawing, getJudgeAssessment]);
 
   // Handler to switch question
   const handleSelectQuestion = (qId: string) => {
@@ -171,11 +176,18 @@ export const PenilaianDualPanelView: React.FC = () => {
     }
   };
 
-  // Reset image state on page change
+  // Reset image state ONLY when currentPage actually changes
   useEffect(() => {
-    setImageLoaded(false);
-    setImageLoadError(false);
-    setImageSourceIndex(0);
+    if (prevPageRef.current !== currentPage) {
+      prevPageRef.current = currentPage;
+      setImageLoadError(false);
+      setImageSourceIndex(0);
+      if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+        setImageLoaded(true);
+      } else {
+        setImageLoaded(false);
+      }
+    }
   }, [currentPage]);
 
   // Redraw canvas with normalized coordinates
@@ -214,7 +226,7 @@ export const PenilaianDualPanelView: React.FC = () => {
     });
 
     // Draw active drawing stroke if in progress
-    if (currentStroke.length > 1 && activeTool !== 'eraser') {
+    if (currentStroke.length > 1 && activeTool !== 'eraser' && activeTool !== 'scroll') {
       ctx.beginPath();
       ctx.moveTo(currentStroke[0].x * canvas.width, currentStroke[0].y * canvas.height);
       for (let i = 1; i < currentStroke.length; i++) {
@@ -269,7 +281,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Pointer event handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!currentParticipant || isFinalized || isAdminMode) return;
+    if (!currentParticipant || isFinalized || isAdminMode || activeTool === 'scroll') return;
     const pt = getNormalizedPoint(e);
     if (!pt) return;
 
@@ -284,7 +296,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !currentParticipant || isFinalized || isAdminMode) return;
+    if (!isDrawing || !currentParticipant || isFinalized || isAdminMode || activeTool === 'scroll') return;
     const pt = getNormalizedPoint(e);
     if (!pt) return;
 
@@ -297,7 +309,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   };
 
   const handlePointerUp = () => {
-    if (!isDrawing || !currentParticipant || isFinalized || isAdminMode) {
+    if (!isDrawing || !currentParticipant || isFinalized || isAdminMode || activeTool === 'scroll') {
       setIsDrawing(false);
       setCurrentStroke([]);
       return;
@@ -435,13 +447,8 @@ export const PenilaianDualPanelView: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Status & Mobile Split Toggle */}
+        {/* Right Mobile Split Toggle (Tanpa Status Supabase URL) */}
         <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono">
-            <Clock className="w-3.5 h-3.5 text-slate-400" />
-            <span className="hidden sm:inline">{syncStatus}</span>
-            <span>({lastSyncTime})</span>
-          </div>
 
           {/* Toggle Tab ONLY for mobile screens (<768px). Tablets and laptops show split-screen directly */}
           <div className="flex md:hidden bg-slate-100 border border-slate-200 rounded-lg p-0.5">
@@ -537,22 +544,34 @@ export const PenilaianDualPanelView: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  {/* Group 3: Tool selection - Icons only, no text labels */}
+                  {/* Group 3: Tool selection - Default is Scroll/Geser; click Pen/Marker/Eraser to annotate */}
                   <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 gap-0.5 shadow-2xs">
                     <button
-                      onClick={() => setActiveTool('pen')}
+                      onClick={() => setActiveTool('scroll')}
+                      className={`p-1.5 rounded-md transition-all cursor-pointer ${
+                        activeTool === 'scroll'
+                          ? 'bg-emerald-800 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                      }`}
+                      title="Mode Geser / Scroll Mushaf (Default)"
+                      aria-label="Mode Geser / Scroll Mushaf"
+                    >
+                      <Hand className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setActiveTool((prev) => (prev === 'pen' ? 'scroll' : 'pen'))}
                       className={`p-1.5 rounded-md transition-all cursor-pointer ${
                         activeTool === 'pen'
                           ? 'bg-emerald-800 text-white shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                       }`}
-                      title="Pena Koreksi Anotasi"
+                      title="Pena Koreksi Anotasi (Klik untuk mulai mencoret)"
                       aria-label="Pena Koreksi Anotasi"
                     >
                       <PenTool className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => setActiveTool('marker')}
+                      onClick={() => setActiveTool((prev) => (prev === 'marker' ? 'scroll' : 'marker'))}
                       className={`p-1.5 rounded-md transition-all cursor-pointer ${
                         activeTool === 'marker'
                           ? 'bg-emerald-800 text-white shadow-2xs'
@@ -564,7 +583,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                       <Highlighter className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => setActiveTool('eraser')}
+                      onClick={() => setActiveTool((prev) => (prev === 'eraser' ? 'scroll' : 'eraser'))}
                       className={`p-1.5 rounded-md transition-all cursor-pointer ${
                         activeTool === 'eraser'
                           ? 'bg-emerald-800 text-white shadow-2xs'
@@ -593,7 +612,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                         }}
                         style={{ backgroundColor: c.color }}
                         className={`w-4 h-4 rounded-full transition-all cursor-pointer ${
-                          activeColor === c.color && activeTool !== 'eraser'
+                          activeColor === c.color && activeTool !== 'eraser' && activeTool !== 'scroll'
                             ? 'ring-2 ring-emerald-700 ring-offset-1 scale-110 shadow-2xs'
                             : 'opacity-75 hover:opacity-100 hover:scale-105'
                         }`}
@@ -702,6 +721,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
               {/* 3. Authentic High-Res Mushaf Scan */}
               <img
+                ref={imgRef}
                 src={currentImageUrl}
                 alt={`Mushaf Madinah Halaman ${currentPage}`}
                 className="w-full h-auto block select-none pointer-events-none"
@@ -729,10 +749,10 @@ export const PenilaianDualPanelView: React.FC = () => {
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
                 onPointerCancel={handlePointerUp}
-                style={{ touchAction: 'none' }}
+                style={{ touchAction: activeTool === 'scroll' ? 'auto' : 'none' }}
                 className={`absolute inset-0 w-full h-full ${
-                  isAdminMode || isFinalized
-                    ? 'cursor-default pointer-events-none'
+                  isAdminMode || isFinalized || activeTool === 'scroll'
+                    ? 'cursor-grab pointer-events-none'
                     : 'cursor-crosshair'
                 }`}
               />

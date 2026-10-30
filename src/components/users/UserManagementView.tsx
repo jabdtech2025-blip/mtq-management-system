@@ -18,6 +18,8 @@ import { User, UserRole } from '../../types/mtq';
 export const UserManagementView: React.FC = () => {
   const {
     users,
+    currentUser,
+    authenticatedProfile,
     addUser,
     updateUser,
     toggleUserStatus,
@@ -203,31 +205,7 @@ export const UserManagementView: React.FC = () => {
         </button>
       </div>
 
-      {/* Provisioning & Security Mode Banner */}
-      <div
-        className={`rounded-xl p-3.5 flex items-start gap-2.5 text-xs border ${
-          isLiveSupabaseMode
-            ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-            : 'bg-amber-50 border-amber-200 text-amber-900'
-        }`}
-      >
-        <AlertCircle
-          className={`w-4 h-4 shrink-0 mt-0.5 ${
-            isLiveSupabaseMode ? 'text-emerald-700' : 'text-amber-700'
-          }`}
-        />
-        <p className="leading-relaxed">
-          {isLiveSupabaseMode ? (
-            <>
-              <strong>Provisioning Supabase Auth & Tenant Membership:</strong> Penambahan atau pembaruan akun dengan alamat email akan menautkan profil pada <code>auth.users</code> melalui RPC <code>upsert_tenant_member_profile</code> atau mengirim undangan resmi melalui Edge Function <code>admin-provision-user</code> tanpa mengekspos <code>service_role</code> di klien.
-            </>
-          ) : (
-            <>
-              <strong>Mode Simulasi Lokal Terisolasi:</strong> Anda sedang berada di mode simulasi lokal. Perubahan akun disimpan pada memori sesi lokal.
-            </>
-          )}
-        </p>
-      </div>
+
 
       {operationBanner && (
         <div
@@ -395,9 +373,26 @@ export const UserManagementView: React.FC = () => {
                           <Pencil className="w-3.5 h-3.5 inline" />
                         </button>
                         <button
-                          onClick={() => toggleUserStatus(u.id)}
-                          className="p-1.5 text-slate-500 hover:text-amber-800 hover:bg-amber-50 rounded"
-                          title={u.status !== 'Nonaktif' ? 'Nonaktifkan Akun' : 'Aktifkan Akun'}
+                          onClick={async () => {
+                            const res = await toggleUserStatus(u.id);
+                            setOperationBanner({
+                              type: res.success ? 'success' : 'error',
+                              message: res.message
+                            });
+                          }}
+                          disabled={
+                            u.id === currentUser.id ||
+                            Boolean(authenticatedProfile && u.id === authenticatedProfile.authUserId)
+                          }
+                          className="p-1.5 text-slate-500 hover:text-amber-800 hover:bg-amber-50 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={
+                            u.id === currentUser.id ||
+                            Boolean(authenticatedProfile && u.id === authenticatedProfile.authUserId)
+                              ? 'Tidak dapat menonaktifkan akun yang sedang Anda gunakan sendiri'
+                              : u.status !== 'Nonaktif'
+                              ? 'Nonaktifkan Akun'
+                              : 'Aktifkan Akun'
+                          }
                         >
                           <Power className="w-3.5 h-3.5 inline" />
                         </button>

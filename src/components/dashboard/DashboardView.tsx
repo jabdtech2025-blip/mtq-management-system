@@ -21,6 +21,7 @@ export const DashboardView: React.FC = () => {
     stageParticipations,
     kafilahs,
     users,
+    assessments,
     setCurrentView,
     setSelectedParticipantId,
     activityLogs,
@@ -46,10 +47,23 @@ export const DashboardView: React.FC = () => {
   const completionPercentage =
     totalUniqueParticipants > 0 ? Math.round((lengkapCount / totalUniqueParticipants) * 100) : 0;
 
-  // Real ongoing participant actively being scored (strictly no fallback to first participant!)
+  // Real ongoing participant actively being scored
   const ongoingParticipant =
-    tenantParticipants.find((p) => getParticipantProgress(p.id) === 'Berlangsung' || p.status === 'Berlangsung') ||
-    null;
+    tenantParticipants.find(
+      (p) =>
+        getParticipantProgress(p.id) === 'Berlangsung' ||
+        (p.status as string) === 'Berlangsung' ||
+        (p.status as string) === 'Sedang Tampil'
+    ) ||
+    tenantParticipants.find((p) => getParticipantProgress(p.id) === 'Menunggu Hakim Lain') ||
+    (() => {
+      // Find participant with recent assessment activity
+      const activeAsm = assessments.find((a) => a.tenantId === currentTenant.id && (a.status === 'in_progress' || a.status === 'finalized'));
+      if (activeAsm) {
+        return tenantParticipants.find((p) => p.id === activeAsm.participantId) || null;
+      }
+      return tenantParticipants[0] || null;
+    })();
 
   const handleOpenActiveScoring = () => {
     if (ongoingParticipant) {
@@ -253,24 +267,48 @@ export const DashboardView: React.FC = () => {
               Aktivitas Penilaian & Penyimpanan Terbaru
             </h3>
           </div>
-          <span className="text-[10px] text-slate-400 font-medium">Tersimpan di local storage</span>
+          <span className="text-[10px] text-slate-400 font-medium">Tersimpan di database</span>
         </div>
 
         <div className="space-y-2.5">
-          {activityLogs.slice(0, 5).map((log, idx) => (
-            <div
-              key={`${log.id}-${idx}`}
-              className="p-3 rounded-lg bg-slate-50 border border-slate-200/70 flex items-start justify-between gap-3 text-xs"
-            >
-              <div>
-                <p className="font-bold text-slate-800">{log.title}</p>
-                <p className="text-slate-600 mt-0.5">{log.description}</p>
+          {(() => {
+            const combinedLogs: Array<{ id: string; title: string; description: string; timestamp: string }> = [...activityLogs];
+            
+            // Add recent finalized/in-progress assessments to activity view if not already logged
+            assessments
+              .filter((a) => a.tenantId === currentTenant.id)
+              .forEach((a) => {
+                const part = tenantParticipants.find((p) => p.id === a.participantId);
+                const partName = part ? `${part.name} (#${part.lotteryNumber})` : a.participantId;
+                const statusLabel = a.status === 'finalized' ? 'Finalisasi Nilai' : 'Penyimpanan Lembar Penilaian';
+                const desc = `Hakim ${a.judgeName} (${a.judgeField}) - Nilai Akhir: ${a.finalScore.toFixed(2)} pts untuk ${partName}.`;
+                const ts = a.finalizedAt || a.lastUpdated || 'Baru saja';
+                
+                if (!combinedLogs.some((l) => l.description.includes(partName) && l.timestamp === ts)) {
+                  combinedLogs.push({
+                    id: `asm-log-${a.id}`,
+                    title: statusLabel,
+                    description: desc,
+                    timestamp: ts
+                  });
+                }
+              });
+
+            return combinedLogs.slice(0, 5).map((log, idx) => (
+              <div
+                key={`${log.id}-${idx}`}
+                className="p-3 rounded-lg bg-slate-50 border border-slate-200/70 flex items-start justify-between gap-3 text-xs"
+              >
+                <div>
+                  <p className="font-bold text-slate-800">{log.title}</p>
+                  <p className="text-slate-600 mt-0.5">{log.description}</p>
+                </div>
+                <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                  {log.timestamp}
+                </span>
               </div>
-              <span className="text-[10px] font-mono text-slate-400 shrink-0">
-                {log.timestamp}
-              </span>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       </div>
     </div>

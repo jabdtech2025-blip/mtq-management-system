@@ -40,6 +40,7 @@ export const MasterDataView: React.FC = () => {
     stages,
     addStage,
     updateStage,
+    deleteStage,
     judgeAssignments,
     addJudgeAssignment,
     removeJudgeAssignment,
@@ -58,8 +59,10 @@ export const MasterDataView: React.FC = () => {
     updateRubricVersion,
     activateRubricVersion,
     archiveRubricVersion,
+    deleteRubricVersion,
     addCompetitionRule,
-    updateCompetitionRule
+    updateCompetitionRule,
+    deleteCompetitionRule
   } = useMtq();
 
   const [activeTab, setActiveTab] = useState<MasterTab>('kategori');
@@ -131,6 +134,7 @@ export const MasterDataView: React.FC = () => {
   const [genericCode, setGenericCode] = useState('');
 
   // Delete Guard Warning State
+  const [rubricToDelete, setRubricToDelete] = useState<RubricVersion | null>(null);
   const [deleteWarningItem, setDeleteWarningItem] = useState<{
     type: 'jenjang' | 'cabang';
     id: string;
@@ -718,6 +722,14 @@ export const MasterDataView: React.FC = () => {
                           <Archive className="w-3.5 h-3.5" />
                         </button>
                       )}
+                      <button
+                        onClick={() => setRubricToDelete(rubric)}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 cursor-pointer inline-flex items-center gap-1"
+                        title="Hapus Versi Rubrik"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus</span>
+                      </button>
                     </div>
                   </div>
 
@@ -772,6 +784,13 @@ export const MasterDataView: React.FC = () => {
                                     title={isInactive ? 'Aktifkan kembali bidang ini' : 'Nonaktifkan bidang ini'}
                                   >
                                     {isInactive ? 'Aktifkan' : 'Nonaktif'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleOrRemoveField(rubric, fld, 'remove')}
+                                    className="p-0.5 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                                    title="Hapus Bidang Ini"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                               </div>
@@ -878,23 +897,39 @@ export const MasterDataView: React.FC = () => {
                     )}
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => {
-                        setEditingRule(rule);
-                        setRuleBranchName(rule.branchName);
-                        setRuleRubricId(rule.rubricVersionId);
-                        setRuleTieBreakInput(rule.tieBreakOrder.join(', '));
-                        setRuleQuotaPenyisihan(rule.quotaPerStage?.['Penyisihan'] || 3);
-                        setRuleQuotaFinal(rule.quotaPerStage?.['Final'] || 3);
-                        setRuleOfficialSource(rule.officialSource || '');
-                        setRuleIsVerified(Boolean(rule.isVerifiedOfficial));
-                        setIsEditRuleOpen(true);
-                      }}
-                      className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      <span>Edit</span>
-                    </button>
+                    <div className="inline-flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          setEditingRule(rule);
+                          setRuleBranchName(rule.branchName);
+                          setRuleRubricId(rule.rubricVersionId);
+                          setRuleTieBreakInput(rule.tieBreakOrder.join(', '));
+                          setRuleQuotaPenyisihan(rule.quotaPerStage?.['Penyisihan'] || 3);
+                          setRuleQuotaFinal(rule.quotaPerStage?.['Final'] || 3);
+                          setRuleOfficialSource(rule.officialSource || '');
+                          setRuleIsVerified(Boolean(rule.isVerifiedOfficial));
+                          setIsEditRuleOpen(true);
+                        }}
+                        className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          const res = deleteCompetitionRule(rule.id);
+                          setFeedbackMessage({
+                            type: res.success ? 'success' : 'error',
+                            text: res.message
+                          });
+                        }}
+                        className="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                        title="Hapus Aturan Cabang"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -955,16 +990,33 @@ export const MasterDataView: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() =>
-                        updateStage(stg.id, {
-                          status: stg.status === 'Aktif' ? 'Selesai' : 'Aktif'
-                        })
-                      }
-                      className="text-xs text-slate-600 hover:text-emerald-800 font-semibold cursor-pointer"
-                    >
-                      Ubah Status
-                    </button>
+                    <div className="inline-flex items-center gap-2">
+                      <button
+                        onClick={() =>
+                          updateStage(stg.id, {
+                            status: stg.status === 'Aktif' ? 'Selesai' : 'Aktif'
+                          })
+                        }
+                        className="text-xs text-slate-600 hover:text-emerald-800 font-semibold cursor-pointer"
+                      >
+                        Ubah Status
+                      </button>
+                      <button
+                        onClick={() => {
+                          const res = deleteStage(stg.id);
+                          setFeedbackMessage({
+                            type: res.success ? 'success' : 'error',
+                            text: res.message
+                          });
+                        }}
+                        disabled={stg.isFinalized}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg inline-flex items-center gap-1 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                        title={stg.isFinalized ? 'Babak sudah disahkan dan tidak dapat dihapus' : 'Hapus Babak'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1168,8 +1220,8 @@ export const MasterDataView: React.FC = () => {
                   </label>
                   <input
                     type="number"
-                    step="0.25"
-                    min="0.1"
+                    step="any"
+                    min="0.05"
                     max="10"
                     value={catDeduction}
                     onChange={(e) => setCatDeduction(Number(e.target.value))}
@@ -1788,6 +1840,55 @@ export const MasterDataView: React.FC = () => {
                 className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
               >
                 Nonaktifkan Saja
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rubric Delete Confirmation Modal */}
+      {rubricToDelete && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5 text-rose-700" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Konfirmasi Hapus Versi Rubrik
+                </h3>
+                <p className="text-xs text-slate-500 font-mono">
+                  {rubricToDelete.name} (v{rubricToDelete.version})
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed mb-5">
+              Apakah Anda yakin ingin menghapus versi rubrik <strong>"{rubricToDelete.name}"</strong> secara permanen? Tindakan ini tidak dapat dibatalkan.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setRubricToDelete(null)}
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const res = deleteRubricVersion(rubricToDelete.id);
+                  setRubricToDelete(null);
+                  setFeedbackMessage({
+                    type: res.success ? 'success' : 'error',
+                    text: res.message
+                  });
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+              >
+                Ya, Hapus Permanen
               </button>
             </div>
           </div>

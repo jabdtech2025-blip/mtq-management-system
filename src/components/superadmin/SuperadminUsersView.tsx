@@ -7,6 +7,7 @@ import {
   XCircle,
   Pencil,
   Power,
+  Trash2,
   Building,
   X,
   AlertCircle,
@@ -20,10 +21,13 @@ export const SuperadminUsersView: React.FC = () => {
     users,
     addUser,
     updateUser,
+    toggleUserStatus,
+    deleteUser,
     retryUserProvisioning,
     requestPasswordReset,
     tenants,
-    isLiveSupabaseMode
+    isLiveSupabaseMode,
+    currentUser
   } = useMtq();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,6 +41,8 @@ export const SuperadminUsersView: React.FC = () => {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [deleteModalUser, setDeleteModalUser] = useState<User | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Tenant reassignment confirmation modal
   const [reassignModalUser, setReassignModalUser] = useState<User | null>(null);
@@ -392,11 +398,37 @@ export const SuperadminUsersView: React.FC = () => {
                         )}
                         <button
                           onClick={() => handleOpenEdit(u)}
-                          className="p-1.5 text-slate-500 hover:text-purple-800 hover:bg-purple-50 rounded"
+                          className="p-1.5 text-slate-500 hover:text-purple-800 hover:bg-purple-50 rounded cursor-pointer"
                           title="Edit Akun"
                         >
                           <Pencil className="w-3.5 h-3.5 inline" />
                         </button>
+                        <button
+                          onClick={async () => {
+                            const res = await toggleUserStatus(u.id);
+                            setOperationBanner({
+                              type: res.success ? 'success' : 'error',
+                              message: res.message
+                            });
+                          }}
+                          className={`p-1.5 rounded cursor-pointer transition-colors ${
+                            u.status === 'Nonaktif'
+                              ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
+                              : 'text-amber-600 hover:text-amber-800 hover:bg-amber-50'
+                          }`}
+                          title={u.status === 'Nonaktif' ? 'Aktifkan Akun' : 'Nonaktifkan Akun'}
+                        >
+                          <Power className="w-3.5 h-3.5 inline" />
+                        </button>
+                        {u.id !== currentUser.id && u.role !== 'superadmin' && (
+                          <button
+                            onClick={() => setDeleteModalUser(u)}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded cursor-pointer transition-colors"
+                            title="Hapus Akun Pengguna"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 inline" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -582,6 +614,60 @@ export const SuperadminUsersView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {deleteModalUser && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Hapus Akun Pengguna?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Akun profil dan hak akses keanggotaan tenant akan dihapus.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-200 leading-relaxed">
+              Apakah Anda yakin ingin menghapus akun <strong>{deleteModalUser.name}</strong> ({deleteModalUser.email || deleteModalUser.username})? Tindakan ini akan menghapus akun dari platform.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeleteModalUser(null)}
+                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  setIsDeleting(true);
+                  const res = await deleteUser(deleteModalUser.id);
+                  setIsDeleting(false);
+                  setDeleteModalUser(null);
+                  setOperationBanner({
+                    type: res.success ? 'success' : 'error',
+                    message: res.message
+                  });
+                }}
+                className="px-4 py-2 bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isDeleting ? 'Menghapus...' : 'Ya, Hapus Akun'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

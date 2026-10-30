@@ -7,6 +7,7 @@ import {
   XCircle,
   Pencil,
   Power,
+  Trash2,
   Users,
   X,
   ExternalLink,
@@ -16,11 +17,25 @@ import { useMtq } from '../../context/MtqContext';
 import { Tenant } from '../../types/mtq';
 
 export const SuperadminTenantsView: React.FC = () => {
-  const { tenants, addTenant, updateTenant, setTenantId, setCurrentView } = useMtq();
+  const {
+    tenants,
+    addTenant,
+    updateTenant,
+    toggleTenantStatus,
+    deleteTenant,
+    setTenantId,
+    setCurrentView
+  } = useMtq();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const [deleteModalTenant, setDeleteModalTenant] = useState<Tenant | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [operationBanner, setOperationBanner] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   // Form states
   const [formName, setFormName] = useState('');
@@ -120,6 +135,24 @@ export const SuperadminTenantsView: React.FC = () => {
         </button>
       </div>
 
+      {operationBanner && (
+        <div
+          className={`rounded-xl p-3.5 flex items-center justify-between gap-3 text-xs border ${
+            operationBanner.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}
+        >
+          <span>{operationBanner.message}</span>
+          <button
+            onClick={() => setOperationBanner(null)}
+            className="text-slate-500 hover:text-slate-800 font-bold px-2 py-0.5 cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex items-center justify-between">
         <div className="relative flex-1 max-w-md">
@@ -171,14 +204,18 @@ export const SuperadminTenantsView: React.FC = () => {
                           : 'bg-slate-100 text-slate-500'
                       }`}
                     >
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      {t.status === 'Aktif' ? (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      ) : (
+                        <XCircle className="w-3 h-3 text-slate-400" />
+                      )}
                       <span>{t.status}</span>
                     </span>
                   </td>
-                  <td className="px-5 py-3.5 text-right space-x-2">
+                  <td className="px-5 py-3.5 text-right space-x-1.5 whitespace-nowrap">
                     <button
                       onClick={() => handleEnterTenant(t.id)}
-                      className="px-2.5 py-1 text-xs font-semibold bg-purple-50 text-purple-800 hover:bg-purple-100 rounded-lg inline-flex items-center gap-1"
+                      className="px-2.5 py-1 text-xs font-semibold bg-purple-50 text-purple-800 hover:bg-purple-100 rounded-lg inline-flex items-center gap-1 cursor-pointer"
                       title="Buka Workspace MTQ"
                     >
                       <ExternalLink className="w-3 h-3" />
@@ -186,11 +223,37 @@ export const SuperadminTenantsView: React.FC = () => {
                     </button>
                     <button
                       onClick={() => handleOpenEdit(t)}
-                      className="p-1.5 text-slate-500 hover:text-purple-800 hover:bg-purple-50 rounded"
+                      className="p-1.5 text-slate-500 hover:text-purple-800 hover:bg-purple-50 rounded cursor-pointer"
                       title="Edit MTQ"
                     >
                       <Pencil className="w-3.5 h-3.5 inline" />
                     </button>
+                    <button
+                      onClick={async () => {
+                        const res = await toggleTenantStatus(t.id);
+                        setOperationBanner({
+                          type: res.success ? 'success' : 'error',
+                          message: res.message
+                        });
+                      }}
+                      className={`p-1.5 rounded cursor-pointer transition-colors ${
+                        t.status === 'Aktif'
+                          ? 'text-amber-600 hover:text-amber-800 hover:bg-amber-50'
+                          : 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
+                      }`}
+                      title={t.status === 'Aktif' ? 'Nonaktifkan Penyelenggara MTQ' : 'Aktifkan Penyelenggara MTQ'}
+                    >
+                      <Power className="w-3.5 h-3.5 inline" />
+                    </button>
+                    {t.id !== 'platform' && t.id !== '00000000-0000-0000-0000-000000000000' && (
+                      <button
+                        onClick={() => setDeleteModalTenant(t)}
+                        className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded cursor-pointer transition-colors"
+                        title="Hapus Penyelenggara MTQ"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 inline" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -305,6 +368,60 @@ export const SuperadminTenantsView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Tenant Confirmation Modal */}
+      {deleteModalTenant && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Hapus Penyelenggara MTQ?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Tindakan ini permanen dan menghapus seluruh data terkait.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-200 leading-relaxed">
+              Apakah Anda yakin ingin menghapus <strong>{deleteModalTenant.name}</strong> ({deleteModalTenant.code})? Seluruh data musabaqah dan keanggotaan tenant ini akan dihapus dari sistem.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeleteModalTenant(null)}
+                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  setIsDeleting(true);
+                  const res = await deleteTenant(deleteModalTenant.id);
+                  setIsDeleting(false);
+                  setDeleteModalTenant(null);
+                  setOperationBanner({
+                    type: res.success ? 'success' : 'error',
+                    message: res.message
+                  });
+                }}
+                className="px-4 py-2 bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isDeleting ? 'Menghapus...' : 'Ya, Hapus Penyelenggara'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

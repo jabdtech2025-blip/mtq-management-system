@@ -79,6 +79,8 @@ interface MtqContextType {
   setTenantId: (id: string) => void;
   addTenant: (tenant: Omit<Tenant, 'id'>) => void;
   updateTenant: (id: string, updated: Partial<Tenant>) => void;
+  toggleTenantStatus: (id: string) => Promise<{ success: boolean; message: string }>;
+  deleteTenant: (id: string) => Promise<{ success: boolean; message: string }>;
 
   users: User[];
   currentUser: User;
@@ -86,7 +88,8 @@ interface MtqContextType {
   addUser: (user: Omit<User, 'id'> & { initialPassword?: string }) => Promise<{ success: boolean; message: string }>;
   updateUser: (id: string, updated: Partial<User>) => Promise<{ success: boolean; message: string }>;
   retryUserProvisioning: (id: string) => Promise<{ success: boolean; message: string }>;
-  toggleUserStatus: (id: string) => void;
+  toggleUserStatus: (id: string) => Promise<{ success: boolean; message: string }>;
+  deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
 
   kafilahs: Kafilah[];
   participants: Participant[];
@@ -116,8 +119,10 @@ interface MtqContextType {
   updateRubricVersion: (id: string, updated: Partial<RubricVersion>) => { success: boolean; message: string };
   activateRubricVersion: (id: string) => { success: boolean; message: string };
   archiveRubricVersion: (id: string) => void;
+  deleteRubricVersion: (id: string) => { success: boolean; message: string };
   addCompetitionRule: (rule: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => void;
   updateCompetitionRule: (id: string, updated: Partial<CompetitionRuleConfig>) => void;
+  deleteCompetitionRule: (id: string) => { success: boolean; message: string };
   getActiveRubricForBranch: (branchName: string, branchId?: string) => RubricVersion | null;
   getBranchRuleConfigByBranch: (branchName: string, branchId?: string) => CompetitionRuleConfig;
 
@@ -252,6 +257,7 @@ interface MtqContextType {
   // Stages & Progressions
   addStage: (stage: Omit<CompetitionStage, 'id' | 'tenantId'>) => void;
   updateStage: (id: string, updated: Partial<CompetitionStage>) => void;
+  deleteStage: (id: string) => { success: boolean; message: string };
   advanceQualifiers: (
     currentStageNameOrParams:
       | string
@@ -748,6 +754,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(STORAGE_PREFIX + 'jenjang_list', JSON.stringify(jenjangList));
     } catch {}
   }, [jenjangList, isLiveSupabaseMode]);
+
+  useEffect(() => {
+    if (isLiveSupabaseMode) return;
+    try {
+      localStorage.setItem(STORAGE_PREFIX + 'rubric_versions', JSON.stringify(rubricVersions));
+    } catch {}
+  }, [rubricVersions, isLiveSupabaseMode]);
+
+  useEffect(() => {
+    if (isLiveSupabaseMode) return;
+    try {
+      localStorage.setItem(STORAGE_PREFIX + 'competition_rules', JSON.stringify(competitionRules));
+    } catch {}
+  }, [competitionRules, isLiveSupabaseMode]);
 
   useEffect(() => {
     if (isLiveSupabaseMode) return;
@@ -1606,6 +1626,52 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const deleteRubricVersion = (id: string): { success: boolean; message: string } => {
+    const target = rubricVersions.find((r) => r.id === id);
+    if (!target) {
+      return { success: false, message: 'Versi rubrik tidak ditemukan.' };
+    }
+
+    const isUsedInFinalizedAssessments = assessments.some(
+      (a) =>
+        a.status === 'finalized' &&
+        (a.rubricVersionId === id || a.rubricVersion === target.code)
+    );
+    const isUsedInSnapshots = stageSnapshots.some((s) => s.rubricVersionId === id);
+
+    if (isUsedInFinalizedAssessments || isUsedInSnapshots) {
+      return {
+        success: false,
+        message: `Versi rubrik "${target.name}" (${target.version}) tidak dapat dihapus karena telah digunakan pada lembar penilaian final atau snapshot babak. Gunakan fitur Arsip.`
+      };
+    }
+
+    setRubricVersions((prev) => prev.filter((r) => r.id !== id));
+
+    if (isLiveDbActive) {
+      const targetTenantUuid = toDeterministicUuid(
+        target.tenantId === 'system'
+          ? '00000000-0000-0000-0000-000000000000'
+          : target.tenantId || currentTenantId
+      );
+      void supabaseDataService
+        .deleteRubricVersion(targetTenantUuid, toDeterministicUuid(id))
+        .then((res) => {
+          if (!res.success) {
+            setSyncStatus(`Gagal menghapus rubrik: ${res.message}`);
+            setRubricVersions((prev) => [...prev, target]);
+          } else {
+            setSyncStatus('Versi Rubrik Dihapus dari Database');
+          }
+        });
+    }
+
+    return {
+      success: true,
+      message: `Versi rubrik "${target.name}" (${target.version}) berhasil dihapus.`
+    };
+  };
+
   const addCompetitionRule = (ruleData: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => {
     const newRule: CompetitionRuleConfig = {
       ...ruleData,
@@ -1655,6 +1721,38 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
       }
     }
+  };
+
+  const deleteCompetitionRule = (id: string): { success: boolean; message: string } => {
+    const existing = competitionRules.find((r) => r.id === id);
+    if (!existing) {
+      return { success: false, message: 'Konfigurasi aturan cabang tidak ditemukan.' };
+    }
+
+    setCompetitionRules((prev) => prev.filter((r) => r.id !== id));
+
+    if (isLiveDbActive) {
+      const targetTenantUuid = toDeterministicUuid(
+        existing.tenantId === 'system'
+          ? '00000000-0000-0000-0000-000000000000'
+          : existing.tenantId || currentTenantId
+      );
+      void supabaseDataService
+        .deleteCompetitionRuleConfig(targetTenantUuid, toDeterministicUuid(id))
+        .then((res) => {
+          if (!res.success) {
+            setSyncStatus(`Gagal menghapus aturan kompetisi: ${res.message}`);
+            setCompetitionRules((prev) => [...prev, existing]);
+          } else {
+            setSyncStatus('Aturan Kompetisi Dihapus dari Database');
+          }
+        });
+    }
+
+    return {
+      success: true,
+      message: `Konfigurasi aturan untuk "${existing.branchName}" berhasil dihapus.`
+    };
   };
 
   /**
@@ -4176,9 +4274,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return updateUser(id, { status: existing.status });
   };
 
-  const toggleUserStatus = (id: string) => {
+  const toggleUserStatus = async (
+    id: string
+  ): Promise<{ success: boolean; message: string }> => {
     const existing = users.find((u) => u.id === id);
-    if (!existing) return;
+    if (!existing) {
+      return { success: false, message: 'Pengguna tidak ditemukan.' };
+    }
+    if (
+      existing.status === 'Aktif' &&
+      (currentUser.id === id || (authenticatedProfile && authenticatedProfile.authUserId === id))
+    ) {
+      return {
+        success: false,
+        message: 'Anda tidak dapat menonaktifkan akun yang sedang Anda gunakan sendiri.'
+      };
+    }
     const nextStatus = existing.status === 'Aktif' ? 'Nonaktif' : 'Aktif';
     const merged: User = { ...existing, status: nextStatus };
 
@@ -4191,20 +4302,53 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         existing.tenantId && existing.tenantId !== 'platform' ? existing.tenantId : currentTenantId
       );
       setSyncStatus('Memperbarui status akun di database...');
-      void supabaseDataService
-        .upsertUserAndMembership({
-          tenantId: targetTenantUuid,
-          user: merged
-        })
-        .then((res) => {
-          if (!res.success) {
-            setSyncStatus(`Gagal Mengubah Status Akun: ${res.message}`);
-            setUsers((prev) => prev.map((u) => (u.id === id ? existing : u)));
-          } else {
-            setSyncStatus(`Status Akun (${nextStatus}) Tersimpan di Database`);
-          }
-        });
+      const res = await supabaseDataService.upsertUserAndMembership({
+        tenantId: targetTenantUuid,
+        user: merged
+      });
+      if (!res.success) {
+        setSyncStatus(`Gagal Mengubah Status Akun: ${res.message}`);
+        setUsers((prev) => prev.map((u) => (u.id === id ? existing : u)));
+        return { success: false, message: res.message };
+      }
+      setSyncStatus(`Status Akun (${nextStatus}) Tersimpan di Database`);
+      return { success: true, message: `Status akun "${existing.name}" berhasil diubah menjadi ${nextStatus}.` };
     }
+
+    return { success: true, message: `Status akun "${existing.name}" berhasil diubah menjadi ${nextStatus}.` };
+  };
+
+  const deleteUser = async (
+    id: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const existing = users.find((u) => u.id === id);
+    if (!existing) {
+      return { success: false, message: 'Pengguna tidak ditemukan.' };
+    }
+
+    // Protection: Cannot delete self
+    if (currentUser.id === id || (authenticatedProfile && authenticatedProfile.authUserId === id)) {
+      return {
+        success: false,
+        message: 'Anda tidak dapat menghapus akun yang sedang Anda gunakan saat ini.'
+      };
+    }
+
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+
+    if (isLiveDbActive) {
+      setSyncStatus('Menghapus akun pengguna dari database...');
+      const res = await supabaseDataService.deleteUser(id);
+      if (!res.success) {
+        setSyncStatus(`Gagal Menghapus Pengguna: ${res.message}`);
+        setUsers((prev) => [...prev, existing]);
+        return { success: false, message: res.message };
+      }
+      setSyncStatus('Akun Pengguna Berhasil Dihapus');
+      return { success: true, message: `Akun "${existing.name}" berhasil dihapus dari platform.` };
+    }
+
+    return { success: true, message: `Akun "${existing.name}" berhasil dihapus.` };
   };
 
   // Tenant Actions (Superadmin)
@@ -4250,6 +4394,71 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
     }
+  };
+
+  const toggleTenantStatus = async (
+    id: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const existing = tenants.find((t) => t.id === id);
+    if (!existing) {
+      return { success: false, message: 'Penyelenggara MTQ tidak ditemukan.' };
+    }
+    const nextStatus: 'Aktif' | 'Nonaktif' = existing.status === 'Aktif' ? 'Nonaktif' : 'Aktif';
+    const merged: Tenant = { ...existing, status: nextStatus };
+
+    setTenants((prev) => prev.map((t) => (t.id === id ? merged : t)));
+
+    if (isLiveDbActive) {
+      setSyncStatus(`Memperbarui status MTQ (${nextStatus}) di database...`);
+      const res = await supabaseDataService.upsertTenant({
+        ...merged,
+        id: toDeterministicUuid(merged.id)
+      });
+      if (!res.success) {
+        setSyncStatus(`Gagal Mengubah Status MTQ: ${res.message}`);
+        setTenants((prev) => prev.map((t) => (t.id === id ? existing : t)));
+        return { success: false, message: res.message };
+      }
+      setSyncStatus(`Status MTQ (${nextStatus}) Tersimpan di Database`);
+      return { success: true, message: `Status penyelenggara "${existing.name}" berhasil diubah menjadi ${nextStatus}.` };
+    }
+
+    return { success: true, message: `Status penyelenggara "${existing.name}" berhasil diubah menjadi ${nextStatus}.` };
+  };
+
+  const deleteTenant = async (
+    id: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const existing = tenants.find((t) => t.id === id);
+    if (!existing) {
+      return { success: false, message: 'Penyelenggara MTQ tidak ditemukan.' };
+    }
+
+    // Protection: Cannot delete system/platform tenant
+    if (existing.id === 'platform' || existing.id === '00000000-0000-0000-0000-000000000000') {
+      return { success: false, message: 'Penyelenggara MTQ platform/sistem utama tidak boleh dihapus.' };
+    }
+
+    if (currentTenantId === id) {
+      setCurrentTenantId('platform');
+      setCurrentView('superadmin_tenants');
+    }
+
+    setTenants((prev) => prev.filter((t) => t.id !== id));
+
+    if (isLiveDbActive) {
+      setSyncStatus('Menghapus penyelenggara MTQ dari database...');
+      const res = await supabaseDataService.deleteTenant(toDeterministicUuid(id));
+      if (!res.success) {
+        setSyncStatus(`Gagal Menghapus MTQ: ${res.message}`);
+        setTenants((prev) => [...prev, existing]);
+        return { success: false, message: res.message };
+      }
+      setSyncStatus('Penyelenggara MTQ Berhasil Dihapus');
+      return { success: true, message: `Penyelenggara MTQ "${existing.name}" berhasil dihapus dari sistem.` };
+    }
+
+    return { success: true, message: `Penyelenggara MTQ "${existing.name}" berhasil dihapus.` };
   };
 
   // Stage Management (Tenant Scoped)
@@ -4324,6 +4533,53 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
     }
+  };
+
+  const deleteStage = (id: string): { success: boolean; message: string } => {
+    const existing = stages.find((s) => s.id === id && s.tenantId === currentTenantId);
+    if (!existing) {
+      return { success: false, message: 'Babak musabaqah tidak ditemukan.' };
+    }
+    if (existing.isFinalized || existing.status === 'Selesai') {
+      return {
+        success: false,
+        message: `Babak "${existing.name}" sudah disahkan/selesai dan tidak dapat dihapus demi menjaga integritas riwayat nilai.`
+      };
+    }
+
+    const usedInFinalizedAssessments = assessments.some(
+      (a) =>
+        a.tenantId === currentTenantId &&
+        a.status === 'finalized' &&
+        (a.stageId === id || (a.stageName === existing.name && (!existing.branchName || true)))
+    );
+    if (usedInFinalizedAssessments) {
+      return {
+        success: false,
+        message: `Babak "${existing.name}" memiliki lembar penilaian yang sudah difinalisasi dan tidak dapat dihapus.`
+      };
+    }
+
+    setStages((prev) => prev.filter((s) => !(s.id === id && s.tenantId === currentTenantId)));
+
+    if (isLiveDbActive) {
+      setSyncStatus('Menghapus babak musabaqah dari database...');
+      void supabaseDataService
+        .deleteStage(toDeterministicUuid(currentTenantId), toDeterministicUuid(id))
+        .then((res) => {
+          if (!res.success) {
+            setSyncStatus(`Gagal Menghapus Babak: ${res.message}`);
+            setStages((prev) => [...prev, existing]);
+          } else {
+            setSyncStatus('Babak Musabaqah Dihapus dari Database');
+          }
+        });
+    }
+
+    return {
+      success: true,
+      message: `Babak "${existing.name}" (${existing.branchName || 'Semua Cabang'}) berhasil dihapus.`
+    };
   };
 
   /**
@@ -4919,6 +5175,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setTenantId: setCurrentTenantId,
         addTenant,
         updateTenant,
+        toggleTenantStatus,
+        deleteTenant,
         users,
         currentUser,
         setCurrentUserId: setSafeCurrentUserId,
@@ -4926,6 +5184,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateUser,
         retryUserProvisioning,
         toggleUserStatus,
+        deleteUser,
         kafilahs: kafilahs.filter((k) => k.tenantId === currentTenantId),
         participants: participants.filter((p) => p.tenantId === currentTenantId),
         stageParticipations: stageParticipations.filter((sp) => sp.tenantId === currentTenantId),
@@ -4950,8 +5209,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateRubricVersion,
         activateRubricVersion,
         archiveRubricVersion,
+        deleteRubricVersion,
         addCompetitionRule,
         updateCompetitionRule,
+        deleteCompetitionRule,
         getActiveRubricForBranch,
         getBranchRuleConfigByBranch,
         currentView,
@@ -4993,6 +5254,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateErrorCategory,
         addStage,
         updateStage,
+        deleteStage,
         advanceQualifiers,
         addJudgeAssignment,
         removeJudgeAssignment,

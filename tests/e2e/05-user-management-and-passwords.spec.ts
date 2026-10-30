@@ -85,4 +85,60 @@ test.describe('E2E: Manajemen Pengguna, Input Kata Sandi Baru & Pemetaan Akun Gl
     const isInvalid = await passInput.evaluate((el: HTMLInputElement) => !el.checkValidity());
     expect(isInvalid).toBe(true);
   });
+
+  test('04. Superadmin Dapat Menonaktifkan & Menghapus Penyelenggara MTQ serta Akun Global', async ({ page }) => {
+    // Pindah ke persona Superadmin
+    await page.getByRole('button', { name: /Ganti/i }).click();
+    await page.getByText(/Prof\. Dr\. H\. Nasaruddin/i).first().click();
+    await expect(page.getByText(/Dashboard Superadmin MTQ Digital/i)).toBeVisible();
+
+    // 1. Buka Manajemen Penyelenggara MTQ
+    await page.getByRole('button', { name: /Penyelenggara MTQ/i }).click();
+    await expect(page.getByText(/Manajemen Penyelenggara MTQ/i)).toBeVisible();
+
+    // Verifikasi tombol Nonaktifkan Penyelenggara MTQ tersedia dan berfungsi
+    const toggleTenantBtn = page.getByTitle(/Nonaktifkan Penyelenggara MTQ/i).first();
+    await expect(toggleTenantBtn).toBeVisible();
+    await toggleTenantBtn.click();
+    await expect(page.getByText(/berhasil diubah menjadi Nonaktif/i)).toBeVisible();
+
+    // Aktifkan kembali
+    const activateTenantBtn = page.getByTitle(/Aktifkan Penyelenggara MTQ/i).first();
+    await expect(activateTenantBtn).toBeVisible();
+    await activateTenantBtn.click();
+    await expect(page.getByText(/berhasil diubah menjadi Aktif/i)).toBeVisible();
+
+    // Verifikasi tombol Hapus Penyelenggara MTQ membuka modal konfirmasi
+    const deleteTenantBtn = page.getByTitle(/Hapus Penyelenggara MTQ/i).first();
+    await expect(deleteTenantBtn).toBeVisible();
+    await deleteTenantBtn.click();
+    await expect(page.getByText(/Hapus Penyelenggara MTQ\?/i)).toBeVisible();
+    await page.getByRole('button', { name: /Batal/i }).click();
+    await expect(page.getByText(/Hapus Penyelenggara MTQ\?/i)).not.toBeVisible();
+
+    // 2. Buka Manajemen Akun Global
+    await page.getByRole('button', { name: /Manajemen Akun/i }).click();
+    await expect(page.getByText(/Manajemen Akun Global/i)).toBeVisible();
+
+    // Verifikasi tombol Nonaktifkan Akun tersedia dan berfungsi
+    const toggleUserBtn = page.getByTitle(/Nonaktifkan Akun/i).first();
+    await expect(toggleUserBtn).toBeVisible();
+    await toggleUserBtn.click();
+    await expect(page.getByText(/berhasil dinonaktifkan/i)).toBeVisible();
+
+    // Aktifkan kembali akun
+    const activateUserBtn = page.getByTitle(/Aktifkan Akun/i).first();
+    await expect(activateUserBtn).toBeVisible();
+    await activateUserBtn.click();
+    await expect(page.getByText(/berhasil diaktifkan/i)).toBeVisible();
+
+    // Verifikasi tombol Hapus Akun membuka modal konfirmasi
+    const deleteUserBtn = page.getByTitle(/Hapus Akun/i).first();
+    await expect(deleteUserBtn).toBeVisible();
+    await deleteUserBtn.click();
+    await expect(page.getByText(/Hapus Akun Pengguna\?/i)).toBeVisible();
+    await page.getByRole('button', { name: /Batal/i }).click();
+    await expect(page.getByText(/Hapus Akun Pengguna\?/i)).not.toBeVisible();
+  });
 });
+
