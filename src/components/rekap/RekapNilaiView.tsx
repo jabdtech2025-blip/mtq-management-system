@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Download,
   Search,
@@ -29,8 +29,18 @@ export const RekapNilaiView: React.FC = () => {
     getParticipantProgress,
     getParticipantStageQuestions,
     setSelectedParticipantId,
-    setCurrentView
+    setCurrentView,
+    refreshSupabaseConnection
   } = useMtq();
+
+  // Real-time live synchronization: automatically fetch fresh assessments every 2.5s so judge deductions appear immediately without manual refresh
+  useEffect(() => {
+    void refreshSupabaseConnection();
+    const timer = setInterval(() => {
+      void refreshSupabaseConnection();
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [refreshSupabaseConnection]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStage, setSelectedStage] = useState('Semua Babak');
@@ -354,12 +364,12 @@ export const RekapNilaiView: React.FC = () => {
                 <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 px-4 py-2.5 border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
                   Identitas Peserta
                 </th>
-                <th className="px-2 py-2.5 border-r border-slate-200 text-center bg-slate-50 text-slate-700 w-28 max-w-[120px]">
+                <th className="px-1.5 py-2.5 border-r border-slate-200 text-center bg-slate-50 text-slate-700 w-20 max-w-[80px]">
                   Maqra / Soal
                 </th>
-                {activeJudges.map((j) => (
+                {activeJudges.map((j, jIdx) => (
                   <th
-                    key={j.id}
+                    key={`${j.id}-${jIdx}`}
                     colSpan={2}
                     className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50"
                   >
@@ -381,10 +391,10 @@ export const RekapNilaiView: React.FC = () => {
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[10px] font-semibold uppercase">
                 <th className="sticky left-0 z-20 bg-slate-50 px-4 py-2 w-16">Undian</th>
                 <th className="sticky left-16 z-20 bg-slate-50 px-4 py-2 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">Nama & Grup</th>
-                <th className="px-2 py-2 border-r border-slate-200 text-center w-28 max-w-[120px]">Maqra / Soal</th>
+                <th className="px-1.5 py-2 border-r border-slate-200 text-center w-20 max-w-[80px]">Maqra / Soal</th>
 
-                {activeJudges.map((j) => (
-                  <React.Fragment key={j.id}>
+                {activeJudges.map((j, jIdx) => (
+                  <React.Fragment key={`${j.id}-${jIdx}`}>
                     <th className="px-2.5 py-2 text-center w-24 min-w-[96px] border-r border-slate-200 whitespace-nowrap">
                       Pengurangan
                     </th>
@@ -417,7 +427,7 @@ export const RekapNilaiView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredParticipants.map((p) => {
+                filteredParticipants.map((p, pIdx) => {
                   const stageQuestions = getParticipantStageQuestions(p.id, p.stageName);
                   const overallProgress = getParticipantProgress(p.id, p.stageName);
 
@@ -448,7 +458,7 @@ export const RekapNilaiView: React.FC = () => {
                   // Case 1: Participant has NO assigned questions for this stage
                   if (stageQuestions.length === 0) {
                     return (
-                      <tr key={p.id} className="hover:bg-slate-50/80 transition-colors group">
+                      <tr key={`${p.id}-${pIdx}`} className="hover:bg-slate-50/80 transition-colors group">
                         <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 font-mono font-bold text-slate-900">
                           #{p.lotteryNumber}
                         </td>
@@ -463,8 +473,8 @@ export const RekapNilaiView: React.FC = () => {
                             Maqra Belum Ditetapkan
                           </span>
                         </td>
-                        {activeJudges.map((j) => (
-                          <React.Fragment key={j.id}>
+                        {activeJudges.map((j, jIdx) => (
+                          <React.Fragment key={`${j.id}-${jIdx}`}>
                             <td className="px-2.5 py-3 text-center font-mono text-[11px] text-slate-400 border-r border-slate-200">
                               -
                             </td>
@@ -506,7 +516,7 @@ export const RekapNilaiView: React.FC = () => {
                         : null;
 
                     return (
-                      <tr key={p.id} className="hover:bg-slate-50/80 transition-colors group">
+                      <tr key={`${p.id}-${pIdx}`} className="hover:bg-slate-50/80 transition-colors group">
                         <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 font-mono font-bold text-slate-900">
                           #{p.lotteryNumber}
                         </td>
@@ -521,10 +531,10 @@ export const RekapNilaiView: React.FC = () => {
                             {q.code}
                           </span>
                         </td>
-                        {activeJudges.map((j) => {
+                        {activeJudges.map((j, jIdx) => {
                           const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
                           return (
-                            <React.Fragment key={j.id}>
+                            <React.Fragment key={`${j.id}-${jIdx}`}>
                               <td className="px-2.5 py-3 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
                                 {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
                               </td>
@@ -575,7 +585,7 @@ export const RekapNilaiView: React.FC = () => {
 
                   // Case 3: Participant has MULTIPLE assigned questions (Setiap satu maqra satu baris + baris akumulasi)
                   return (
-                    <React.Fragment key={p.id}>
+                    <React.Fragment key={`${p.id}-${pIdx}`}>
                       {stageQuestions.map((q, qIdx) => {
                         const judgeAssessments = activeJudges.map((j) =>
                           getJudgeAssessment(p.id, j.id, p.stageName, q.questionId)
@@ -598,7 +608,7 @@ export const RekapNilaiView: React.FC = () => {
 
                         return (
                           <tr
-                            key={`${p.id}-${q.questionId}`}
+                            key={`${p.id}-${q.id || q.questionId}-${qIdx}`}
                             className={`hover:bg-slate-50/80 transition-colors ${
                               qIdx === 0 ? 'border-t-2 border-slate-200' : ''
                             }`}
@@ -624,10 +634,10 @@ export const RekapNilaiView: React.FC = () => {
                             </td>
 
                             {/* Scores for this specific maqra */}
-                            {activeJudges.map((j) => {
+                            {activeJudges.map((j, jIdx) => {
                               const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
                               return (
-                                <React.Fragment key={j.id}>
+                                <React.Fragment key={`${j.id}-${jIdx}`}>
                                   <td className="px-2.5 py-2.5 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
                                     {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
                                   </td>
@@ -701,7 +711,7 @@ export const RekapNilaiView: React.FC = () => {
                         <td className="px-3 py-2 text-center text-emerald-950 font-bold text-[11px] border-r border-slate-200">
                           Total Maqra {stageQuestions.length}
                         </td>
-                        {activeJudges.map((j) => {
+                        {activeJudges.map((j, jIdx) => {
                           const judgeScores = stageQuestions
                             .map((q) => getJudgeAssessment(p.id, j.id, p.stageName, q.questionId))
                             .map((a) => (a ? a.finalScore : null))
@@ -712,7 +722,7 @@ export const RekapNilaiView: React.FC = () => {
                               : null;
 
                           return (
-                            <React.Fragment key={j.id}>
+                            <React.Fragment key={`${j.id}-${jIdx}`}>
                               <td className="px-2.5 py-2 text-center text-slate-400 font-mono text-[10px] border-r border-slate-200">
                                 Σ Maqra
                               </td>
@@ -832,7 +842,7 @@ export const RekapNilaiView: React.FC = () => {
                     const isSelected = q.questionId === activeQuestionId;
                     return (
                       <button
-                        key={q.questionId}
+                        key={`${q.id || q.questionId}-${idx}`}
                         onClick={() => setModalSelectedQuestionId(q.questionId)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                           isSelected
@@ -900,7 +910,7 @@ export const RekapNilaiView: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {activeJudges.map((j) => {
+                      {activeJudges.map((j, jIdx) => {
                         const asm = getJudgeAssessment(
                           inspectedParticipant.id,
                           j.id,
@@ -914,7 +924,7 @@ export const RekapNilaiView: React.FC = () => {
                         );
 
                         return (
-                          <tr key={j.id} className="hover:bg-slate-50/70 transition-colors">
+                          <tr key={`${j.id}-${jIdx}`} className="hover:bg-slate-50/70 transition-colors">
                             <td className="px-4 py-3 align-top">
                               <p className="font-bold text-slate-900">{j.name}</p>
                               <p className="text-[11px] text-slate-500 mt-0.5">{j.field}</p>
@@ -934,7 +944,7 @@ export const RekapNilaiView: React.FC = () => {
                                 </span>
                               ) : (
                                 <div className="space-y-1">
-                                  {activeErrors.map(([catId, count]) => {
+                                  {activeErrors.map(([catId, count], catIdx) => {
                                     const deduction = asm.deductions?.[catId] || 0;
                                     const categoryObj = errorCategories.find((c) => c.id === catId);
                                     const categoryName = categoryObj
@@ -942,7 +952,7 @@ export const RekapNilaiView: React.FC = () => {
                                       : catId.replace('cat-', '').replace(/-/g, ' ');
                                     return (
                                       <div
-                                        key={catId}
+                                        key={`${catId}-${catIdx}`}
                                         className="flex items-center justify-between text-[11px] gap-2"
                                       >
                                         <span className="text-slate-700 font-medium">

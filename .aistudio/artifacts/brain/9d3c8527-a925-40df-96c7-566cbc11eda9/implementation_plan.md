@@ -69,3 +69,26 @@ Seluruh audit dan penyempurnaan arsitektur antarmuka pengguna (UI/UX) pada siste
   - Menampilkan ringkasan metrik di bagian atas: *Dewan Hakim Bertugas*, *Status Penyelesaian*, dan *Rata-Rata Nilai Saat Ini*.
   - Tabel rincian per hakim yang terstruktur dengan kolom: *Dewan Hakim & Bidang*, *Rincian Kesalahan*, *Pengurangan*, *Nilai Akhir*, dan *Status*.
   - Menghapus seluruh string hardcode versi rubrik (seperti `v2.4-lptq-2024`).
+
+---
+
+## 6. Audit & Perbaikan Terbaru (Sprint Aktual)
+1. **Sidebar Navigasi (`Sidebar.tsx`)**:
+   - Memperbaiki layout flexbox dengan menambahkan `min-h-0` pada kontainer daftar menu yang *scrollable* (`flex-1 min-h-0 overflow-y-auto`).
+   - Kartu profil pengguna di kiri bawah kini terkunci permanen (*sticky/pinned*) di bagian bawah (`mt-auto shrink-0 sticky bottom-0 z-20`) dan tidak ikut bergeser ketika menu di-scroll.
+2. **Dashboard Admin MTQ (`DashboardView.tsx`)**:
+   - Kartu **Sesi Penilaian Aktif**: Memperbaiki logika deteksi peserta yang sedang dinilai secara berurutan (*ongoing progress* -> *in_progress assessment* -> *selectedParticipantId* -> *latest evaluated* -> *first participant*), sehingga kartu selalu menampilkan peserta aktif secara valid.
+   - Kartu **Aktivitas Penilaian & Penyimpanan Terbaru**: Menyajikan aktivitas penilaian dewan hakim riil terbaru yang diurutkan dari yang paling baru (*descending*), mencakup identitas hakim, bidang, dan skor peserta.
+3. **Master Data & Konfigurasi Kompetisi (`MasterDataView.tsx` & `MtqContext.tsx`)**:
+   - Menambahkan **Modal Konfirmasi Hapus Bidang Rubrik** (`fieldToDelete`) sebelum bidang penilaian dihapus.
+   - Memperbaiki mekanisme persistensi penghapusan rubrik dan bidang: pelepasan relasi foreign key (*error_categories*, *rubric_criteria*, *deduction_rules*, *judge_assignments*, dan *competition_rule_configs*) sebelum eksekusi penghapusan di Supabase serta pencatatan ID terhapus di storage lokal (`mtq_deleted_rubrics`), sehingga penghapusan tetap tersimpan permanen saat halaman di-refresh.
+   - Menghapus tombol *Hapus Babak* dari tabel babak di Master Data demi kepatuhan SOP kompetisi.
+4. **Manajemen Pengguna & Dewan Hakim (`UserManagementView.tsx`)**:
+   - Menghapus teks teknis terkait RPC `tenant member profile`, Edge Function `admin provision user`, dan pengecualian *service role*.
+   - Menyederhanakan penjelasan kata sandi menjadi teks ramah pengguna: *"Jika diisi, akun akan langsung dapat digunakan untuk masuk ke aplikasi."*
+5. **Rekap Nilai Real-Time (`RekapNilaiView.tsx`)**:
+   - Mengintegrasikan sinkronisasi live otomatis berkala (polling interval 2,5 detik via `refreshSupabaseConnection()`) sehingga perubahan nilai/koreksi kesalahan oleh dewan hakim langsung tercermin secara instan tanpa perlu me-refresh halaman browser manual.
+   - Mengurangi lebar kolom *Maqra / Soal* (`w-20 max-w-[80px]`) agar proporsional dan tidak memakan ruang tabel.
+   - Merapikan label sel akumulasi peserta pada footer menjadi format ringkas: `"Total Maqra 2"`.
+6. **Hasil Babak & Kelulusan Kualifikasi (`HasilKelulusanView.tsx`)**:
+   - Banner peringatan *"Penilaian Belum Lengkap (Peringkat Sementara)"* kini disembunyikan secara otomatis ketika seluruh peserta telah dinilai lengkap (`incompleteParticipants.length === 0`).

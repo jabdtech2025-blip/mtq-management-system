@@ -77,8 +77,8 @@ interface MtqContextType {
   tenants: Tenant[];
   currentTenant: Tenant;
   setTenantId: (id: string) => void;
-  addTenant: (tenant: Omit<Tenant, 'id'>) => void;
-  updateTenant: (id: string, updated: Partial<Tenant>) => void;
+  addTenant: (tenant: Omit<Tenant, 'id'>) => Promise<{ success: boolean; message: string }>;
+  updateTenant: (id: string, updated: Partial<Tenant>) => Promise<{ success: boolean; message: string }>;
   toggleTenantStatus: (id: string) => Promise<{ success: boolean; message: string }>;
   deleteTenant: (id: string) => Promise<{ success: boolean; message: string }>;
 
@@ -1055,7 +1055,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // tanpa menyisakan akun tiruan (INITIAL_USERS) dari mockData
         const dbUsers = hydrated.users || [];
         const hasCurrentAuthUser = dbUsers.some((u) => u.id === profile.authUserId);
-        setUsers(hasCurrentAuthUser ? dbUsers : [mappedUser, ...dbUsers]);
+        const combinedUsers = hasCurrentAuthUser ? dbUsers : [mappedUser, ...dbUsers];
+        const uniqueUsers = Array.from(new Map(combinedUsers.map((u) => [u.id, u])).values());
+        setUsers(uniqueUsers);
 
         // Replace tenant operational data unconditionally so demo/mock data is never retained in live mode
         setCabangList(hydrated.cabangList || []);
@@ -1063,7 +1065,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setKafilahs(hydrated.kafilahs || []);
         setStages(hydrated.stages || []);
         setQuestions(hydrated.questions || []);
-        setParticipants(hydrated.participants || []);
+        const rawParticipants = hydrated.participants || [];
+        const uniqueHydratedParticipants = Array.from(new Map(rawParticipants.map((p) => [p.id, p])).values());
+        setParticipants(uniqueHydratedParticipants);
         setStageParticipations(hydrated.stageParticipations || []);
         setErrorCategories(hydrated.errorCategories || []);
         setCompetitionRules(hydrated.competitionRules || []);
@@ -1072,7 +1076,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setStageSnapshots(hydrated.stageSnapshots || []);
         setAuditLogs(hydrated.auditLogs || []);
         if (hydrated.rubricVersions && hydrated.rubricVersions.length > 0) {
-          setRubricVersions(hydrated.rubricVersions);
+          const deletedIds = (() => {
+            try {
+              return new Set(JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'deleted_rubrics') || '[]'));
+            } catch {
+              return new Set<string>();
+            }
+          })();
+          const filteredRubrics = hydrated.rubricVersions.filter(
+            (r) => !deletedIds.has(r.id) && !deletedIds.has(toDeterministicUuid(r.id))
+          );
+          setRubricVersions(filteredRubrics);
         }
       } else {
         setDataSourceMode('supabase_error');
@@ -1119,7 +1133,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.removeItem('mtq_offline_demo_simulation_v4');
     } catch {}
     setIsOfflineDemoSimulation(false);
+    setWorkspaceError(null);
     const res = await supabaseDataService.signInWithPassword(email, password);
+    if (!res.success) {
+      return { success: false, message: res.message };
+    }
+    setDataSourceMode('supabase_live');
     await refreshSupabaseConnection();
     return { success: res.success, message: res.message };
   };
@@ -1646,7 +1665,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    setRubricVersions((prev) => prev.filter((r) => r.id !== id));
+    const updatedRubrics = rubricVersions.filter((r) => r.id !== id);
+    setRubricVersions(updatedRubrics);
+
+    try {
+      const existingDeleted = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'deleted_rubrics') || '[]');
+      const newDeleted = Array.from(new Set([...existingDeleted, id, toDeterministicUuid(id)]));
+      localStorage.setItem(STORAGE_PREFIX + 'deleted_rubrics', JSON.stringify(newDeleted));
+      localStorage.setItem(STORAGE_PREFIX + 'rubric_versions', JSON.stringify(updatedRubrics));
+    } catch {}
 
     if (isLiveDbActive) {
       const targetTenantUuid = toDeterministicUuid(
@@ -4140,7 +4167,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: generateUuid(),
       provisioningStatus: isLiveDbActive ? 'Mengundang...' : 'Aktif'
     };
-    setUsers((prev) => [...prev, newUser]);
+    setUsers((prev) => [...prev.filter((u) => u.id !== newUser.id), newUser]);
 
     if (isLiveDbActive) {
       const rawTargetTenant =
@@ -4352,48 +4379,106 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Tenant Actions (Superadmin)
-  const addTenant = (tenantData: Omit<Tenant, 'id'>) => {
+  const addTenant = async (
+    tenantData: Omit<Tenant, 'id'>
+  ): Promise<{ success: boolean; message: string }> => {
+    const cleanCode = tenantData.code.trim().toUpperCase();
+    const duplicateLocal = tenants.find(
+      (t) => t.code.trim().toUpperCase() === cleanCode
+    );
+    if (duplicateLocal) {
+      return {
+        success: false,
+        message: `Kode singkat "${cleanCode}" sudah digunakan oleh penyelenggara "${duplicateLocal.name}". Gunakan kode unik.`
+      };
+    }
+
     const newTenant: Tenant = {
       ...tenantData,
+      code: cleanCode,
+      name: tenantData.name.trim(),
+      eventName: tenantData.eventName.trim(),
+      region: tenantData.region.trim(),
       id: generateUuid()
     };
+
     setTenants((prev) => [...prev, newTenant]);
+
     if (isLiveDbActive) {
-      setSyncStatus('Menyimpan tenant baru ke database...');
-      void supabaseDataService.upsertTenant(newTenant).then((res) => {
-        if (!res.success) {
-          setSyncStatus(`Gagal Menyimpan Tenant: ${res.message}`);
-          setTenants((prev) => prev.filter((t) => t.id !== newTenant.id));
-        } else {
-          setSyncStatus('Tenant Baru Tersimpan di Database');
-        }
-      });
+      setSyncStatus('Menyimpan penyelenggara baru ke database...');
+      const res = await supabaseDataService.upsertTenant(newTenant);
+      if (!res.success) {
+        setSyncStatus(`Gagal Menyimpan Tenant: ${res.message}`);
+        setTenants((prev) => prev.filter((t) => t.id !== newTenant.id));
+        return {
+          success: false,
+          message: `Gagal menyimpan penyelenggara ke database: ${res.message}`
+        };
+      }
+      setSyncStatus('Penyelenggara Baru Tersimpan di Database');
+      return {
+        success: true,
+        message: `Penyelenggara "${newTenant.name}" (${newTenant.code}) berhasil ditambahkan dan disimpan di database.`
+      };
     }
+
+    return {
+      success: true,
+      message: `Penyelenggara "${newTenant.name}" (${newTenant.code}) berhasil ditambahkan.`
+    };
   };
 
-  const updateTenant = (id: string, updated: Partial<Tenant>) => {
+  const updateTenant = async (
+    id: string,
+    updated: Partial<Tenant>
+  ): Promise<{ success: boolean; message: string }> => {
     const existing = tenants.find((t) => t.id === id);
-    if (!existing) return;
-    const merged: Tenant = { ...existing, ...updated };
-    setTenants((prev) =>
-      prev.map((t) => (t.id === id ? merged : t))
-    );
-    if (isLiveDbActive) {
-      setSyncStatus('Memperbarui tenant di database...');
-      void supabaseDataService
-        .upsertTenant({
-          ...merged,
-          id: toDeterministicUuid(merged.id)
-        })
-        .then((res) => {
-          if (!res.success) {
-            setSyncStatus(`Gagal Memperbarui Tenant: ${res.message}`);
-            setTenants((prev) => prev.map((t) => (t.id === id ? existing : t)));
-          } else {
-            setSyncStatus('Tenant Diperbarui di Database');
-          }
-        });
+    if (!existing) {
+      return { success: false, message: 'Penyelenggara MTQ tidak ditemukan.' };
     }
+    const cleanCode = (updated.code || existing.code).trim().toUpperCase();
+    const duplicateLocal = tenants.find(
+      (t) => t.id !== id && t.code.trim().toUpperCase() === cleanCode
+    );
+    if (duplicateLocal) {
+      return {
+        success: false,
+        message: `Kode singkat "${cleanCode}" sudah digunakan oleh penyelenggara "${duplicateLocal.name}".`
+      };
+    }
+
+    const merged: Tenant = {
+      ...existing,
+      ...updated,
+      code: cleanCode
+    };
+    setTenants((prev) => prev.map((t) => (t.id === id ? merged : t)));
+
+    if (isLiveDbActive) {
+      setSyncStatus('Memperbarui penyelenggara di database...');
+      const res = await supabaseDataService.upsertTenant({
+        ...merged,
+        id: toDeterministicUuid(merged.id)
+      });
+      if (!res.success) {
+        setSyncStatus(`Gagal Memperbarui Tenant: ${res.message}`);
+        setTenants((prev) => prev.map((t) => (t.id === id ? existing : t)));
+        return {
+          success: false,
+          message: `Gagal memperbarui penyelenggara: ${res.message}`
+        };
+      }
+      setSyncStatus('Penyelenggara Diperbarui di Database');
+      return {
+        success: true,
+        message: `Data penyelenggara "${merged.name}" berhasil diperbarui.`
+      };
+    }
+
+    return {
+      success: true,
+      message: `Data penyelenggara "${merged.name}" berhasil diperbarui.`
+    };
   };
 
   const toggleTenantStatus = async (
@@ -4547,12 +4632,27 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    const usedInFinalizedAssessments = assessments.some(
-      (a) =>
-        a.tenantId === currentTenantId &&
-        a.status === 'finalized' &&
-        (a.stageId === id || (a.stageName === existing.name && (!existing.branchName || true)))
+    // Cek berapa banyak babak dengan nama & cabang yang sama (untuk mendeteksi babak duplikat/tidak terpakai)
+    const siblingStagesWithSameName = stages.filter(
+      (s) =>
+        s.tenantId === currentTenantId &&
+        s.name === existing.name &&
+        (!existing.branchName || !s.branchName || s.branchName === existing.branchName)
     );
+    const hasDuplicateSiblingStages = siblingStagesWithSameName.length > 1;
+
+    // Jika ada babak duplikat (misal 3 Babak Penyisihan), periksa secara spesifik berdasarkan stageId terlebih dahulu
+    const usedInFinalizedAssessments = assessments.some((a) => {
+      if (a.tenantId !== currentTenantId || a.status !== 'finalized') return false;
+      if (a.stageId) {
+        return a.stageId === id || a.stageId === toDeterministicUuid(id);
+      }
+      if (hasDuplicateSiblingStages) {
+        return false;
+      }
+      return a.stageName === existing.name;
+    });
+
     if (usedInFinalizedAssessments) {
       return {
         success: false,
@@ -4560,7 +4660,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
+    const usedInDirectStageParticipations = stageParticipations.some(
+      (sp) =>
+        sp.tenantId === currentTenantId &&
+        (sp.stageId === id || sp.stageId === toDeterministicUuid(id))
+    );
+    if (usedInDirectStageParticipations) {
+      return {
+        success: false,
+        message: `Babak "${existing.name}" (${existing.branchName || 'Semua Cabang'}) sedang digunakan oleh peserta terdaftar dan tidak dapat dihapus.`
+      };
+    }
+
     setStages((prev) => prev.filter((s) => !(s.id === id && s.tenantId === currentTenantId)));
+    setJudgeAssignments((prev) =>
+      prev.filter((ja) => !(ja.tenantId === currentTenantId && ja.stageId === id))
+    );
 
     if (isLiveDbActive) {
       setSyncStatus('Menghapus babak musabaqah dari database...');

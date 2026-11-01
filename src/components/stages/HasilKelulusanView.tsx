@@ -280,8 +280,8 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
-      {/* Stage Overall Status Banner (Shown ONLY when incomplete or boundary tie exists) */}
-      {(!allAssessmentsFinalized || incompleteParticipants.length > 0 || hasBoundaryTie) && (
+      {/* Stage Overall Status Banner (Shown ONLY when incomplete participants exist or boundary tie exists) */}
+      {((!allAssessmentsFinalized && incompleteParticipants.length > 0) || hasBoundaryTie) && (
         <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -411,7 +411,7 @@ export const HasilKelulusanView: React.FC = () => {
                   : 'bg-amber-700/20 border-amber-600/40';
               return (
                 <div
-                  key={item.participant.id}
+                  key={`${item.participant.id}-${idx}`}
                   className={`rounded-xl border p-4 ${cardBg} backdrop-blur-xs flex flex-col items-center text-center space-y-2 shadow-sm`}
                 >
                   <span className="text-2xl">{medals[idx]}</span>
@@ -525,12 +525,12 @@ export const HasilKelulusanView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                evaluatedParticipants.map((item) => {
+                evaluatedParticipants.map((item, idx) => {
                   const p = item.participant;
 
                   return (
                     <tr
-                      key={p.id}
+                      key={`${p.id}-${idx}`}
                       className="hover:bg-slate-50 transition-colors"
                     >
                       {/* Rank */}
@@ -767,7 +767,7 @@ export const HasilKelulusanView: React.FC = () => {
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 max-h-48 overflow-y-auto space-y-1 mb-4 text-xs">
               {(nextStage ? qualifiedParticipants : evaluatedParticipants).map((item, idx) => (
-                <div key={item.participant.id} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
+                <div key={`${item.participant.id}-${idx}`} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
                   <span className="font-semibold text-slate-900">
                     {idx + 1}. #{item.participant.lotteryNumber} {item.participant.name}
                     {!nextStage && idx < 3 ? ` (${idx === 0 ? 'Juara 1' : idx === 1 ? 'Juara 2' : 'Juara 3'})` : ''}

@@ -798,7 +798,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                     const qLabel = q.code || `Soal ${idx + 1}`;
                     return (
                       <button
-                        key={q.questionId}
+                        key={`${q.id || q.questionId}-${idx}`}
                         type="button"
                         onClick={() => handleSelectQuestion(q.questionId)}
                         className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all text-center cursor-pointer truncate ${

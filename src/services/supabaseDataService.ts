@@ -928,7 +928,13 @@ export const supabaseDataService = {
         };
       });
 
-    const users: User[] = [...usersFromMemberships, ...usersWithoutMembership];
+    const seenUserIds = new Set<string>();
+    const users: User[] = [];
+    [...usersFromMemberships, ...usersWithoutMembership].forEach((u) => {
+      if (!u.id || seenUserIds.has(u.id)) return;
+      seenUserIds.add(u.id);
+      users.push(u);
+    });
 
     const branchMap = new Map<string, string>();
     const cabangList: GenericMasterItem[] = (branchesRes.data || []).map((b: Record<string, unknown>) => {
@@ -1125,9 +1131,11 @@ export const supabaseDataService = {
       };
     });
 
+    const uniqueParticipants = Array.from(new Map(participants.map((p) => [p.id, p])).values());
+
     // Update participantCount on kafilahs
     kafilahs.forEach((k) => {
-      k.participantCount = participants.filter((p) => p.kafilahId === k.id).length;
+      k.participantCount = uniqueParticipants.filter((p) => p.kafilahId === k.id).length;
     });
 
     const errorCategories: ErrorCategory[] = (errorCatsRes.data || []).map((c: Record<string, unknown>) => ({
@@ -1361,7 +1369,7 @@ export const supabaseDataService = {
         cabangList,
         jenjangList,
         kafilahs,
-        participants,
+        participants: uniqueParticipants,
         stages,
         stageParticipations,
         questions,
@@ -2536,19 +2544,85 @@ export const supabaseDataService = {
     if (!this.isLive() || !client) {
       return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
     }
-    const { error } = await client.from('tenants').upsert({
+
+    const tenantPayload = {
       id: tenant.id,
-      code: tenant.code,
-      name: tenant.name,
-      event_name: tenant.eventName,
-      region: tenant.region,
-      edition: tenant.edition || null,
-      period: tenant.period || null,
+      code: tenant.code.trim().toUpperCase(),
+      name: tenant.name.trim(),
+      event_name: tenant.eventName.trim(),
+      region: tenant.region.trim(),
+      edition: tenant.edition?.trim() || null,
+      period: tenant.period?.trim() || null,
       status: tenant.status,
       updated_at: new Date().toISOString()
-    });
-    if (error) return { success: false, mode: 'supabase_live', message: error.message };
-    return { success: true, mode: 'supabase_live', message: 'Tenant tersimpan di Supabase.' };
+    };
+
+    try {
+      const { data: existingById } = await client
+        .from('tenants')
+        .select('id, code')
+        .eq('id', tenant.id)
+        .maybeSingle();
+
+      let saveError: any = null;
+
+      if (existingById?.id) {
+        const { error } = await client
+          .from('tenants')
+          .update(tenantPayload)
+          .eq('id', tenant.id);
+        saveError = error;
+      } else {
+        // Cek apakah kode tenant sudah digunakan oleh tenant lain
+        const { data: existingByCode } = await client
+          .from('tenants')
+          .select('id, name')
+          .eq('code', tenantPayload.code)
+          .maybeSingle();
+
+        if (existingByCode?.id && existingByCode.id !== tenant.id) {
+          return {
+            success: false,
+            mode: 'supabase_live',
+            message: `Kode singkat "${tenantPayload.code}" sudah digunakan oleh penyelenggara "${existingByCode.name}". Gunakan kode unik.`
+          };
+        }
+
+        const { error } = await client
+          .from('tenants')
+          .insert(tenantPayload);
+        saveError = error;
+      }
+
+      if (saveError) {
+        return { success: false, mode: 'supabase_live', message: saveError.message };
+      }
+
+      // Pastikan sesi superadmin aktif ditautkan ke tenant_memberships agar memiliki hak akses langsung
+      try {
+        const { data: sessionData } = await client.auth.getSession();
+        const currentUserId = sessionData?.session?.user?.id;
+        if (currentUserId && isValidUuid(currentUserId)) {
+          await client.from('tenant_memberships').upsert(
+            {
+              id: toDeterministicUuid(`tm-${tenant.id}-${currentUserId}`),
+              tenant_id: tenant.id,
+              profile_id: currentUserId,
+              role: 'superadmin',
+              status: 'Aktif',
+              updated_at: new Date().toISOString()
+            },
+            { onConflict: 'tenant_id,profile_id' }
+          );
+        }
+      } catch (linkErr) {
+        console.warn('Membership auto-link non-fatal:', linkErr);
+      }
+
+      return { success: true, mode: 'supabase_live', message: 'Tenant tersimpan di Supabase.' };
+    } catch (err: any) {
+      return { success: false, mode: 'supabase_live', message: err?.message || 'Gagal menyimpan tenant ke database.' };
+    }
   },
 
   async deleteTenant(tenantId: string): Promise<RpcServiceResult> {
@@ -2837,13 +2911,49 @@ export const supabaseDataService = {
     if (!this.isLive() || !client) {
       return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
     }
-    await client.from('rubric_fields').delete().eq('rubric_version_id', rubricId);
-    const { error } = await client
-      .from('rubric_versions')
-      .delete()
-      .eq('id', rubricId);
-    if (error) return { success: false, mode: 'supabase_live', message: error.message };
-    return { success: true, mode: 'supabase_live', message: 'Versi rubrik berhasil dihapus dari database.' };
+
+    try {
+      // 1. Dapatkan seluruh ID bidang dari versi rubrik ini
+      const { data: fieldRows } = await client
+        .from('rubric_fields')
+        .select('id')
+        .eq('rubric_version_id', rubricId);
+      const fieldIds = (fieldRows || []).map((f: { id: string }) => String(f.id)).filter(Boolean);
+
+      if (fieldIds.length > 0) {
+        // Lepaskan referensi foreign key di error_categories dan judge_assignments
+        await client.from('error_categories').update({ rubric_field_id: null }).in('rubric_field_id', fieldIds);
+        await client.from('judge_assignments').update({ rubric_field_id: null }).in('rubric_field_id', fieldIds);
+        // Hapus kriteria dan aturan potongan terkait bidang-bidang ini
+        const { data: critRows } = await client.from('rubric_criteria').select('id').in('rubric_field_id', fieldIds);
+        const critIds = (critRows || []).map((c: { id: string }) => String(c.id)).filter(Boolean);
+        if (critIds.length > 0) {
+          await client.from('deduction_rules').delete().in('criterion_id', critIds);
+          await client.from('rubric_criteria').delete().in('rubric_field_id', fieldIds);
+        }
+        await client.from('rubric_fields').delete().in('id', fieldIds);
+      } else {
+        await client.from('rubric_fields').delete().eq('rubric_version_id', rubricId);
+      }
+
+      // 2. Lepaskan/hapus aturan kompetisi yang merujuk pada versi rubrik ini
+      await client.from('competition_rule_configs').delete().eq('rubric_version_id', rubricId);
+
+      // 3. Hapus versi rubrik
+      const { error } = await client
+        .from('rubric_versions')
+        .delete()
+        .eq('id', rubricId);
+
+      if (error) {
+        return { success: false, mode: 'supabase_live', message: error.message };
+      }
+
+      return { success: true, mode: 'supabase_live', message: 'Versi rubrik berhasil dihapus permanen dari database.' };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal menghapus rubrik';
+      return { success: false, mode: 'supabase_live', message: msg };
+    }
   },
 
   async updateRubricVersionStatus(
@@ -2949,13 +3059,42 @@ export const supabaseDataService = {
     if (!this.isLive() || !client) {
       return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
     }
-    const { error } = await client
-      .from('stages')
-      .delete()
-      .eq('id', stageId)
-      .eq('tenant_id', tenantId);
-    if (error) return { success: false, mode: 'supabase_live', message: error.message };
-    return { success: true, mode: 'supabase_live', message: 'Babak musabaqah berhasil dihapus dari database.' };
+
+    try {
+      // Hapus penugasan dewan hakim yang terkait dengan babak ini terlebih dahulu jika ada
+      await client
+        .from('judge_assignments')
+        .delete()
+        .eq('stage_id', stageId)
+        .eq('tenant_id', tenantId);
+
+      // Hapus draft soal yang hanya terikat ke babak ini
+      await client
+        .from('questions')
+        .delete()
+        .eq('stage_id', stageId)
+        .eq('tenant_id', tenantId);
+
+      const { error } = await client
+        .from('stages')
+        .delete()
+        .eq('id', stageId)
+        .eq('tenant_id', tenantId);
+
+      if (error) {
+        if (error.message?.includes('violates foreign key') || error.message?.includes('stage_participations')) {
+          return {
+            success: false,
+            mode: 'supabase_live',
+            message: 'Babak tidak dapat dihapus karena masih memiliki riwayat partisipasi peserta atau lembar penilaian.'
+          };
+        }
+        return { success: false, mode: 'supabase_live', message: error.message };
+      }
+      return { success: true, mode: 'supabase_live', message: 'Babak musabaqah berhasil dihapus dari database.' };
+    } catch (err: any) {
+      return { success: false, mode: 'supabase_live', message: err?.message || 'Gagal menghapus babak.' };
+    }
   },
 
   async upsertUserAndMembership(params: {

@@ -275,11 +275,11 @@ export const UserManagementView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((u) => {
+                filteredUsers.map((u, idx) => {
                   const provStatus =
                     u.provisioningStatus || (u.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif');
                   return (
-                    <tr key={u.id} className="hover:bg-slate-50/70">
+                    <tr key={`${u.id}-${idx}`} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3.5">
                         <p className="font-bold text-slate-900">{u.name}</p>
                         {u.mimbarLocation && (
@@ -489,7 +489,7 @@ export const UserManagementView: React.FC = () => {
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                   />
                   <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                    Jika diisi, sistem akan langsung mendaftarkan akun di <code>auth.users</code> dan <code>public.profiles</code> dengan kata sandi ini tanpa mengeluarkan sesi Anda.
+                    Jika diisi, akun akan langsung dapat digunakan untuk masuk ke aplikasi.
                   </p>
                 </div>
               )}

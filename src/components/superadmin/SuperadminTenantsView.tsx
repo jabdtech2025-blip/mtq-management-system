@@ -37,6 +37,9 @@ export const SuperadminTenantsView: React.FC = () => {
     message: string;
   } | null>(null);
 
+  const [isSaving, setIsSaving] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+
   // Form states
   const [formName, setFormName] = useState('');
   const [formCode, setFormCode] = useState('');
@@ -54,6 +57,7 @@ export const SuperadminTenantsView: React.FC = () => {
 
   const handleOpenAdd = () => {
     setEditingTenant(null);
+    setModalError(null);
     setFormName('');
     setFormCode('LPTQ-');
     setFormEventName('MTQ Tingkat Provinsi 2025');
@@ -65,6 +69,7 @@ export const SuperadminTenantsView: React.FC = () => {
 
   const handleOpenEdit = (t: Tenant) => {
     setEditingTenant(t);
+    setModalError(null);
     setFormName(t.name);
     setFormCode(t.code);
     setFormEventName(t.eventName);
@@ -74,33 +79,49 @@ export const SuperadminTenantsView: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleSaveTenant = (e: React.FormEvent) => {
+  const handleSaveTenant = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName || !formCode) return;
+    if (!formName.trim() || !formCode.trim()) return;
+    setModalError(null);
+    setIsSaving(true);
 
-    if (editingTenant) {
-      updateTenant(editingTenant.id, {
-        name: formName,
-        code: formCode.toUpperCase(),
-        eventName: formEventName,
-        region: formRegion,
-        edition: formEdition,
-        period: formPeriod
+    try {
+      let res: { success: boolean; message: string };
+      if (editingTenant) {
+        res = await updateTenant(editingTenant.id, {
+          name: formName.trim(),
+          code: formCode.trim().toUpperCase(),
+          eventName: formEventName.trim(),
+          region: formRegion.trim(),
+          edition: formEdition.trim(),
+          period: formPeriod.trim()
+        });
+      } else {
+        res = await addTenant({
+          name: formName.trim(),
+          code: formCode.trim().toUpperCase(),
+          eventName: formEventName.trim(),
+          region: formRegion.trim(),
+          edition: formEdition.trim(),
+          period: formPeriod.trim(),
+          status: 'Aktif',
+          userCount: 1
+        });
+      }
+
+      if (!res.success) {
+        setModalError(res.message);
+        return;
+      }
+
+      setOperationBanner({
+        type: 'success',
+        message: res.message
       });
-    } else {
-      addTenant({
-        name: formName,
-        code: formCode.toUpperCase(),
-        eventName: formEventName,
-        region: formRegion,
-        edition: formEdition,
-        period: formPeriod,
-        status: 'Aktif',
-        userCount: 1
-      });
+      setIsModalOpen(false);
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsModalOpen(false);
   };
 
   const handleEnterTenant = (tenantId: string) => {
@@ -181,8 +202,8 @@ export const SuperadminTenantsView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredTenants.map((t) => (
-                <tr key={t.id} className="hover:bg-slate-50/70">
+              {filteredTenants.map((t, idx) => (
+                <tr key={`${t.id}-${idx}`} className="hover:bg-slate-50/70">
                   <td className="px-5 py-3.5 font-mono font-bold text-purple-900">
                     {t.code}
                   </td>
@@ -278,7 +299,14 @@ export const SuperadminTenantsView: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSaveTenant} className="space-y-4 text-xs">
+            <form onSubmit={(e) => void handleSaveTenant(e)} className="space-y-4 text-xs">
+              {modalError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span className="font-semibold leading-relaxed">{modalError}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
                   <label className="font-bold text-slate-600 block mb-1">
@@ -355,16 +383,18 @@ export const SuperadminTenantsView: React.FC = () => {
               <div className="flex justify-end gap-2 pt-3 border-t">
                 <button
                   type="button"
+                  disabled={isSaving}
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 border rounded-lg font-semibold"
+                  className="px-4 py-2 border rounded-lg font-semibold cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-purple-800 text-white rounded-lg font-bold"
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-purple-800 hover:bg-purple-900 disabled:opacity-60 text-white rounded-lg font-bold cursor-pointer"
                 >
-                  Simpan Penyelenggara
+                  {isSaving ? 'Menyimpan...' : 'Simpan Penyelenggara'}
                 </button>
               </div>
             </form>

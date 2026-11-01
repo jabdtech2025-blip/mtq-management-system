@@ -135,6 +135,7 @@ export const MasterDataView: React.FC = () => {
 
   // Delete Guard Warning State
   const [rubricToDelete, setRubricToDelete] = useState<RubricVersion | null>(null);
+  const [fieldToDelete, setFieldToDelete] = useState<{ rubric: RubricVersion; field: RubricField } | null>(null);
   const [deleteWarningItem, setDeleteWarningItem] = useState<{
     type: 'jenjang' | 'cabang';
     id: string;
@@ -557,10 +558,10 @@ export const MasterDataView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {errorCategories.map((cat) => {
+              {errorCategories.map((cat, idx) => {
                 const mappedField = availableRubricFields.find((f) => f.id === cat.fieldId);
                 return (
-                  <tr key={cat.id} className="hover:bg-slate-50/70">
+                  <tr key={`${cat.id}-${idx}`} className="hover:bg-slate-50/70">
                     <td className="px-5 py-3.5 font-mono font-bold text-slate-900">{cat.code}</td>
                     <td className="px-5 py-3.5">
                       <p className="font-bold text-slate-900">{cat.name}</p>
@@ -644,14 +645,14 @@ export const MasterDataView: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 gap-5">
-            {rubricVersions.map((rubric) => {
+            {rubricVersions.map((rubric, idx) => {
               const activeFieldsList = rubric.fields.filter((f) => f.status !== 'Nonaktif' && f.status !== 'Arsip');
               const totalFieldsMax = activeFieldsList.reduce((acc, f) => acc + f.maxScore, 0);
               const isActive = rubric.status === 'Aktif';
 
               return (
                 <div
-                  key={rubric.id}
+                  key={`${rubric.id}-${idx}`}
                   className={`bg-white rounded-xl border transition-all ${
                     isActive ? 'border-emerald-300 ring-1 ring-emerald-300 shadow-xs' : 'border-slate-200'
                   } p-5 space-y-4`}
@@ -746,11 +747,11 @@ export const MasterDataView: React.FC = () => {
                       {rubric.fields
                         .slice()
                         .sort((a, b) => (a.order || 0) - (b.order || 0))
-                        .map((fld) => {
+                        .map((fld, idx) => {
                           const isInactive = fld.status === 'Nonaktif' || fld.status === 'Arsip';
                           return (
                             <div
-                              key={fld.id}
+                              key={`${fld.id}-${idx}`}
                               className={`p-3 rounded-lg border flex flex-col justify-between ${
                                 isInactive
                                   ? 'bg-slate-100/70 border-slate-200 opacity-60'
@@ -786,7 +787,7 @@ export const MasterDataView: React.FC = () => {
                                     {isInactive ? 'Aktifkan' : 'Nonaktif'}
                                   </button>
                                   <button
-                                    onClick={() => handleToggleOrRemoveField(rubric, fld, 'remove')}
+                                    onClick={() => setFieldToDelete({ rubric, field: fld })}
                                     className="p-0.5 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
                                     title="Hapus Bidang Ini"
                                   >
@@ -855,8 +856,8 @@ export const MasterDataView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {competitionRules.map((rule) => (
-                <tr key={rule.id} className="hover:bg-slate-50/70">
+              {competitionRules.map((rule, idx) => (
+                <tr key={`${rule.id}-${idx}`} className="hover:bg-slate-50/70">
                   <td className="px-5 py-3.5">
                     <p className="font-bold text-slate-900">{rule.branchName}</p>
                     <p className="text-[11px] font-mono text-slate-500">
@@ -865,12 +866,12 @@ export const MasterDataView: React.FC = () => {
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-1 flex-wrap">
-                      {rule.tieBreakOrder.map((crit, idx) => (
-                        <React.Fragment key={crit}>
+                      {rule.tieBreakOrder.map((crit, cIdx) => (
+                        <React.Fragment key={`${crit}-${cIdx}`}>
                           <span className="px-2 py-0.5 bg-slate-100 rounded text-[11px] font-semibold text-slate-700">
-                            {idx + 1}. {crit}
+                            {cIdx + 1}. {crit}
                           </span>
-                          {idx < rule.tieBreakOrder.length - 1 && (
+                          {cIdx < rule.tieBreakOrder.length - 1 && (
                             <span className="text-slate-400">➔</span>
                           )}
                         </React.Fragment>
@@ -878,8 +879,8 @@ export const MasterDataView: React.FC = () => {
                     </div>
                   </td>
                   <td className="px-4 py-3.5 text-center font-mono">
-                    {Object.entries(rule.quotaPerStage || {}).map(([stg, q]) => (
-                      <span key={stg} className="inline-block mx-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 rounded font-bold text-[10px]">
+                    {Object.entries(rule.quotaPerStage || {}).map(([stg, q], sIdx) => (
+                      <span key={`${stg}-${sIdx}`} className="inline-block mx-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 rounded font-bold text-[10px]">
                         {stg}: {q}
                       </span>
                     ))}
@@ -966,8 +967,8 @@ export const MasterDataView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {stages.map((stg) => (
-                <tr key={stg.id} className="hover:bg-slate-50/70">
+              {stages.map((stg, idx) => (
+                <tr key={`${stg.id}-${idx}`} className="hover:bg-slate-50/70">
                   <td className="px-5 py-3.5 text-center font-mono font-bold text-slate-500">
                     {stg.order}
                   </td>
@@ -997,11 +998,14 @@ export const MasterDataView: React.FC = () => {
                             status: stg.status === 'Aktif' ? 'Selesai' : 'Aktif'
                           })
                         }
-                        className="text-xs text-slate-600 hover:text-emerald-800 font-semibold cursor-pointer"
+                        disabled={stg.isFinalized}
+                        className="text-xs text-slate-600 hover:text-emerald-800 disabled:opacity-40 font-semibold cursor-pointer px-2.5 py-1 rounded-md border border-slate-200 hover:bg-slate-50"
                       >
                         Ubah Status
                       </button>
                       <button
+                        type="button"
+                        disabled={stg.isFinalized || stg.status === 'Selesai'}
                         onClick={() => {
                           const res = deleteStage(stg.id);
                           setFeedbackMessage({
@@ -1009,9 +1013,12 @@ export const MasterDataView: React.FC = () => {
                             text: res.message
                           });
                         }}
-                        disabled={stg.isFinalized}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg inline-flex items-center gap-1 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                        title={stg.isFinalized ? 'Babak sudah disahkan dan tidak dapat dihapus' : 'Hapus Babak'}
+                        title={
+                          stg.isFinalized || stg.status === 'Selesai'
+                            ? 'Babak yang sudah selesai/disahkan tidak dapat dihapus'
+                            : 'Hapus babak musabaqah ini'
+                        }
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 disabled:cursor-not-allowed text-rose-700 font-semibold text-xs cursor-pointer transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         <span>Hapus</span>
@@ -1042,9 +1049,9 @@ export const MasterDataView: React.FC = () => {
           </div>
 
           <div className="divide-y divide-slate-100">
-            {jenjangList.map((item) => (
+            {jenjangList.map((item, idx) => (
               <div
-                key={item.id}
+                key={`${item.id}-${idx}`}
                 className="p-4 flex items-center justify-between hover:bg-slate-50/60 transition-colors"
               >
                 <div className="flex items-center gap-3">
@@ -1102,9 +1109,9 @@ export const MasterDataView: React.FC = () => {
           </div>
 
           <div className="divide-y divide-slate-100">
-            {cabangList.map((item) => (
+            {cabangList.map((item, idx) => (
               <div
-                key={item.id}
+                key={`${item.id}-${idx}`}
                 className="p-4 flex items-center justify-between hover:bg-slate-50/60 transition-colors"
               >
                 <div className="flex items-center gap-3">
@@ -1172,8 +1179,8 @@ export const MasterDataView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {judgeAssignments.map((ja) => (
-                <tr key={ja.id} className="hover:bg-slate-50/70">
+              {judgeAssignments.map((ja, idx) => (
+                <tr key={`${ja.id}-${idx}`} className="hover:bg-slate-50/70">
                   <td className="px-5 py-3.5 font-bold text-slate-900">{ja.judgeName}</td>
                   <td className="px-5 py-3.5 font-semibold text-slate-800">{ja.stageName}</td>
                   <td className="px-4 py-3.5 text-slate-600">{ja.branchName}</td>
@@ -1889,6 +1896,51 @@ export const MasterDataView: React.FC = () => {
                 className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
               >
                 Ya, Hapus Permanen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rubric Field Delete Confirmation Modal */}
+      {fieldToDelete && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5 text-rose-700" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Konfirmasi Hapus Bidang Rubrik
+                </h3>
+                <p className="text-xs text-slate-500 font-mono">
+                  {fieldToDelete.field.name} ({fieldToDelete.field.code}) · {fieldToDelete.rubric.name}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed mb-5">
+              Apakah Anda yakin ingin menghapus bidang penilaian <strong>"{fieldToDelete.field.name}"</strong> dari versi rubrik ini? Kategori kesalahan terkait bidang ini akan dilepaskan pemetaannya.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setFieldToDelete(null)}
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleToggleOrRemoveField(fieldToDelete.rubric, fieldToDelete.field, 'remove');
+                  setFieldToDelete(null);
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+              >
+                Ya, Hapus Bidang
               </button>
             </div>
           </div>

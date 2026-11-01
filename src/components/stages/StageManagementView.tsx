@@ -149,14 +149,14 @@ export const StageManagementView: React.FC = () => {
         {stages
           .slice()
           .sort((a, b) => a.order - b.order)
-          .map((stg) => {
+          .map((stg, idx) => {
             const stageParticipants = participants.filter((p) => p.stageName === stg.name);
             const totalStage = stageParticipants.length;
             const finalizedStage = stageParticipants.filter((p) => p.status === 'Final').length;
 
             return (
               <div
-                key={stg.id}
+                key={`${stg.id}-${idx}`}
                 className={`bg-white rounded-2xl border p-5 shadow-xs flex flex-col justify-between transition-all ${
                   stg.status === 'Aktif'
                     ? 'border-emerald-600 ring-2 ring-emerald-500/10'

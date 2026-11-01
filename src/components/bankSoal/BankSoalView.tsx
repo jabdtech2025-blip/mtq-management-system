@@ -679,7 +679,7 @@ export const BankSoalView: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredQuestions.map((q) => {
+                  filteredQuestions.map((q, idx) => {
                     // Check all participants assigned to this question
                     const assignedParts = participants.filter((p) => {
                       if (p.questionId === q.id) return true;
@@ -693,7 +693,7 @@ export const BankSoalView: React.FC = () => {
                         : `Hal. ${q.pageNumber}`;
 
                     return (
-                      <tr key={q.id} className="hover:bg-slate-50/70 transition-colors">
+                      <tr key={`${q.id}-${idx}`} className="hover:bg-slate-50/70 transition-colors">
                         <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
                           {q.code}
                         </td>
@@ -976,9 +976,9 @@ export const BankSoalView: React.FC = () => {
                             (aq) => aq.questionId === manualAssignQuestion.id && (!aq.stageName || aq.stageName === manualAssignQuestion.stageName)
                           ))
                     )
-                    .map((p) => (
+                    .map((p, idx) => (
                       <div
-                        key={p.id}
+                        key={`${p.id}-${idx}`}
                         className="flex items-center justify-between p-2 rounded-lg bg-emerald-50/60 border border-emerald-200 text-xs"
                       >
                         <div>
@@ -1015,7 +1015,7 @@ export const BankSoalView: React.FC = () => {
                 onChange={(e) => setTargetParticipantId(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 bg-white"
               >
-                {participants.map((p) => {
+                {participants.map((p, idx) => {
                   const matchesStage = !manualAssignQuestion.stageName || p.stageName === manualAssignQuestion.stageName;
                   const alreadyHas =
                     (p.questionId === manualAssignQuestion.id && (!p.stageName || p.stageName === manualAssignQuestion.stageName)) ||
@@ -1036,7 +1036,7 @@ export const BankSoalView: React.FC = () => {
 
                   return (
                     <option
-                      key={p.id}
+                      key={`${p.id}-${idx}`}
                       value={p.id}
                       disabled={alreadyHas || !matchesStage}
                     >
@@ -1219,12 +1219,12 @@ export const BankSoalView: React.FC = () => {
                       Tidak ada peserta yang cocok dengan kriteria babak/cabang ini.
                     </div>
                   ) : (
-                    eligibleLotteryParticipants.map((p) => {
+                    eligibleLotteryParticipants.map((p, idx) => {
                       const isSelected = selectedParticipantIds.includes(p.id);
                       const currentQCount = p.assignedQuestions?.length || (p.questionId ? 1 : 0);
                       return (
                         <div
-                          key={p.id}
+                          key={`${p.id}-${idx}`}
                           onClick={() => handleToggleParticipant(p.id)}
                           className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
                             isSelected ? 'bg-emerald-50/50' : 'hover:bg-slate-50'
@@ -1291,9 +1291,9 @@ export const BankSoalView: React.FC = () => {
                   </div>
 
                   <div className="space-y-2 max-h-56 overflow-y-auto">
-                    {lotteryDrawResults.map((res) => (
+                    {lotteryDrawResults.map((res, idx) => (
                       <div
-                        key={res.participantId}
+                        key={`${res.participantId}-${idx}`}
                         className="bg-white p-2.5 rounded-lg border border-emerald-100 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-1.5"
                       >
                         <span className="font-bold text-slate-900">{res.participantName}</span>

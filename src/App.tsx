@@ -203,6 +203,10 @@ const AuthenticationGateView: React.FC = () => {
   };
 
   const renderConnectionBlockBanner = () => {
+    if (isSubmitting) {
+      return null;
+    }
+
     if (accessGateReason === 'supabase_unconfigured') {
       return (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-950 space-y-2">
@@ -260,6 +264,7 @@ const AuthenticationGateView: React.FC = () => {
 
   const renderAccessDiagnostic = () => {
     if (
+      isSubmitting ||
       !authenticatedProfile ||
       accessGateReason === 'unauthenticated' ||
       accessGateReason === 'supabase_unconfigured' ||

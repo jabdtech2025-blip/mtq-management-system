@@ -313,9 +313,9 @@ export const DemoAccountModal: React.FC = () => {
                 <div className="space-y-1.5">
                   {users
                     .filter((u) => u.role === 'superadmin')
-                    .map((u) => (
+                    .map((u, idx) => (
                       <button
-                        key={u.id}
+                        key={`${u.id}-${idx}`}
                         onClick={() => handleSelectUser(u.id)}
                         className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
                           u.id === currentUser.id
@@ -353,9 +353,9 @@ export const DemoAccountModal: React.FC = () => {
                 <div className="space-y-1.5">
                   {users
                     .filter((u) => u.role === 'admin')
-                    .map((u) => (
+                    .map((u, idx) => (
                       <button
-                        key={u.id}
+                        key={`${u.id}-${idx}`}
                         onClick={() => handleSelectUser(u.id)}
                         className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
                           u.id === currentUser.id
@@ -393,9 +393,9 @@ export const DemoAccountModal: React.FC = () => {
                 <div className="space-y-1.5">
                   {users
                     .filter((u) => u.role === 'judge')
-                    .map((u) => (
+                    .map((u, idx) => (
                       <button
-                        key={u.id}
+                        key={`${u.id}-${idx}`}
                         onClick={() => handleSelectUser(u.id)}
                         className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all ${
                           u.id === currentUser.id

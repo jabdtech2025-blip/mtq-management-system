@@ -294,12 +294,12 @@ export const PenilaianHakimListView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredParticipants.map((p) => {
+                filteredParticipants.map((p, pIdx) => {
                   const isFinal = p.judgeStatus === 'finalized';
                 const isInProgress = p.judgeStatus === 'in_progress';
 
                 return (
-                  <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                  <tr key={`${p.id}-${pIdx}`} className="hover:bg-slate-50/50 transition-colors">
                     <td className="py-3.5 px-4 text-center font-bold text-slate-900 font-mono text-sm">
                       {p.lotteryNumber}
                     </td>
@@ -321,8 +321,8 @@ export const PenilaianHakimListView: React.FC = () => {
                         </span>
                       ) : (
                         <div className="space-y-1">
-                          {p.stageQuestions.map((q) => (
-                            <div key={q.questionId} className="flex flex-wrap items-center gap-1.5 text-xs">
+                          {p.stageQuestions.map((q, qIdx) => (
+                            <div key={`${q.id || q.questionId}-${qIdx}`} className="flex flex-wrap items-center gap-1.5 text-xs">
                               <span className="font-semibold text-emerald-800">
                                 {q.code ? `${q.code}: ` : ''}{q.title}
                               </span>

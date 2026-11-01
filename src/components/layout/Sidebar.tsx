@@ -136,8 +136,8 @@ export const Sidebar: React.FC = () => {
   };
 
   const sidebarContent = (
-    <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 select-none h-full z-50">
-      <div className="flex-1 overflow-y-auto">
+    <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 select-none h-full max-h-screen z-50 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {/* Brand Lockup */}
         <div className="p-4 flex items-center justify-between border-b border-slate-100">
           <div className="flex items-center gap-3">
@@ -175,11 +175,11 @@ export const Sidebar: React.FC = () => {
 
         {/* Navigation Items */}
         <nav className="p-3 space-y-1">
-          {navItems.map((item) => {
+          {navItems.map((item, idx) => {
             const isActive = currentView === item.id;
             return (
               <button
-                key={item.id}
+                key={`${item.id}-${idx}`}
                 onClick={() => handleNavClick(item.id)}
                 className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-colors text-left ${
                   isActive
@@ -197,8 +197,8 @@ export const Sidebar: React.FC = () => {
         </nav>
       </div>
 
-      {/* Discrete Prototype Demo Switcher Footer */}
-      <div className="p-3 border-t border-slate-200 bg-white space-y-2 shrink-0 sticky bottom-0 z-10">
+      {/* Discrete Locked Bottom Persona Footer */}
+      <div className="p-3 border-t border-slate-200 bg-white space-y-2 shrink-0 z-20 mt-auto">
         <button
           onClick={() => setIsDemoAccountModalOpen(true)}
           className="w-full text-left p-2 rounded-xl bg-white border border-slate-200/90 hover:border-emerald-500 hover:bg-emerald-50/40 transition-all flex items-center justify-between"
@@ -235,7 +235,7 @@ export const Sidebar: React.FC = () => {
   return (
     <>
       {/* Desktop Persistent Sidebar (hidden on tablet/mobile) */}
-      <div className="hidden xl:block h-screen sticky top-0 shrink-0">
+      <div className="hidden xl:block h-screen max-h-screen sticky top-0 shrink-0 overflow-hidden">
         {sidebarContent}
       </div>
 
@@ -246,7 +246,7 @@ export const Sidebar: React.FC = () => {
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
             onClick={() => setIsSidebarOpen(false)}
           />
-          <div className="relative flex flex-col w-64 max-w-xs h-full bg-white shadow-2xl z-50 animate-in slide-in-from-left duration-200">
+          <div className="relative flex flex-col w-64 max-w-xs h-full max-h-screen bg-white shadow-2xl z-50 animate-in slide-in-from-left duration-200 overflow-hidden">
             {sidebarContent}
           </div>
         </div>

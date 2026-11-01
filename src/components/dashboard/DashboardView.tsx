@@ -23,6 +23,7 @@ export const DashboardView: React.FC = () => {
     users,
     assessments,
     setCurrentView,
+    selectedParticipantId,
     setSelectedParticipantId,
     activityLogs,
     getParticipantProgress
@@ -47,23 +48,53 @@ export const DashboardView: React.FC = () => {
   const completionPercentage =
     totalUniqueParticipants > 0 ? Math.round((lengkapCount / totalUniqueParticipants) * 100) : 0;
 
-  // Real ongoing participant actively being scored
-  const ongoingParticipant =
-    tenantParticipants.find(
+  // Real ongoing participant actively being scored or latest active
+  const ongoingParticipant = React.useMemo(() => {
+    // 1. Participant currently with 'Berlangsung' progress or status
+    const inProgPart = tenantParticipants.find(
       (p) =>
         getParticipantProgress(p.id) === 'Berlangsung' ||
         (p.status as string) === 'Berlangsung' ||
         (p.status as string) === 'Sedang Tampil'
-    ) ||
-    tenantParticipants.find((p) => getParticipantProgress(p.id) === 'Menunggu Hakim Lain') ||
-    (() => {
-      // Find participant with recent assessment activity
-      const activeAsm = assessments.find((a) => a.tenantId === currentTenant.id && (a.status === 'in_progress' || a.status === 'finalized'));
-      if (activeAsm) {
-        return tenantParticipants.find((p) => p.id === activeAsm.participantId) || null;
-      }
-      return tenantParticipants[0] || null;
-    })();
+    );
+    if (inProgPart) return inProgPart;
+
+    // 2. Participant with active assessment currently in progress
+    const activeInProgAsm = assessments.find(
+      (a) =>
+        (!currentTenant.id || a.tenantId === currentTenant.id) &&
+        a.status === 'in_progress'
+    );
+    if (activeInProgAsm) {
+      const match = tenantParticipants.find((p) => p.id === activeInProgAsm.participantId);
+      if (match) return match;
+    }
+
+    // 3. Participant with status 'Menunggu Hakim Lain'
+    const waitingPart = tenantParticipants.find(
+      (p) => getParticipantProgress(p.id) === 'Menunggu Hakim Lain'
+    );
+    if (waitingPart) return waitingPart;
+
+    // 4. Participant currently selected in context
+    if (selectedParticipantId) {
+      const selPart = tenantParticipants.find((p) => p.id === selectedParticipantId);
+      if (selPart) return selPart;
+    }
+
+    // 5. Participant with latest assessment finalized or updated
+    const latestAsm = assessments
+      .filter((a) => !currentTenant.id || a.tenantId === currentTenant.id)
+      .slice()
+      .reverse()[0];
+    if (latestAsm) {
+      const match = tenantParticipants.find((p) => p.id === latestAsm.participantId);
+      if (match) return match;
+    }
+
+    // 6. First participant in tenant
+    return tenantParticipants[0] || null;
+  }, [tenantParticipants, assessments, currentTenant.id, getParticipantProgress, selectedParticipantId]);
 
   const handleOpenActiveScoring = () => {
     if (ongoingParticipant) {
@@ -272,29 +303,53 @@ export const DashboardView: React.FC = () => {
 
         <div className="space-y-2.5">
           {(() => {
-            const combinedLogs: Array<{ id: string; title: string; description: string; timestamp: string }> = [...activityLogs];
-            
-            // Add recent finalized/in-progress assessments to activity view if not already logged
+            const list: Array<{ id: string; title: string; description: string; timestamp: string }> = [];
+
+            // 1. Prioritize real finalized/in-progress assessments from dewan hakim
             assessments
-              .filter((a) => a.tenantId === currentTenant.id)
+              .filter((a) => !currentTenant.id || a.tenantId === currentTenant.id)
+              .slice()
+              .reverse()
               .forEach((a) => {
                 const part = tenantParticipants.find((p) => p.id === a.participantId);
                 const partName = part ? `${part.name} (#${part.lotteryNumber})` : a.participantId;
-                const statusLabel = a.status === 'finalized' ? 'Finalisasi Nilai' : 'Penyimpanan Lembar Penilaian';
+                const statusLabel = a.status === 'finalized' ? 'Finalisasi Nilai Dewan Hakim' : 'Penyimpanan Lembar Penilaian';
                 const desc = `Hakim ${a.judgeName} (${a.judgeField}) - Nilai Akhir: ${a.finalScore.toFixed(2)} pts untuk ${partName}.`;
                 const ts = a.finalizedAt || a.lastUpdated || 'Baru saja';
-                
-                if (!combinedLogs.some((l) => l.description.includes(partName) && l.timestamp === ts)) {
-                  combinedLogs.push({
-                    id: `asm-log-${a.id}`,
-                    title: statusLabel,
-                    description: desc,
-                    timestamp: ts
+
+                list.push({
+                  id: `asm-log-${a.id}`,
+                  title: statusLabel,
+                  description: desc,
+                  timestamp: ts
+                });
+              });
+
+            // 2. Activity logs from operational context
+            activityLogs
+              .filter((l) => !currentTenant.id || l.tenantId === currentTenant.id)
+              .forEach((l) => {
+                if (!list.some((existing) => existing.description === l.description)) {
+                  list.push({
+                    id: l.id,
+                    title: l.title || 'Aktivitas Penilaian',
+                    description: l.description,
+                    timestamp: l.timestamp
                   });
                 }
               });
 
-            return combinedLogs.slice(0, 5).map((log, idx) => (
+            // 3. Fallback when fresh empty state
+            if (list.length === 0) {
+              list.push({
+                id: 'default-log-1',
+                title: 'Workspace MTQ Aktif',
+                description: `Penyelenggaraan ${currentTenant.name} (${currentTenant.eventName}) siap untuk penjurian.`,
+                timestamp: 'Baru saja'
+              });
+            }
+
+            return list.slice(0, 5).map((log, idx) => (
               <div
                 key={`${log.id}-${idx}`}
                 className="p-3 rounded-lg bg-slate-50 border border-slate-200/70 flex items-start justify-between gap-3 text-xs"

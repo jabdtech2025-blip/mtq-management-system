@@ -95,9 +95,9 @@ export const SuperadminDashboardView: React.FC = () => {
           Daftar Event Musabaqah yang Sedang Berjalan
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {tenants.map((t) => (
+          {tenants.map((t, idx) => (
             <div
-              key={t.id}
+              key={`${t.id}-${idx}`}
               className="bg-white rounded-xl border border-slate-200/90 p-5 shadow-xs flex flex-col justify-between hover:border-purple-300 transition-all"
             >
               <div>

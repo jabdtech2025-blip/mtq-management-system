@@ -271,8 +271,8 @@ export const SuperadminUsersView: React.FC = () => {
             <option value="Semua Tenant">Semua Tenant MTQ</option>
             <option value="Platform">Platform Inti</option>
             <option value="unassigned">Belum Ditugaskan (Tabel Profiles)</option>
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>
+            {tenants.map((t, idx) => (
+              <option key={`${t.id}-${idx}`} value={t.id}>
                 {t.name}
               </option>
             ))}
@@ -302,11 +302,11 @@ export const SuperadminUsersView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((u) => {
+                filteredUsers.map((u, idx) => {
                   const provStatus =
                     u.provisioningStatus || (u.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif');
                   return (
-                    <tr key={u.id} className="hover:bg-slate-50/70">
+                    <tr key={`${u.id}-${u.tenantId || ''}-${idx}`} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3.5">
                         <p className="font-bold text-slate-900">{u.name}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">{u.judgeCategory || ''}</p>
@@ -466,8 +466,8 @@ export const SuperadminUsersView: React.FC = () => {
                   onChange={(e) => setTargetTenantId(e.target.value)}
                   className="px-2 py-1 border border-slate-300 rounded font-semibold text-slate-900 bg-white"
                 >
-                  {tenants.map((t) => (
-                    <option key={t.id} value={t.id}>
+                  {tenants.map((t, idx) => (
+                    <option key={`${t.id}-${idx}`} value={t.id}>
                       {t.name}
                     </option>
                   ))}
@@ -587,8 +587,8 @@ export const SuperadminUsersView: React.FC = () => {
                       onChange={(e) => setFormTenantId(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
                     >
-                      {tenants.map((t) => (
-                        <option key={t.id} value={t.id}>
+                      {tenants.map((t, idx) => (
+                        <option key={`${t.id}-${idx}`} value={t.id}>
                           {t.name}
                         </option>
                       ))}

@@ -220,8 +220,8 @@ export const KafilahPesertaView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredKafilahs.map((k) => (
-                <tr key={k.id} className="hover:bg-slate-50/50 transition-colors">
+              {filteredKafilahs.map((k, idx) => (
+                <tr key={`${k.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors">
                   <td className="py-3.5 px-5 font-bold text-emerald-800 tracking-wide font-mono">
                     {k.code}
                   </td>
@@ -327,8 +327,8 @@ export const KafilahPesertaView: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {kafilahParticipants.map((p) => (
-                        <tr key={p.id} className="hover:bg-slate-50/50">
+                      {kafilahParticipants.map((p, idx) => (
+                        <tr key={`${p.id}-${idx}`} className="hover:bg-slate-50/50">
                           <td className="py-2.5 px-4 font-mono font-bold text-slate-800">
                             {p.lotteryNumber}
                           </td>
