@@ -201,10 +201,13 @@ interface MtqContextType {
   // Master Data & Config (Tenant Scoped)
   addKafilah: (kafilah: Omit<Kafilah, 'id' | 'tenantId'>) => void;
   updateKafilah: (id: string, updated: Partial<Kafilah>) => void;
+  deleteKafilah: (id: string) => { success: boolean; message: string };
   addParticipant: (part: Omit<Participant, 'id' | 'tenantId'>) => { success: boolean; message: string };
   updateParticipant: (id: string, updated: Partial<Participant>) => void;
+  deleteParticipant: (id: string) => { success: boolean; message: string };
   addQuestion: (q: Omit<Question, 'id' | 'tenantId'>) => void;
   updateQuestion: (id: string, updated: Partial<Question>) => void;
+  deleteQuestion: (id: string) => { success: boolean; message: string };
   assignMaqraToParticipant: (
     participantId: string,
     questionId: string,
@@ -253,6 +256,7 @@ interface MtqContextType {
   updateCategoryDeduction: (categoryId: string, deduction: number) => void;
   addErrorCategory: (cat: Omit<ErrorCategory, 'id' | 'tenantId'>) => void;
   updateErrorCategory: (id: string, updated: Partial<ErrorCategory>) => void;
+  deleteErrorCategory: (id: string) => { success: boolean; message: string };
 
   // Stages & Progressions
   addStage: (stage: Omit<CompetitionStage, 'id' | 'tenantId'>) => void;
@@ -1700,25 +1704,35 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addCompetitionRule = (ruleData: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => {
+    const matchedBranch = cabangList.find(
+      (c) =>
+        (c.tenantId === currentTenantId || !c.tenantId) &&
+        ruleData.branchName &&
+        (c.name === ruleData.branchName || ruleData.branchName.includes(c.name) || c.name.includes(ruleData.branchName))
+    );
+    const resolvedBranchId = ruleData.branchId || matchedBranch?.id;
     const newRule: CompetitionRuleConfig = {
       ...ruleData,
       id: generateUuid(),
-      tenantId: currentTenantId
+      tenantId: currentTenantId,
+      ...(resolvedBranchId ? { branchId: resolvedBranchId } : {})
     };
     setCompetitionRules((prev) => [...prev, newRule]);
-    if (isLiveDbActive && newRule.branchId && newRule.rubricVersionId) {
+    if (isLiveDbActive && newRule.rubricVersionId) {
       void supabaseDataService
         .upsertCompetitionRuleConfig({
           ...newRule,
           id: toDeterministicUuid(newRule.id),
           tenantId: toDeterministicUuid(currentTenantId),
-          branchId: toDeterministicUuid(newRule.branchId),
+          branchId: newRule.branchId ? toDeterministicUuid(newRule.branchId) : undefined,
           rubricVersionId: toDeterministicUuid(newRule.rubricVersionId)
         })
         .then((res) => {
           if (!res.success) {
             setSyncStatus(`Gagal menyimpan aturan kompetisi: ${res.message}`);
             setCompetitionRules((prev) => prev.filter((r) => r.id !== newRule.id));
+          } else {
+            setSyncStatus('Aturan Kompetisi Tersimpan di Database');
           }
         });
     }
@@ -1731,19 +1745,28 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     if (isLiveDbActive && existing) {
       const merged: CompetitionRuleConfig = { ...existing, ...updated };
-      if (merged.branchId && merged.rubricVersionId) {
+      const matchedBranch = cabangList.find(
+        (c) =>
+          (c.tenantId === currentTenantId || !c.tenantId) &&
+          merged.branchName &&
+          (c.name === merged.branchName || merged.branchName.includes(c.name) || c.name.includes(merged.branchName))
+      );
+      const effectiveBranchId = merged.branchId || matchedBranch?.id;
+      if (merged.rubricVersionId) {
         void supabaseDataService
           .upsertCompetitionRuleConfig({
             ...merged,
             id: toDeterministicUuid(merged.id),
             tenantId: toDeterministicUuid(currentTenantId),
-            branchId: toDeterministicUuid(merged.branchId),
+            branchId: effectiveBranchId ? toDeterministicUuid(effectiveBranchId) : undefined,
             rubricVersionId: toDeterministicUuid(merged.rubricVersionId)
           })
           .then((res) => {
             if (!res.success) {
               setSyncStatus(`Gagal memperbarui aturan kompetisi: ${res.message}`);
               setCompetitionRules((prev) => prev.map((r) => (r.id === id ? existing : r)));
+            } else {
+              setSyncStatus('Aturan Kompetisi Diperbarui di Database');
             }
           });
       }
@@ -2964,6 +2987,44 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const deleteKafilah = (id: string): { success: boolean; message: string } => {
+    const existing = kafilahs.find((k) => k.id === id && k.tenantId === currentTenantId);
+    if (!existing) {
+      return { success: false, message: 'Grup/Kafilah tidak ditemukan.' };
+    }
+    const activeMembers = participants.filter(
+      (p) => p.tenantId === currentTenantId && p.kafilahId === id
+    ).length;
+    if (activeMembers > 0) {
+      return {
+        success: false,
+        message: `Grup "${existing.name}" masih memiliki ${activeMembers} peserta terdaftar. Hapus atau pindahkan peserta terlebih dahulu sebelum menghapus grup.`
+      };
+    }
+
+    setKafilahs((prev) => prev.filter((k) => !(k.id === id && k.tenantId === currentTenantId)));
+
+    if (isLiveDbActive) {
+      setSyncStatus('Menghapus kafilah dari database...');
+      void supabaseDataService
+        .deleteKafilah(toDeterministicUuid(currentTenantId), toDeterministicUuid(id))
+        .then((res) => {
+          if (!res.success) {
+            setSyncStatus(`Gagal Menghapus Kafilah: ${res.message}`);
+            setKafilahs((prev) => [...prev, existing]);
+          } else {
+            setSyncStatus('Kafilah Dihapus dari Database');
+            setLastSyncTime(getWibTime());
+          }
+        });
+    }
+
+    return {
+      success: true,
+      message: `Grup "${existing.name}" berhasil dihapus.`
+    };
+  };
+
   // Participant Actions (Tenant Scoped)
   const addParticipant = (data: Omit<Participant, 'id' | 'tenantId'>): { success: boolean; message: string } => {
     const idTrimmed = (data.participantId || '').trim();
@@ -3062,7 +3123,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             tenantId: toDeterministicUuid(currentTenantId),
             stageId: toDeterministicUuid(stageId)
           },
-          levelId: matchedLevel?.id ? toDeterministicUuid(matchedLevel.id) : null
+          levelId: matchedLevel?.id ? toDeterministicUuid(matchedLevel.id) : null,
+          autoCreateMissingMaster: true
         })
         .then((res) => {
           if (!res.success) {
@@ -3161,6 +3223,74 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const deleteParticipant = (id: string): { success: boolean; message: string } => {
+    const existing = participants.find((p) => p.id === id && p.tenantId === currentTenantId);
+    if (!existing) {
+      return { success: false, message: 'Peserta tidak ditemukan.' };
+    }
+
+    const hasFinalizedAssessment = assessments.some(
+      (a) => a.tenantId === currentTenantId && a.participantId === id && a.status === 'finalized'
+    );
+    if (hasFinalizedAssessment || existing.status === 'Final') {
+      return {
+        success: false,
+        message: `Peserta "${existing.name}" (${existing.participantId}) sudah memiliki lembar penilaian final dan tidak dapat dihapus.`
+      };
+    }
+
+    const existingSps = stageParticipations.filter(
+      (sp) => sp.tenantId === currentTenantId && sp.participantId === id
+    );
+    const existingAss = assessments.filter(
+      (a) => a.tenantId === currentTenantId && a.participantId === id
+    );
+
+    setParticipants((prev) => prev.filter((p) => !(p.id === id && p.tenantId === currentTenantId)));
+    setStageParticipations((prev) =>
+      prev.filter((sp) => !(sp.participantId === id && sp.tenantId === currentTenantId))
+    );
+    setAssessments((prev) =>
+      prev.filter((a) => !(a.participantId === id && a.tenantId === currentTenantId))
+    );
+    setKafilahs((prev) =>
+      prev.map((k) =>
+        k.id === existing.kafilahId && k.tenantId === currentTenantId
+          ? { ...k, participantCount: Math.max(0, k.participantCount - 1) }
+          : k
+      )
+    );
+
+    if (isLiveDbActive) {
+      setSyncStatus('Menghapus peserta dari database...');
+      void supabaseDataService
+        .deleteParticipant(toDeterministicUuid(currentTenantId), toDeterministicUuid(id))
+        .then((res) => {
+          if (!res.success) {
+            setSyncStatus(`Gagal Menghapus Peserta: ${res.message}`);
+            setParticipants((prev) => [...prev, existing]);
+            setStageParticipations((prev) => [...prev, ...existingSps]);
+            setAssessments((prev) => [...prev, ...existingAss]);
+            setKafilahs((prev) =>
+              prev.map((k) =>
+                k.id === existing.kafilahId && k.tenantId === currentTenantId
+                  ? { ...k, participantCount: k.participantCount + 1 }
+                  : k
+              )
+            );
+          } else {
+            setSyncStatus('Peserta Dihapus dari Database');
+            setLastSyncTime(getWibTime());
+          }
+        });
+    }
+
+    return {
+      success: true,
+      message: `Peserta "${existing.name}" (${existing.participantId}) berhasil dihapus.`
+    };
+  };
+
   // Question & Maqra Actions (Tenant Scoped)
   const addQuestion = (data: Omit<Question, 'id' | 'tenantId'>) => {
     const newQ: Question = {
@@ -3233,6 +3363,85 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
     }
+  };
+
+  const deleteQuestion = (id: string): { success: boolean; message: string } => {
+    const existing = questions.find((q) => q.id === id && q.tenantId === currentTenantId);
+    if (!existing) {
+      return { success: false, message: 'Paket soal / maqra tidak ditemukan.' };
+    }
+
+    const usedInFinalizedAssessment = assessments.some(
+      (a) => a.tenantId === currentTenantId && a.questionId === id && a.status === 'finalized'
+    );
+    if (usedInFinalizedAssessment) {
+      return {
+        success: false,
+        message: `Soal "${existing.code}" tidak dapat dihapus karena telah digunakan pada lembar penilaian yang sudah difinalisasi.`
+      };
+    }
+
+    setQuestions((prev) => prev.filter((q) => !(q.id === id && q.tenantId === currentTenantId)));
+
+    // Bersihkan penetapan maqra dari peserta jika belum difinalisasi
+    setParticipants((prev) =>
+      prev.map((p) => {
+        if (p.tenantId !== currentTenantId) return p;
+        const filteredAq = (p.assignedQuestions || []).filter((aq) => aq.questionId !== id);
+        const filteredQIds = (p.questionIds || []).filter((qId) => qId !== id);
+        if (p.questionId === id || filteredAq.length !== (p.assignedQuestions || []).length) {
+          const nextPrimary = filteredAq[0];
+          return {
+            ...p,
+            questionId: nextPrimary ? nextPrimary.questionId : '',
+            assignedMaqra: nextPrimary ? nextPrimary.title : 'Belum Ditetapkan',
+            pageNumber: nextPrimary ? nextPrimary.pageNumber : 1,
+            assignedQuestions: filteredAq,
+            questionIds: filteredQIds
+          };
+        }
+        return p;
+      })
+    );
+
+    setStageParticipations((prev) =>
+      prev.map((sp) => {
+        if (sp.tenantId !== currentTenantId) return sp;
+        const filteredAq = (sp.assignedQuestions || []).filter((aq) => aq.questionId !== id);
+        if (sp.questionId === id || filteredAq.length !== (sp.assignedQuestions || []).length) {
+          const nextPrimary = filteredAq[0];
+          return {
+            ...sp,
+            questionId: nextPrimary ? nextPrimary.questionId : '',
+            assignedMaqra: nextPrimary ? nextPrimary.title : 'Belum Ditetapkan',
+            pageNumber: nextPrimary ? nextPrimary.pageNumber : 1,
+            assignedQuestions: filteredAq,
+            status: nextPrimary ? sp.status : 'Maqra Belum Ditetapkan'
+          };
+        }
+        return sp;
+      })
+    );
+
+    if (isLiveDbActive) {
+      setSyncStatus('Menghapus paket soal dari database...');
+      void supabaseDataService
+        .deleteQuestion(toDeterministicUuid(currentTenantId), toDeterministicUuid(id))
+        .then((res) => {
+          if (!res.success) {
+            setSyncStatus(`Gagal Menghapus Soal: ${res.message}`);
+            setQuestions((prev) => [...prev, existing]);
+          } else {
+            setSyncStatus('Paket Soal Dihapus dari Database');
+            setLastSyncTime(getWibTime());
+          }
+        });
+    }
+
+    return {
+      success: true,
+      message: `Paket soal "${existing.code} - ${existing.title}" berhasil dihapus.`
+    };
   };
 
   const assignMaqraToParticipant = (
@@ -4155,6 +4364,48 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
     }
+  };
+
+  const deleteErrorCategory = (id: string): { success: boolean; message: string } => {
+    const existing = errorCategories.find((c) => c.id === id && c.tenantId === currentTenantId);
+    if (!existing) {
+      return { success: false, message: 'Kategori kesalahan tidak ditemukan.' };
+    }
+
+    const usedInFinalized = assessments.some(
+      (a) =>
+        a.tenantId === currentTenantId &&
+        a.status === 'finalized' &&
+        ((a.errorCounts?.[existing.code] || 0) > 0 || (a.errorCounts?.[id] || 0) > 0)
+    );
+    if (usedInFinalized) {
+      return {
+        success: false,
+        message: `Kategori "${existing.name}" (${existing.code}) tidak dapat dihapus karena telah digunakan pada lembar penilaian yang sudah difinalisasi.`
+      };
+    }
+
+    setErrorCategories((prev) =>
+      prev.filter((c) => !(c.id === id && c.tenantId === currentTenantId))
+    );
+
+    if (isLiveDbActive) {
+      void supabaseDataService
+        .deleteErrorCategory(toDeterministicUuid(currentTenantId), toDeterministicUuid(id))
+        .then((res) => {
+          if (!res.success) {
+            setSyncStatus(`Gagal Menghapus Kategori Kesalahan: ${res.message}`);
+            setErrorCategories((prev) => [...prev, existing]);
+          } else {
+            setSyncStatus('Kategori Kesalahan Dihapus dari Database');
+          }
+        });
+    }
+
+    return {
+      success: true,
+      message: `Kategori kesalahan "${existing.name}" (${existing.code}) berhasil dihapus.`
+    };
   };
 
   // User & Judge Management
@@ -5234,10 +5485,42 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Judge Assignment Actions (Tenant Scoped)
   const addJudgeAssignment = (asg: Omit<JudgeAssignment, 'id' | 'tenantId'>) => {
+    const matchedStage = stages.find(
+      (s) => s.tenantId === currentTenantId && s.name === asg.stageName
+    ) || stages.find((s) => s.tenantId === currentTenantId);
+
+    const matchedBranch = cabangList.find(
+      (c) =>
+        (c.tenantId === currentTenantId || !c.tenantId) &&
+        asg.branchName &&
+        (c.name === asg.branchName || asg.branchName.includes(c.name) || c.name.includes(asg.branchName))
+    );
+
+    let resolvedRubricFieldId = asg.rubricFieldId;
+    if (!resolvedRubricFieldId && asg.judgeField) {
+      for (const rv of rubricVersions) {
+        const matchedFld = rv.fields.find(
+          (f) =>
+            asg.judgeField.toLowerCase().includes(f.name.toLowerCase()) ||
+            f.name.toLowerCase().includes(asg.judgeField.toLowerCase())
+        );
+        if (matchedFld) {
+          resolvedRubricFieldId = matchedFld.id;
+          break;
+        }
+      }
+    }
+
+    const resolvedStageId = asg.stageId || matchedStage?.id || 'stage-penyisihan';
+    const resolvedBranchId = asg.branchId || matchedBranch?.id;
+
     const newAsg: JudgeAssignment = {
       ...asg,
       id: generateUuid(),
-      tenantId: currentTenantId
+      tenantId: currentTenantId,
+      stageId: resolvedStageId,
+      ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+      ...(resolvedRubricFieldId ? { rubricFieldId: resolvedRubricFieldId } : {})
     };
     setJudgeAssignments((prev) => [...prev, newAsg]);
     if (isLiveDbActive) {
@@ -5246,7 +5529,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .upsertJudgeAssignment({
           ...newAsg,
           tenantId: toDeterministicUuid(currentTenantId),
-          stageId: toDeterministicUuid(newAsg.stageId || 'stage-penyisihan'),
+          stageId: toDeterministicUuid(resolvedStageId),
+          branchId: resolvedBranchId ? toDeterministicUuid(resolvedBranchId) : undefined,
+          rubricFieldId: resolvedRubricFieldId ? toDeterministicUuid(resolvedRubricFieldId) : undefined,
           judgeId: toDeterministicUuid(newAsg.judgeId)
         })
         .then((res) => {
@@ -5355,10 +5640,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getParticipantStageQuestions,
         addKafilah,
         updateKafilah,
+        deleteKafilah,
         addParticipant,
         updateParticipant,
+        deleteParticipant,
         addQuestion,
         updateQuestion,
+        deleteQuestion,
         assignMaqraToParticipant,
         addQuestionToParticipant,
         removeQuestionFromParticipant,
@@ -5367,6 +5655,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateCategoryDeduction,
         addErrorCategory,
         updateErrorCategory,
+        deleteErrorCategory,
         addStage,
         updateStage,
         deleteStage,

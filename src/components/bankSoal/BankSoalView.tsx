@@ -28,6 +28,7 @@ export const BankSoalView: React.FC = () => {
     questions,
     addQuestion,
     updateQuestion,
+    deleteQuestion,
     participants,
     assignMaqraToParticipant,
     addQuestionToParticipant,
@@ -40,6 +41,7 @@ export const BankSoalView: React.FC = () => {
   } = useMtq();
 
   const [activeTab, setActiveTab] = useState<'daftar_soal' | 'penetapan_soal'>('daftar_soal');
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('Semua Cabang');
   const [selectedStage, setSelectedStage] = useState('Semua Babak');
@@ -570,6 +572,32 @@ export const BankSoalView: React.FC = () => {
         </div>
       </div>
 
+      {/* Feedback Banner */}
+      {feedbackMessage && (
+        <div
+          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-semibold ${
+            feedbackMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+              : 'bg-rose-50 text-rose-900 border-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {feedbackMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-700" />
+            )}
+            <span>{feedbackMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setFeedbackMessage(null)}
+            className="p-1 hover:opacity-75 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Tabs Navigation */}
       <div className="flex border-b border-slate-200 gap-6">
         <button
@@ -754,6 +782,19 @@ export const BankSoalView: React.FC = () => {
                           >
                             <Edit2 className="w-4 h-4 inline" />
                           </button>
+                          <button
+                            onClick={() => {
+                              const res = deleteQuestion(q.id);
+                              setFeedbackMessage({
+                                type: res.success ? 'success' : 'error',
+                                text: res.message
+                              });
+                            }}
+                            className="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Hapus Maqra"
+                          >
+                            <Trash2 className="w-4 h-4 inline" />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -838,9 +879,11 @@ export const BankSoalView: React.FC = () => {
                         )}
                         <button
                           onClick={() => {
-                            if (window.confirm(`Lepaskan maqra ${row.questionCode} dari peserta ${row.participantName}?`)) {
-                              removeQuestionFromParticipant(row.participantId, row.questionId);
-                            }
+                            removeQuestionFromParticipant(row.participantId, row.questionId);
+                            setFeedbackMessage({
+                              type: 'success',
+                              text: `Penetapan maqra ${row.questionCode} telah dilepaskan dari peserta ${row.participantName}.`
+                            });
                           }}
                           className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                           title="Hapus / Lepas Penetapan Maqra"

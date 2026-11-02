@@ -1,14 +1,25 @@
 import React, { useState } from 'react';
-import { Plus, Search, Eye, X, UserPlus, Edit3, Check, Users, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Eye, X, UserPlus, Edit3, Check, Users, AlertTriangle, Trash2, CheckCircle2 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Kafilah, Participant } from '../../types/mtq';
 
 export const KafilahPesertaView: React.FC = () => {
-  const { kafilahs, participants, stages, addKafilah, updateKafilah, addParticipant, updateParticipant } = useMtq();
+  const {
+    kafilahs,
+    participants,
+    stages,
+    addKafilah,
+    updateKafilah,
+    deleteKafilah,
+    addParticipant,
+    updateParticipant,
+    deleteParticipant
+  } = useMtq();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedKafilah, setSelectedKafilah] = useState<Kafilah | null>(null);
   const [isAddKafilahOpen, setIsAddKafilahOpen] = useState(false);
   const [isAddParticipantOpen, setIsAddParticipantOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Edit states for Grup
   const [editingKafilah, setEditingKafilah] = useState<Kafilah | null>(null);
@@ -187,6 +198,32 @@ export const KafilahPesertaView: React.FC = () => {
         </button>
       </div>
 
+      {/* Feedback Banner */}
+      {feedbackMessage && (
+        <div
+          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-semibold ${
+            feedbackMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+              : 'bg-rose-50 text-rose-900 border-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {feedbackMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-700" />
+            )}
+            <span>{feedbackMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setFeedbackMessage(null)}
+            className="p-1 hover:opacity-75 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Search and Count Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
@@ -263,6 +300,22 @@ export const KafilahPesertaView: React.FC = () => {
                         title="Edit data grup"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          const res = deleteKafilah(k.id);
+                          if (res.success && selectedKafilah?.id === k.id) {
+                            setSelectedKafilah(null);
+                          }
+                          setFeedbackMessage({
+                            type: res.success ? 'success' : 'error',
+                            text: res.message
+                          });
+                        }}
+                        className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                        title="Hapus grup ini"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </td>
@@ -381,14 +434,30 @@ export const KafilahPesertaView: React.FC = () => {
                             </span>
                           </td>
                           <td className="py-2.5 px-4 text-center">
-                            <button
-                              onClick={() => handleOpenEditParticipant(p)}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-emerald-700 hover:bg-slate-100 px-2 py-1 rounded transition-colors cursor-pointer"
-                              title="Edit data peserta ini"
-                            >
-                              <Edit3 className="w-3 h-3" />
-                              <span>Edit</span>
-                            </button>
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleOpenEditParticipant(p)}
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-emerald-700 hover:bg-slate-100 px-2 py-1 rounded transition-colors cursor-pointer"
+                                title="Edit data peserta ini"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const res = deleteParticipant(p.id);
+                                  setFeedbackMessage({
+                                    type: res.success ? 'success' : 'error',
+                                    text: res.message
+                                  });
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded transition-colors cursor-pointer"
+                                title="Hapus peserta ini"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Hapus</span>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

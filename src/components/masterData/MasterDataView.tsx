@@ -37,6 +37,7 @@ export const MasterDataView: React.FC = () => {
     errorCategories,
     addErrorCategory,
     updateErrorCategory,
+    deleteErrorCategory,
     stages,
     addStage,
     updateStage,
@@ -444,15 +445,26 @@ export const MasterDataView: React.FC = () => {
   // Save Judge Assignment
   const handleSaveJudgeAssignment = (e: React.FormEvent) => {
     e.preventDefault();
-    const judgeObj = users.find((u) => u.id === selectedJudgeId);
-    if (!judgeObj) return;
+    const availableJudges = users.filter((u) => u.role === 'judge');
+    const judgeObj =
+      availableJudges.find((u) => u.id === selectedJudgeId) || availableJudges[0];
+    if (!judgeObj) {
+      setFeedbackMessage({
+        type: 'error',
+        text: 'Belum ada akun Dewan Hakim yang terdaftar pada tenant ini. Tambahkan akun Hakim terlebih dahulu di menu Manajemen Pengguna.'
+      });
+      return;
+    }
+
+    const effectiveStage = assignStageName || stages[0]?.name || 'Penyisihan';
+    const effectiveBranch = assignBranchName || cabangList[0]?.name || 'Tilawah Dewasa Putra';
 
     addJudgeAssignment({
       judgeId: judgeObj.id,
       judgeName: judgeObj.name,
-      stageName: assignStageName,
-      branchName: assignBranchName,
-      judgeField: assignField
+      stageName: effectiveStage,
+      branchName: effectiveBranch,
+      judgeField: assignField || judgeObj.judgeField || 'Bidang Tajwid'
     });
     setIsAssignJudgeOpen(false);
     setFeedbackMessage({ type: 'success', text: `Penugasan hakim ${judgeObj.name} berhasil disimpan.` });
@@ -591,21 +603,37 @@ export const MasterDataView: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      <button
-                        onClick={() => {
-                          setEditingCategory(cat);
-                          setCatName(cat.name);
-                          setCatCode(cat.code);
-                          setCatScope(cat.scope);
-                          setCatFieldId(cat.fieldId || '');
-                          setCatDeduction(cat.defaultDeduction);
-                          setIsAddCategoryOpen(true);
-                        }}
-                        className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                        <span>Edit</span>
-                      </button>
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setEditingCategory(cat);
+                            setCatName(cat.name);
+                            setCatCode(cat.code);
+                            setCatScope(cat.scope);
+                            setCatFieldId(cat.fieldId || '');
+                            setCatDeduction(cat.defaultDeduction);
+                            setIsAddCategoryOpen(true);
+                          }}
+                          className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            const res = deleteErrorCategory(cat.id);
+                            setFeedbackMessage({
+                              type: res.success ? 'success' : 'error',
+                              text: res.message
+                            });
+                          }}
+                          className="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                          title="Hapus Kategori Kesalahan"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1160,7 +1188,14 @@ export const MasterDataView: React.FC = () => {
               Penugasan Dewan Hakim per Babak & Bidang
             </h3>
             <button
-              onClick={() => setIsAssignJudgeOpen(true)}
+              onClick={() => {
+                const firstJudge = users.find((u) => u.role === 'judge');
+                setSelectedJudgeId(firstJudge?.id || '');
+                setAssignStageName(stages[0]?.name || 'Penyisihan');
+                setAssignBranchName(cabangList[0]?.name || 'Tilawah Dewasa Putra');
+                setAssignField(firstJudge?.judgeField || 'Bidang Tajwid & Makhraj');
+                setIsAssignJudgeOpen(true);
+              }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -1776,15 +1811,29 @@ export const MasterDataView: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian</label>
-                  <input
-                    type="text"
-                    value={assignField}
-                    onChange={(e) => setAssignField(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-                  />
+                  <label className="font-bold text-slate-600 block mb-1">Cabang Lomba</label>
+                  <select
+                    value={assignBranchName}
+                    onChange={(e) => setAssignBranchName(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                  >
+                    {cabangList.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+              </div>
+              <div>
+                <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian</label>
+                <input
+                  type="text"
+                  value={assignField}
+                  onChange={(e) => setAssignField(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                />
               </div>
               <div className="flex justify-end gap-2 pt-3 border-t">
                 <button

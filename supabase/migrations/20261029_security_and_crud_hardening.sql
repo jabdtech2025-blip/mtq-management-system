@@ -194,6 +194,10 @@ DROP POLICY IF EXISTS tenants_insert_policy ON tenants;
 CREATE POLICY tenants_insert_policy ON tenants FOR INSERT
 WITH CHECK (is_superadmin());
 
+DROP POLICY IF EXISTS tenants_delete_policy ON tenants;
+CREATE POLICY tenants_delete_policy ON tenants FOR DELETE
+USING (is_superadmin() AND id <> '00000000-0000-0000-0000-000000000000'::uuid);
+
 DROP POLICY IF EXISTS "Users can view profiles in same tenant" ON profiles;
 DROP POLICY IF EXISTS profiles_select_policy ON profiles;
 CREATE POLICY profiles_select_policy ON profiles FOR SELECT
@@ -213,6 +217,19 @@ USING (id = auth.uid() OR is_superadmin())
 WITH CHECK (
     (id = auth.uid() AND role = get_my_profile_role())
     OR is_superadmin()
+);
+
+DROP POLICY IF EXISTS profiles_delete_policy ON profiles;
+CREATE POLICY profiles_delete_policy ON profiles FOR DELETE
+USING (
+    id <> auth.uid()
+    AND (
+        is_superadmin()
+        OR id IN (
+            SELECT tm.profile_id FROM tenant_memberships tm
+            WHERE is_tenant_admin(tm.tenant_id)
+        )
+    )
 );
 
 DROP POLICY IF EXISTS "Users can view memberships of their tenants" ON tenant_memberships;

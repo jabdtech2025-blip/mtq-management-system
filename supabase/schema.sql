@@ -746,6 +746,10 @@ CREATE POLICY tenants_update_policy ON tenants FOR UPDATE
 USING (is_tenant_admin(id))
 WITH CHECK (is_tenant_admin(id));
 
+DROP POLICY IF EXISTS tenants_delete_policy ON tenants;
+CREATE POLICY tenants_delete_policy ON tenants FOR DELETE
+USING (is_superadmin() AND id <> '00000000-0000-0000-0000-000000000000'::uuid);
+
 -- RLS: Profiles (Prevent self role-escalation without recursive subquery)
 DROP POLICY IF EXISTS "Users can view profiles in same tenant" ON profiles;
 DROP POLICY IF EXISTS profiles_select_policy ON profiles;
@@ -756,6 +760,19 @@ USING (
     OR id IN (
         SELECT tm.profile_id FROM tenant_memberships tm 
         WHERE tm.tenant_id IN (SELECT get_user_tenants())
+    )
+);
+
+DROP POLICY IF EXISTS profiles_delete_policy ON profiles;
+CREATE POLICY profiles_delete_policy ON profiles FOR DELETE
+USING (
+    id <> auth.uid()
+    AND (
+        is_superadmin()
+        OR id IN (
+            SELECT tm.profile_id FROM tenant_memberships tm
+            WHERE is_tenant_admin(tm.tenant_id)
+        )
     )
 );
 

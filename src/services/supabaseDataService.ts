@@ -1945,8 +1945,9 @@ export const supabaseDataService = {
     participant: Participant;
     stageParticipation: StageParticipation;
     levelId?: string | null;
+    autoCreateMissingMaster?: boolean;
   }): Promise<RpcServiceResult> {
-    const { participant, stageParticipation, levelId } = params;
+    const { participant, stageParticipation, levelId, autoCreateMissingMaster } = params;
     const uuidCheck = this.validateReferences({
       participant_id: participant.id,
       tenant_id: participant.tenantId,
@@ -1972,6 +1973,50 @@ export const supabaseDataService = {
         mode: 'local_offline_fallback',
         message: 'Mode lokal: peserta disimpan pada localStorage.'
       };
+    }
+
+    if (autoCreateMissingMaster) {
+      try {
+        const { data: existingBranch } = await client
+          .from('branches')
+          .select('id')
+          .eq('id', participant.branchId)
+          .maybeSingle();
+        if (!existingBranch?.id && participant.branchName && participant.branchId) {
+          const autoCode = participant.branchName
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '-')
+            .slice(0, 20);
+          await client.from('branches').upsert({
+            id: participant.branchId,
+            tenant_id: participant.tenantId,
+            code: `${autoCode}-${participant.branchId.slice(0, 4).toUpperCase()}`,
+            name: participant.branchName,
+            status: 'Aktif'
+          });
+        }
+
+        const { data: existingStage } = await client
+          .from('stages')
+          .select('id')
+          .eq('id', stageParticipation.stageId)
+          .maybeSingle();
+        if (!existingStage?.id && stageParticipation.stageName) {
+          await client.from('stages').upsert({
+            id: stageParticipation.stageId,
+            tenant_id: participant.tenantId,
+            branch_id: participant.branchId,
+            name: stageParticipation.stageName,
+            stage_order: stageParticipation.stageName === 'Final' ? 2 : 1,
+            qualification_quota: 3,
+            qualification_method: 'top_n',
+            status: 'Aktif',
+            is_finalized: false
+          });
+        }
+      } catch {
+        // Proceed to standard FK verification
+      }
     }
 
     const fkCheck = await this.verifyDatabaseReferencesExist({
@@ -2359,8 +2404,84 @@ export const supabaseDataService = {
       .delete()
       .eq('id', kafilahId)
       .eq('tenant_id', tenantId);
-    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    if (error) {
+      if (error.message?.includes('violates foreign key') || error.message?.includes('participants')) {
+        return {
+          success: false,
+          mode: 'supabase_live',
+          message: 'Grup/Kafilah tidak dapat dihapus karena masih memiliki peserta terdaftar.'
+        };
+      }
+      return { success: false, mode: 'supabase_live', message: error.message };
+    }
     return { success: true, mode: 'supabase_live', message: 'Kafilah berhasil dihapus dari database.' };
+  },
+
+  async deleteParticipant(tenantId: string, participantId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ tenant_id: tenantId, participant_id: participantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!,
+        validationErrors: uuidCheck.invalidFields
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+
+    try {
+      const { data: spRows } = await client
+        .from('stage_participations')
+        .select('id')
+        .eq('participant_id', participantId)
+        .eq('tenant_id', tenantId);
+      const spIds = (spRows || []).map((r: { id: string }) => String(r.id)).filter(Boolean);
+
+      if (spIds.length > 0) {
+        const { data: finalizedAss } = await client
+          .from('judge_assessments')
+          .select('id')
+          .in('stage_participation_id', spIds)
+          .eq('status', 'finalized')
+          .limit(1);
+        if (finalizedAss && finalizedAss.length > 0) {
+          return {
+            success: false,
+            mode: 'supabase_live',
+            message: 'Peserta tidak dapat dihapus karena telah memiliki lembar penilaian yang sudah difinalisasi.'
+          };
+        }
+
+        await client
+          .from('judge_assessments')
+          .delete()
+          .in('stage_participation_id', spIds)
+          .eq('tenant_id', tenantId);
+        await client
+          .from('assigned_maqras')
+          .delete()
+          .in('stage_participation_id', spIds)
+          .eq('tenant_id', tenantId);
+        await client
+          .from('stage_participations')
+          .delete()
+          .in('id', spIds)
+          .eq('tenant_id', tenantId);
+      }
+
+      const { error } = await client
+        .from('participants')
+        .delete()
+        .eq('id', participantId)
+        .eq('tenant_id', tenantId);
+      if (error) return { success: false, mode: 'supabase_live', message: error.message };
+      return { success: true, mode: 'supabase_live', message: 'Peserta berhasil dihapus dari database.' };
+    } catch (err: any) {
+      return { success: false, mode: 'supabase_live', message: err?.message || 'Gagal menghapus peserta.' };
+    }
   },
 
   async updateParticipantRecord(
@@ -2402,7 +2523,7 @@ export const supabaseDataService = {
         kafilah_id: participant.kafilahId,
         branch_id: effectiveBranchId,
         level_id: levelId && isValidUuid(levelId) ? levelId : null,
-        participant_number: participant.participantId,
+        participant_code: participant.participantId,
         name: participant.name,
         gender: participant.gender,
         lottery_number: participant.lotteryNumber,
@@ -2439,6 +2560,13 @@ export const supabaseDataService = {
     if (!this.isLive() || !client) {
       return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
     }
+    try {
+      await client
+        .from('assigned_maqras')
+        .delete()
+        .eq('question_id', questionId)
+        .eq('tenant_id', tenantId);
+    } catch {}
     const { error } = await client
       .from('questions')
       .delete()
@@ -2640,6 +2768,19 @@ export const supabaseDataService = {
     }
 
     try {
+      // Bersihkan entitas anak yang memiliki constraint RESTRICT terlebih dahulu
+      await client.from('judge_assessments').delete().eq('tenant_id', tenantId);
+      await client.from('assigned_maqras').delete().eq('tenant_id', tenantId);
+      await client.from('stage_participations').delete().eq('tenant_id', tenantId);
+      await client.from('judge_assignments').delete().eq('tenant_id', tenantId);
+      await client.from('questions').delete().eq('tenant_id', tenantId);
+      await client.from('participants').delete().eq('tenant_id', tenantId);
+      await client.from('stages').delete().eq('tenant_id', tenantId);
+      await client.from('kafilahs').delete().eq('tenant_id', tenantId);
+      await client.from('competition_rule_configs').delete().eq('tenant_id', tenantId);
+      await client.from('error_categories').delete().eq('tenant_id', tenantId);
+      await client.from('branches').delete().eq('tenant_id', tenantId);
+      await client.from('levels').delete().eq('tenant_id', tenantId);
       await client.from('tenant_memberships').delete().eq('tenant_id', tenantId);
     } catch {}
 
@@ -2656,6 +2797,7 @@ export const supabaseDataService = {
 
     if (isValidUuid(userId)) {
       try {
+        await client.from('judge_assignments').delete().eq('judge_profile_id', userId);
         await client.from('tenant_memberships').delete().eq('profile_id', userId);
       } catch {}
 
@@ -2832,6 +2974,28 @@ export const supabaseDataService = {
     });
     if (error) return { success: false, mode: 'supabase_live', message: error.message };
     return { success: true, mode: 'supabase_live', message: 'Kategori kesalahan tersimpan di Supabase.' };
+  },
+
+  async deleteErrorCategory(tenantId: string, categoryId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: categoryId, tenant_id: tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client
+      .from('error_categories')
+      .delete()
+      .eq('id', categoryId)
+      .eq('tenant_id', tenantId);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Kategori kesalahan berhasil dihapus dari database.' };
   },
 
   async upsertRubricVersionWithFields(tenantId: string, rubric: RubricVersion): Promise<RpcServiceResult> {

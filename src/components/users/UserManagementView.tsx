@@ -9,6 +9,7 @@ import {
   XCircle,
   Pencil,
   Power,
+  Trash2,
   X,
   AlertCircle
 } from 'lucide-react';
@@ -23,6 +24,7 @@ export const UserManagementView: React.FC = () => {
     addUser,
     updateUser,
     toggleUserStatus,
+    deleteUser,
     retryUserProvisioning,
     requestPasswordReset,
     currentTenant,
@@ -395,6 +397,28 @@ export const UserManagementView: React.FC = () => {
                           }
                         >
                           <Power className="w-3.5 h-3.5 inline" />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            const res = await deleteUser(u.id);
+                            setOperationBanner({
+                              type: res.success ? 'success' : 'error',
+                              message: res.message
+                            });
+                          }}
+                          disabled={
+                            u.id === currentUser.id ||
+                            Boolean(authenticatedProfile && u.id === authenticatedProfile.authUserId)
+                          }
+                          className="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={
+                            u.id === currentUser.id ||
+                            Boolean(authenticatedProfile && u.id === authenticatedProfile.authUserId)
+                              ? 'Tidak dapat menghapus akun yang sedang Anda gunakan sendiri'
+                              : 'Hapus Akun'
+                          }
+                        >
+                          <Trash2 className="w-3.5 h-3.5 inline" />
                         </button>
                       </td>
                     </tr>
