@@ -1,88 +1,118 @@
-import React, { useState } from 'react';
-import {
-  BookOpen,
-  Menu,
-  ShieldCheck,
-  CheckCircle,
-  Database
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Menu, Sparkles, LogOut } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 
 export const TopHeader: React.FC = () => {
   const {
     currentTenant,
-    currentUser,
     toggleSidebar,
+    isSuperadminWorkspaceMode,
+    exitTenantWorkspace,
+    isLiveSupabaseMode,
+    connectionInfo,
     syncStatus,
     lastSyncTime,
-    setIsDemoAccountModalOpen
+    outboxSummary
   } = useMtq();
 
-  const getInitials = (name: string) => {
-    const parts = name.split(' ').filter(Boolean);
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return name.slice(0, 2).toUpperCase();
-  };
+  const [isBrowserOnline, setIsBrowserOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine !== false : true
+  );
 
-  const getRoleBadge = (role: string) => {
-    if (role === 'superadmin') return 'Superadmin Platform';
-    if (role === 'admin') return 'Admin MTQ';
-    return currentUser.judgeCategory || (currentUser.judgeField ? `Hakim ${currentUser.judgeField}` : 'Dewan Hakim');
-  };
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onOnline = () => setIsBrowserOnline(true);
+    const onOffline = () => setIsBrowserOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  const pendingOrFailedCount = outboxSummary.pendingCount + outboxSummary.failedCount;
+  const isSyncingState =
+    outboxSummary.syncingCount > 0 ||
+    connectionInfo.state === 'checking' ||
+    syncStatus.toLowerCase().includes('menyimpan') ||
+    syncStatus.toLowerCase().includes('memproses') ||
+    syncStatus.toLowerCase().includes('sinkronisasi realtime');
+
+  type HeaderConnectionState = 'Offline' | 'Syncing' | 'Unsynced' | 'Connected';
+  const headerConnectionState: HeaderConnectionState = (() => {
+    if (!isBrowserOnline) return 'Offline';
+    if (isSyncingState) return 'Syncing';
+    if (
+      pendingOrFailedCount > 0 ||
+      syncStatus.toLowerCase().includes('gagal') ||
+      (isLiveSupabaseMode && !connectionInfo.isDatabaseReady)
+    ) {
+      return 'Unsynced';
+    }
+    return 'Connected';
+  })();
+
+  const dotColorClass =
+    headerConnectionState === 'Connected'
+      ? 'bg-emerald-500'
+      : headerConnectionState === 'Syncing'
+      ? 'bg-sky-500 animate-pulse'
+      : headerConnectionState === 'Offline'
+      ? 'bg-slate-400'
+      : 'bg-amber-500';
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30">
-      {/* Left: Hamburger Button to toggle sidebar + Static Event Context (No brand duplication) */}
-      <div className="flex items-center gap-3">
-        {/* Tombol Hamburger Standar untuk Buka Sidebar */}
-        <button
-          onClick={toggleSidebar}
-          aria-label="Buka Menu Sidebar"
-          className="p-2 rounded-lg text-slate-600 hover:text-emerald-800 hover:bg-slate-100 active:scale-95 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-600"
-          title="Buka Menu Navigasi"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-
-        {/* Static Institution and Event Header */}
-        <div className="min-w-0">
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+      {isSuperadminWorkspaceMode && (
+        <div className="bg-amber-900 text-amber-50 px-4 lg:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs border-b border-amber-700/60">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-slate-900 truncate">
-              {currentTenant.name}
-            </h2>
-            <span className="hidden sm:inline-block text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200/60 font-mono">
-              {currentTenant.code}
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-extrabold uppercase tracking-wider text-[10px]">
+              <Sparkles className="w-3 h-3" /> Mode Supervisi Tenant
+            </span>
+            <span className="font-medium text-amber-100">
+              Anda sedang mengelola ruang kerja operasional:{' '}
+              <strong className="text-white underline decoration-amber-400">{currentTenant.name}</strong> ({currentTenant.eventName})
             </span>
           </div>
-          <p className="text-xs text-slate-500 truncate max-w-sm sm:max-w-md lg:max-w-xl">
-            {currentTenant.eventName}
-          </p>
+          <button
+            onClick={exitTenantWorkspace}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-800 hover:bg-amber-700 text-white font-bold transition-colors border border-amber-600 cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Kembali ke Panel Platform
+          </button>
         </div>
-      </div>
+      )}
 
-      {/* Right: Profile */}
-      <div className="flex items-center gap-3 sm:gap-4">
+      <div className="px-4 lg:px-6 py-3 flex items-center justify-between gap-3">
+        {/* Left: Hamburger + Simple Title & Subtitle */}
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={toggleSidebar}
+            aria-label="Buka menu navigasi"
+            className="lg:hidden p-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 transition-colors cursor-pointer shrink-0"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
 
-        {/* Profile Card with Quick Demo Account Modal trigger */}
-        <button
-          onClick={() => setIsDemoAccountModalOpen(true)}
-          className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-50 transition-colors text-left cursor-pointer border border-transparent hover:border-slate-200"
-          title="Ganti Akun Demo / Evaluasi Persona"
+          <div className="min-w-0">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate">
+              Musabaqah Tilawatil Qur&apos;an
+            </h2>
+            <p className="text-xs text-slate-500 truncate">Nasional</p>
+          </div>
+        </div>
+
+        {/* Right: Simple Dot + Connected text */}
+        <div
+          data-testid="header-connection-status"
+          title={`${syncStatus}${lastSyncTime ? ` • Sinkron terakhir: ${lastSyncTime}` : ''}`}
+          className="inline-flex items-center gap-2 text-xs font-medium text-slate-600 shrink-0"
         >
-          <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-900 flex items-center justify-center font-bold text-xs shrink-0 border border-emerald-200">
-            {getInitials(currentUser.name)}
-          </div>
-          <div className="hidden sm:block">
-            <span className="font-semibold block text-xs leading-tight text-slate-800">
-              {currentUser.name.split(',')[0]}
-            </span>
-            <span className="text-[11px] text-emerald-800 font-medium block">
-              {getRoleBadge(currentUser.role)}
-            </span>
-          </div>
-        </button>
+          <span className={`w-2 h-2 rounded-full ${dotColorClass}`} />
+          <span>{headerConnectionState}</span>
+        </div>
       </div>
     </header>
   );

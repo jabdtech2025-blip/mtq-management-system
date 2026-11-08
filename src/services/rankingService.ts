@@ -91,7 +91,7 @@ export class RankingService {
     } = params;
 
     // 1. Filter partisipasi babak dengan isolasi ketat tenantId, stageId, dan branchId (P0-8)
-    const filteredParticipations = participations.filter((sp) => {
+    const rawFilteredParticipations = participations.filter((sp) => {
       if (sp.tenantId !== tenantId) return false;
 
       if (stageId) {
@@ -102,15 +102,73 @@ export class RankingService {
 
       const partObj = participants.find((p) => p.id === sp.participantId && p.tenantId === tenantId);
       const effectiveBranchId = sp.branchId || partObj?.branchId;
+      const effectiveBranchName =
+        (sp.branchName && sp.branchName !== 'Semua Cabang' ? sp.branchName : partObj?.branchName) ||
+        sp.branchName;
 
       if (branchId) {
         if (!effectiveBranchId || effectiveBranchId !== branchId) return false;
       } else if (branchName && branchName !== 'Semua Cabang') {
-        if (sp.branchName !== branchName) return false;
+        if (effectiveBranchName !== branchName) return false;
       }
 
       return true;
     });
+
+    // Deduplikasi StageParticipation per participantId (jika ada duplikat baris babak, prioritaskan yang memiliki penilaian/maqra)
+    const tenantAssessments = assessments.filter((a) => a.tenantId === tenantId);
+    const dedupedParticipationMap = new Map<string, StageParticipation>();
+    rawFilteredParticipations.forEach((sp) => {
+      const existing = dedupedParticipationMap.get(sp.participantId);
+      if (!existing) {
+        dedupedParticipationMap.set(sp.participantId, sp);
+        return;
+      }
+      const existingHasAsm = tenantAssessments.some(
+        (a) => a.participantId === existing.participantId && a.stageParticipationId === existing.id
+      );
+      const candidateHasAsm = tenantAssessments.some(
+        (a) => a.participantId === sp.participantId && a.stageParticipationId === sp.id
+      );
+      const existingQCount = existing.assignedQuestions?.length || (existing.questionId ? 1 : 0);
+      const candidateQCount = sp.assignedQuestions?.length || (sp.questionId ? 1 : 0);
+      if ((candidateHasAsm && !existingHasAsm) || (candidateQCount > existingQCount && !existingHasAsm)) {
+        dedupedParticipationMap.set(sp.participantId, sp);
+      }
+    });
+
+    // Jika !stageId (mode tampilan berdasarkan stageName), sertakan pula peserta di babak ini yang memiliki penilaian namun belum tercatat di rawFilteredParticipations
+    if (!stageId) {
+      participants.forEach((p) => {
+        if (p.tenantId !== tenantId) return;
+        if (dedupedParticipationMap.has(p.id)) return;
+        if (branchId && p.branchId !== branchId) return;
+        if (branchName && branchName !== 'Semua Cabang' && p.branchName !== branchName) return;
+
+        const hasStageAssessment = tenantAssessments.some(
+          (a) => a.participantId === p.id && a.stageName === stageName
+        );
+        if (p.stageName === stageName || hasStageAssessment) {
+          dedupedParticipationMap.set(p.id, {
+            id: `sp-synth-${p.id}-${stageName}`,
+            tenantId,
+            participantId: p.id,
+            stageId: p.stageId || '',
+            stageName,
+            branchId: p.branchId,
+            branchName: p.branchName,
+            lotteryNumber: p.lotteryNumber,
+            questionId: p.questionId,
+            assignedMaqra: p.assignedMaqra,
+            pageNumber: p.pageNumber,
+            assignedQuestions: p.assignedQuestions,
+            status: 'Belum Dimulai'
+          });
+        }
+      });
+    }
+
+    const filteredParticipations = Array.from(dedupedParticipationMap.values());
 
     if (filteredParticipations.length === 0) {
       return {
@@ -127,13 +185,36 @@ export class RankingService {
     }
 
     // 2. Kumpulkan dewan hakim yang ditugaskan khusus untuk cabang dan babak ini (tanpa fallback ke seluruh hakim tenant)
+    const firstPartObj = participants.find(
+      (p) => p.id === filteredParticipations[0]?.participantId && p.tenantId === tenantId
+    );
+    const firstSpBranchName =
+      filteredParticipations[0]?.branchName && filteredParticipations[0]?.branchName !== 'Semua Cabang'
+        ? filteredParticipations[0]?.branchName
+        : firstPartObj?.branchName;
+
     const targetBranch =
       branchName && branchName !== 'Semua Cabang'
         ? branchName
-        : filteredParticipations[0]?.branchName || '';
-    const targetBranchId = branchId || filteredParticipations[0]?.branchId;
+        : firstSpBranchName || filteredParticipations[0]?.branchName || '';
+    const targetBranchId = branchId || filteredParticipations[0]?.branchId || firstPartObj?.branchId;
 
-    const relevantAssignments = judgeAssignments.filter((ja) => {
+    const matchesBranchAssignment = (ja: JudgeAssignment, bId?: string, bName?: string): boolean => {
+      if (ja.branchName === 'Semua Cabang' || (!ja.branchId && !ja.branchName)) {
+        return true;
+      }
+      if (bId && ja.branchId) {
+        return ja.branchId === bId;
+      }
+      if (bName && bName !== 'Semua Cabang' && ja.branchName) {
+        const jaBr = ja.branchName.toLowerCase();
+        const tBr = bName.toLowerCase();
+        return jaBr === tBr || tBr.includes(jaBr) || jaBr.includes(tBr);
+      }
+      return true;
+    };
+
+    let relevantAssignments = judgeAssignments.filter((ja) => {
       if (ja.tenantId !== tenantId) return false;
 
       if (stageId && ja.stageId) {
@@ -142,25 +223,60 @@ export class RankingService {
         return false;
       }
 
-      if (targetBranchId && ja.branchId) {
-        if (ja.branchId !== targetBranchId) return false;
-      } else if (targetBranch && ja.branchName) {
-        if (ja.branchName !== targetBranch && !targetBranch.includes(ja.branchName)) {
-          return false;
-        }
-      }
-
-      return true;
+      return matchesBranchAssignment(ja, targetBranchId, targetBranch);
     });
+
+    // Jika duplikat babak membuat ja.stageId berbeda dengan stageId namun ja.stageName sama pada cabang yang sama (hanya bila stageId tidak dikunci lintas cabang berbeda)
+    if (relevantAssignments.length === 0 && !stageId) {
+      relevantAssignments = judgeAssignments.filter((ja) => {
+        if (ja.tenantId !== tenantId) return false;
+        if (ja.stageName !== stageName) return false;
+        return matchesBranchAssignment(ja, targetBranchId, targetBranch);
+      });
+    }
 
     const requiredJudgeIds = Array.from(new Set(relevantAssignments.map((ja) => ja.judgeId)));
 
     // 3. Hitung skor tiap peserta menggunakan Scoring Engine terpusat dengan isolasi stageId & stageParticipationId
-    const tenantAssessments = assessments.filter((a) => a.tenantId === tenantId);
-
     const evaluatedItems = filteredParticipations.map((sp) => {
       const partObj = participants.find((p) => p.id === sp.participantId && p.tenantId === tenantId);
-      const stageQuestions = stageQuestionsGetter(sp.participantId, stageName);
+      let stageQuestions = stageQuestionsGetter(sp.participantId, stageName);
+
+      // Fallback resolusi maqra jika getter kosong tetapi ada maqra di StageParticipation / Participant / Assessments
+      if (stageQuestions.length === 0) {
+        if (sp.assignedQuestions && sp.assignedQuestions.length > 0) {
+          stageQuestions = sp.assignedQuestions;
+        } else if (partObj?.assignedQuestions && partObj.assignedQuestions.length > 0) {
+          const matchedQ = partObj.assignedQuestions.filter(
+            (aq) => !aq.stageName || aq.stageName === stageName
+          );
+          if (matchedQ.length > 0) stageQuestions = matchedQ;
+        } else if (sp.questionId && sp.questionId.trim() !== '') {
+          stageQuestions = [
+            {
+              questionId: sp.questionId,
+              title: sp.assignedMaqra || 'Maqra',
+              pageNumber: sp.pageNumber || 1,
+              stageName
+            }
+          ];
+        } else {
+          const partStageAssessments = tenantAssessments.filter(
+            (a) => a.participantId === sp.participantId && a.stageName === stageName && Boolean(a.questionId)
+          );
+          const uniqueQIds = Array.from(
+            new Set(partStageAssessments.map((a) => a.questionId).filter((id): id is string => Boolean(id)))
+          );
+          if (uniqueQIds.length > 0) {
+            stageQuestions = uniqueQIds.map((qId) => ({
+              questionId: qId,
+              title: sp.assignedMaqra && sp.assignedMaqra !== 'Belum Ditetapkan' ? sp.assignedMaqra : 'Maqra',
+              pageNumber: sp.pageNumber || 1,
+              stageName
+            }));
+          }
+        }
+      }
 
       // P0-7: JANGAN mengganti daftar hakim wajib dengan assessment acak jika penugasan wajib tidak ditemukan
       const agg = aggregateParticipantScores(
@@ -207,13 +323,22 @@ export class RankingService {
     });
 
     // 4. Resolusi Konfigurasi Aturan & Validasi Tie-Break terhadap Rubrik Aktif
-    const ruleConfig = getBranchRuleConfig(targetBranch, tenantId, customRuleConfigs, targetBranchId);
+    const combinedRubrics = Array.from(
+      new Map(
+        [...customRubricVersions, ...INITIAL_RUBRIC_VERSIONS].map((r) => [r.id, r])
+      ).values()
+    );
+    const effectiveRuleBranch =
+      targetBranch && targetBranch !== 'Semua Cabang'
+        ? targetBranch
+        : firstPartObj?.branchName || 'Tilawah Dewasa Putra';
+    const ruleConfig = getBranchRuleConfig(effectiveRuleBranch, tenantId, customRuleConfigs, targetBranchId);
     const rubricRes = resolveActiveRubricForBranch({
-      branchName: targetBranch,
+      branchName: effectiveRuleBranch,
       branchId: targetBranchId,
       tenantId,
       competitionRules: customRuleConfigs,
-      rubricVersions: customRubricVersions
+      rubricVersions: combinedRubrics
     });
 
     const tieBreakOrder = ruleConfig.tieBreakOrder || [];

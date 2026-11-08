@@ -9,6 +9,7 @@ import {
   evaluateWorkspaceAccessGate
 } from '../lib/supabaseClient';
 import { supabaseDataService } from '../services/supabaseDataService';
+import { outboxSyncService } from '../services/outboxSyncService';
 import { DEFAULT_COMPETITION_RULES, INITIAL_RUBRIC_VERSIONS } from '../services/competitionRules';
 import { isValidUuid, generateUuid, toDeterministicUuid } from '../utils/uuid';
 
@@ -415,6 +416,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261030_auth_provisioning_and_bootstrap.sql'),
     'utf-8'
   );
+  const complete20261109Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261109_complete_system_improvement.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -525,6 +530,7 @@ export async function runSupabaseTests(): Promise<{
       // Verify idempotent incremental migrations on top of already-seeded database
       await pg.exec(hardening20261029Sql);
       await pg.exec(provisioning20261030Sql);
+      await pg.exec(complete20261109Sql);
       await pg.exec(`
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
         GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
@@ -1806,6 +1812,166 @@ export async function runSupabaseTests(): Promise<{
         hasSelfSignedUpProfile === true &&
         hasDirectPasswordJudge === true,
       `signUp: ${selfSignUpRes.success}, directPassProv: ${directPasswordProvisionRes.success} (${directPasswordProvisionRes.message}), hasSelfSignedUp: ${hasSelfSignedUpProfile}, hasDirectJudge: ${hasDirectPasswordJudge}`
+    );
+
+    // =========================================================================
+    // 57. P0 PERSISTENSI 15 ATRIBUT PESERTA, RELASI LEVEL BANK SOAL, AUDIT LOG UNDIAN MAQRA, & OUTBOX SYNC QUEUE
+    // =========================================================================
+    currentAuthUser = { id: adminUserId, email: 'admin@jabar.mtq.id' };
+    const levelDewasaId = '66666666-6666-4666-8666-666666666603';
+    const extPartUuid = generateUuid();
+    const extSpUuid = generateUuid();
+
+    const extPartRes = await supabaseDataService.upsertParticipantWithStage({
+      participant: {
+        id: extPartUuid,
+        tenantId: tenantJabarId,
+        adminSequenceNumber: 'ADM-2026-099',
+        participantId: 'TLW-EXT-099',
+        name: 'Muhammad Zaki Al-Hafizh',
+        fatherName: 'KH. Mansyur',
+        gender: 'Putra',
+        originCity: 'Kota Tasikmalaya',
+        originRegion: 'Jawa Barat',
+        originInstitution: 'PP Cipasung',
+        kafilahId: kafilahBandungId,
+        kafilahName: 'Kota Bandung',
+        branchId: branchTilawahPutraId,
+        branchName: 'Tilawah Dewasa Putra',
+        levelId: levelDewasaId,
+        levelName: 'Ulya (Dewasa)',
+        stageId: stagePenyisihanId,
+        stageName: 'Penyisihan',
+        lotteryNumber: '99',
+        status: 'Menunggu',
+        questionId: '',
+        assignedMaqra: 'Belum Ditetapkan',
+        pageNumber: 305
+      },
+      stageParticipation: {
+        id: extSpUuid,
+        tenantId: tenantJabarId,
+        participantId: extPartUuid,
+        stageId: stagePenyisihanId,
+        stageName: 'Penyisihan',
+        branchId: branchTilawahPutraId,
+        branchName: 'Tilawah Dewasa Putra',
+        lotteryNumber: '99',
+        questionId: '',
+        assignedMaqra: 'Belum Ditetapkan',
+        pageNumber: 305,
+        status: 'Maqra Belum Ditetapkan'
+      }
+    });
+
+    const extQuestionId = generateUuid();
+    const extQuestionRes = await supabaseDataService.upsertQuestion({
+      id: extQuestionId,
+      tenantId: tenantJabarId,
+      code: 'MQ-EXT-99',
+      title: 'Maqra Relasional Cabang & Jenjang',
+      surahName: 'Ar-Rahman',
+      surahNumber: 55,
+      startAyah: 1,
+      endAyah: 25,
+      pageNumber: 531,
+      pageStart: 531,
+      pageEnd: 532,
+      pageNumbers: [531, 532],
+      branchId: branchTilawahPutraId,
+      branchName: 'Tilawah Dewasa Putra',
+      levelId: levelDewasaId,
+      levelName: 'Ulya (Dewasa)',
+      branchAndLevel: 'Tilawah Dewasa Putra Ulya (Dewasa)',
+      stageName: 'Penyisihan',
+      status: 'Aktif'
+    });
+
+    const drawLogId = generateUuid();
+    const drawLogRes = await supabaseDataService.insertLotteryDrawLog({
+      id: drawLogId,
+      tenantId: tenantJabarId,
+      stageId: stagePenyisihanId,
+      stageName: 'Penyisihan',
+      branchId: branchTilawahPutraId,
+      branchName: 'Tilawah Dewasa Putra',
+      levelId: levelDewasaId,
+      levelName: 'Ulya (Dewasa)',
+      actorId: adminUserId,
+      actorName: 'H. Ridwan Hakim',
+      questionsPerParticipant: 1,
+      questionPoolIds: [questionPenyisihanId, extQuestionId],
+      participantIds: [extPartUuid],
+      drawResults: [
+        {
+          participantId: extPartUuid,
+          participantCode: 'TLW-EXT-099',
+          participantName: 'Muhammad Zaki Al-Hafizh',
+          lotteryNumber: '99',
+          assignedQuestionIds: [extQuestionId],
+          assignedQuestionCodes: ['MQ-EXT-99 - Maqra Relasional Cabang & Jenjang']
+        }
+      ],
+      drawVersion: 1,
+      createdAt: new Date().toISOString()
+    });
+
+    const rehydratedAfterExt = await supabaseDataService.fetchTenantWorkspaceResult(tenantJabarId);
+    const hydratedExtPart = rehydratedAfterExt.payload?.participants.find((p) => p.id === extPartUuid);
+    const hydratedExtQ = rehydratedAfterExt.payload?.questions.find((q) => q.id === extQuestionId);
+    const hydratedDrawLog = rehydratedAfterExt.payload?.lotteryDrawLogs?.find((l) => l.id === drawLogId);
+
+    // Outbox Sync Service verification: idempotency + blocking of critical finalization
+    await outboxSyncService.clearAll();
+    let blockedCriticalCheck = false;
+    try {
+      await outboxSyncService.enqueueOperation({
+        idempotencyKey: 'forbidden-finalize',
+        tenantId: tenantJabarId,
+        operationType: 'FINALIZE_ASSESSMENT',
+        entityLabel: 'Finalize Assessment',
+        payload: {}
+      });
+    } catch {
+      blockedCriticalCheck = true;
+    }
+
+    const enq1 = await outboxSyncService.enqueueOperation({
+      idempotencyKey: `question:${extQuestionId}`,
+      tenantId: tenantJabarId,
+      operationType: 'UPSERT_QUESTION',
+      entityLabel: 'MQ-EXT-99',
+      payload: { code: 'MQ-EXT-99-V1' }
+    });
+    const enq2 = await outboxSyncService.enqueueOperation({
+      idempotencyKey: `question:${extQuestionId}`,
+      tenantId: tenantJabarId,
+      operationType: 'UPSERT_QUESTION',
+      entityLabel: 'MQ-EXT-99',
+      payload: { code: 'MQ-EXT-99-V2' }
+    });
+    const pendingBeforeFlush = outboxSyncService.getSummary(tenantJabarId);
+    outboxSyncService.registerProcessor(async () => ({ success: true }));
+    const flushRes = await outboxSyncService.flushPendingQueue();
+    const pendingAfterFlush = outboxSyncService.getSummary(tenantJabarId);
+
+    assert(
+      '57. P0 Persistensi 15 Atribut Peserta, Level ID Bank Soal, Audit Log Undian Maqra (`lottery_draw_logs`), & Idempotensi Outbox Sync Queue',
+      extPartRes.success === true &&
+        hydratedExtPart?.adminSequenceNumber === 'ADM-2026-099' &&
+        hydratedExtPart?.fatherName === 'KH. Mansyur' &&
+        hydratedExtPart?.originCity === 'Kota Tasikmalaya' &&
+        hydratedExtPart?.originInstitution === 'PP Cipasung' &&
+        extQuestionRes.success === true &&
+        hydratedExtQ?.levelId === levelDewasaId &&
+        drawLogRes.success === true &&
+        hydratedDrawLog?.questionPoolIds.length === 2 &&
+        blockedCriticalCheck === true &&
+        enq1.id === enq2.id &&
+        pendingBeforeFlush.pendingCount === 1 &&
+        flushRes.succeeded === 1 &&
+        pendingAfterFlush.pendingCount === 0,
+      `extPart: ${extPartRes.success}, father: ${hydratedExtPart?.fatherName}, qLevel: ${hydratedExtQ?.levelId}, drawLog: ${drawLogRes.success}, outboxPendingBefore: ${pendingBeforeFlush.pendingCount}, after: ${pendingAfterFlush.pendingCount}`
     );
   } finally {
     supabaseDataService.setTestDatabaseClient(null);

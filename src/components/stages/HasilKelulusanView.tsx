@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Award,
   CheckCircle2,
@@ -27,22 +27,61 @@ export const HasilKelulusanView: React.FC = () => {
     stages,
     judgeAssignments,
     competitionRules,
+    rubricVersions,
     users,
     getParticipantProgress,
     getParticipantStageQuestions,
     advanceQualifiers,
     setCurrentView,
-    setSelectedParticipantId
+    setSelectedParticipantId,
+    refreshSupabaseConnection
   } = useMtq();
+
+  // Sinkronisasi langsung dari database setiap kali halaman Hasil & Kelulusan dibuka
+  useEffect(() => {
+    void refreshSupabaseConnection();
+    const interval = setInterval(() => {
+      void refreshSupabaseConnection();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Deduplikasi opsi babak berdasarkan nama babak (utamakan babak yang aktif / memiliki peserta)
+  const uniqueStages = useMemo(() => {
+    const tenantStages = stages.filter((s) => s.tenantId === currentTenant.id);
+    const map = new Map<string, (typeof tenantStages)[number]>();
+    tenantStages.forEach((stg) => {
+      const existing = map.get(stg.name);
+      if (!existing) {
+        map.set(stg.name, stg);
+        return;
+      }
+      const existingHasSp = stageParticipations.some(
+        (sp) => sp.tenantId === currentTenant.id && sp.stageId === existing.id
+      );
+      const candidateHasSp = stageParticipations.some(
+        (sp) => sp.tenantId === currentTenant.id && sp.stageId === stg.id
+      );
+      if ((candidateHasSp && !existingHasSp) || (stg.status === 'Aktif' && existing.status !== 'Aktif')) {
+        map.set(stg.name, stg);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.order - b.order);
+  }, [stages, stageParticipations, currentTenant.id]);
 
   // Active stage selector
   const [selectedStageName, setSelectedStageName] = useState<string>('Penyisihan');
 
   // Next stage target
-  const currentStage = stages.find((s) => s.tenantId === currentTenant.id && s.name === selectedStageName) || stages[0];
-  const nextStage = stages
-    .filter((s) => s.tenantId === currentTenant.id && s.order > (currentStage?.order || 0))
-    .sort((a, b) => a.order - b.order)[0] || null;
+  const currentStage =
+    uniqueStages.find((s) => s.name === selectedStageName) ||
+    stages.find((s) => s.tenantId === currentTenant.id && s.name === selectedStageName) ||
+    uniqueStages[0] ||
+    stages[0];
+  const nextStage =
+    uniqueStages
+      .filter((s) => s.order > (currentStage?.order || 0) && s.name !== currentStage?.name)
+      .sort((a, b) => a.order - b.order)[0] || null;
 
   // Manual overrides state: { [participantId]: boolean } and reasons { [participantId]: string }
   const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
@@ -69,9 +108,30 @@ export const HasilKelulusanView: React.FC = () => {
   // Selected branch filter for multi-branch isolation
   const [selectedBranch, setSelectedBranch] = useState<string>('Semua Cabang');
   const branchOptions = useMemo(() => {
-    const branches = Array.from(new Set(currentStageParticipations.map((sp) => sp.branchName).filter(Boolean)));
-    return ['Semua Cabang', ...branches];
-  }, [currentStageParticipations]);
+    const branchSet = new Set<string>();
+    currentStageParticipations.forEach((sp) => {
+      if (sp.branchName && sp.branchName !== 'Semua Cabang') {
+        branchSet.add(sp.branchName);
+      }
+      const partObj = participants.find(
+        (p) => p.id === sp.participantId && p.tenantId === currentTenant.id
+      );
+      if (partObj?.branchName && partObj.branchName !== 'Semua Cabang') {
+        branchSet.add(partObj.branchName);
+      }
+    });
+    participants.forEach((p) => {
+      if (
+        p.tenantId === currentTenant.id &&
+        p.stageName === selectedStageName &&
+        p.branchName &&
+        p.branchName !== 'Semua Cabang'
+      ) {
+        branchSet.add(p.branchName);
+      }
+    });
+    return ['Semua Cabang', ...Array.from(branchSet)];
+  }, [currentStageParticipations, participants, currentTenant.id, selectedStageName]);
 
   // Use centralized RankingService for scoring, multi-maqra aggregation, and official tie-break resolution
   const {
@@ -96,7 +156,8 @@ export const HasilKelulusanView: React.FC = () => {
       quota,
       manualOverrides,
       overrideReasons,
-      customRuleConfigs: competitionRules
+      customRuleConfigs: competitionRules,
+      customRubricVersions: rubricVersions
     });
   }, [
     currentTenant.id,
@@ -110,7 +171,8 @@ export const HasilKelulusanView: React.FC = () => {
     quota,
     manualOverrides,
     overrideReasons,
-    competitionRules
+    competitionRules,
+    rubricVersions
   ]);
 
   const incompleteParticipants = useMemo(() => {
@@ -240,7 +302,7 @@ export const HasilKelulusanView: React.FC = () => {
             aria-label="Pilih Babak"
             className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 bg-white shadow-xs outline-none"
           >
-            {stages.map((stg) => (
+            {uniqueStages.map((stg) => (
               <option key={stg.id} value={stg.name}>
                 Babak {stg.name}
               </option>
@@ -311,7 +373,7 @@ export const HasilKelulusanView: React.FC = () => {
           </div>
           <div className="flex items-baseline gap-2 mt-3">
             <span className="text-2xl font-bold text-slate-900 font-mono">
-              {rankedParticipants.filter((item) => item.isFullyFinalized).length} / {currentStageParticipations.length}
+              {rankedParticipants.filter((item) => item.isFullyFinalized).length} / {evaluatedParticipants.length}
             </span>
             <span className="text-xs text-slate-500">Peserta Lengkap</span>
           </div>

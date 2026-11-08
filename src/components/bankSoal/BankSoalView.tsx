@@ -4,24 +4,30 @@ import {
   Search,
   Eye,
   X,
-  ZoomIn,
-  ZoomOut,
   AlertTriangle,
   Dice5,
   CheckCircle2,
   Edit2,
   Trash2,
-  ChevronLeft,
-  ChevronRight,
-  Layers,
   Sparkles,
-  Users,
-  Check,
   RefreshCw,
-  Sliders
+  Download,
+  Upload,
+  FileSpreadsheet,
+  History
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
-import { Question, Participant } from '../../types/mtq';
+import { Question } from '../../types/mtq';
+import { AppModal } from '../common/AppModal';
+import {
+  fisherYatesShuffle,
+  downloadQuestionExcelTemplate,
+  parseWorkbookToRows,
+  validateQuestionImportRows,
+  downloadImportErrorReport,
+  ImportValidationResult,
+  ValidatedQuestionRow
+} from '../../utils/excelHelper';
 
 export const BankSoalView: React.FC = () => {
   const {
@@ -30,27 +36,39 @@ export const BankSoalView: React.FC = () => {
     updateQuestion,
     deleteQuestion,
     participants,
-    assignMaqraToParticipant,
     addQuestionToParticipant,
     removeQuestionFromParticipant,
-    conductLotteryDraw,
     commitLotteryDrawResults,
+    lotteryDrawLogs,
+    importQuestionsBatch,
     stages,
     cabangList,
     jenjangList
   } = useMtq();
 
-  const [activeTab, setActiveTab] = useState<'daftar_soal' | 'penetapan_soal'>('daftar_soal');
+  const [activeTab, setActiveTab] = useState<'daftar_soal' | 'penetapan_soal' | 'riwayat_undian'>('daftar_soal');
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('Semua Cabang');
+  const [selectedLevel, setSelectedLevel] = useState('Semua Jenjang');
   const [selectedStage, setSelectedStage] = useState('Semua Babak');
+
+  // Active Master Data lists (exclude Nonaktif for new entries)
+  const activeCabangList = useMemo(
+    () => cabangList.filter((c) => c.status === 'Aktif'),
+    [cabangList]
+  );
+  const activeJenjangList = useMemo(
+    () => jenjangList.filter((j) => j.status === 'Aktif'),
+    [jenjangList]
+  );
+  const activeStages = useMemo(
+    () => stages.filter((s) => s.status === 'Aktif' || s.status === 'Menunggu'),
+    [stages]
+  );
 
   // Preview Modal
   const [previewQuestion, setPreviewQuestion] = useState<Question | null>(null);
-  const [previewCurrentPageIndex, setPreviewCurrentPageIndex] = useState<number>(0);
-  const [previewViewMode, setPreviewViewMode] = useState<'single' | 'gallery'>('gallery');
-  const [previewZoom, setPreviewZoom] = useState<number>(100);
 
   // Manual Assign Modal
   const [manualAssignQuestion, setManualAssignQuestion] = useState<Question | null>(null);
@@ -64,8 +82,10 @@ export const BankSoalView: React.FC = () => {
   const [isLotteryModalOpen, setIsLotteryModalOpen] = useState(false);
   const [lotteryStage, setLotteryStage] = useState('Penyisihan');
   const [lotteryBranch, setLotteryBranch] = useState('Semua Cabang');
+  const [lotteryLevel, setLotteryLevel] = useState('Semua Jenjang');
   const [lotteryQuestionsPerParticipant, setLotteryQuestionsPerParticipant] = useState<number>(1);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
+  const [selectedQuestionPoolIds, setSelectedQuestionPoolIds] = useState<string[]>([]);
   const [isDrawingAnimation, setIsDrawingAnimation] = useState(false);
   const [lotteryDrawResults, setLotteryDrawResults] = useState<{
     participantId: string;
@@ -75,7 +95,13 @@ export const BankSoalView: React.FC = () => {
   }[] | null>(null);
   const [lotteryFeedback, setLotteryFeedback] = useState<string>('');
 
-  // Add / Edit Form Modal
+  // Excel Import Modal State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importValidation, setImportValidation] = useState<ImportValidationResult<ValidatedQuestionRow> | null>(null);
+  const [importFileName, setImportFileName] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
+  // Add / Edit Form Modal (Separated Cabang, Jenjang, Babak)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [formCode, setFormCode] = useState('');
@@ -86,7 +112,8 @@ export const BankSoalView: React.FC = () => {
   const [formEndAyah, setFormEndAyah] = useState(15);
   const [formPageStart, setFormPageStart] = useState(305);
   const [formPageEnd, setFormPageEnd] = useState(305);
-  const [formBranch, setFormBranch] = useState('Tilawah Dewasa Putra Ulya');
+  const [formBranchName, setFormBranchName] = useState('');
+  const [formLevelName, setFormLevelName] = useState('');
   const [formStage, setFormStage] = useState('Penyisihan');
   const [formDesc, setFormDesc] = useState('');
   const [formError, setFormError] = useState('');
@@ -98,41 +125,17 @@ export const BankSoalView: React.FC = () => {
         q.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         q.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
         q.surahName.toLowerCase().includes(searchQuery.toLowerCase());
+      const qBranch = q.branchName || q.branchAndLevel || '';
+      const qLevel = q.levelName || q.branchAndLevel || '';
       const matchesBranch =
-        selectedBranch === 'Semua Cabang' || q.branchAndLevel.includes(selectedBranch);
+        selectedBranch === 'Semua Cabang' || qBranch.includes(selectedBranch);
+      const matchesLevel =
+        selectedLevel === 'Semua Jenjang' || qLevel.includes(selectedLevel);
       const matchesStage =
         selectedStage === 'Semua Babak' || q.stageName === selectedStage;
-      return matchesSearch && matchesBranch && matchesStage;
+      return matchesSearch && matchesBranch && matchesLevel && matchesStage;
     });
-  }, [questions, searchQuery, selectedBranch, selectedStage]);
-
-  // Options for Cabang & Jenjang dropdown in Add/Edit Maqra Modal
-  const branchAndLevelOptions = useMemo(() => {
-    const set = new Set<string>();
-    cabangList.forEach((c) => {
-      if (c.name) set.add(c.name);
-      jenjangList.forEach((j) => {
-        if (c.name && j.name) {
-          set.add(`${c.name} ${j.name}`);
-        }
-      });
-    });
-    questions.forEach((q) => {
-      if (q.branchAndLevel) set.add(q.branchAndLevel);
-    });
-    participants.forEach((p) => {
-      if (p.branchName && p.levelName) {
-        set.add(`${p.branchName} ${p.levelName}`);
-      }
-      if (p.branchName) {
-        set.add(p.branchName);
-      }
-    });
-    if (formBranch) {
-      set.add(formBranch);
-    }
-    return Array.from(set).filter(Boolean);
-  }, [cabangList, jenjangList, questions, participants, formBranch]);
+  }, [questions, searchQuery, selectedBranch, selectedLevel, selectedStage]);
 
   // Assigned Maqra Rows for Tab 2 (Setiap satu maqra satu baris)
   const assignedMaqraRows = useMemo(() => {
@@ -143,6 +146,7 @@ export const BankSoalView: React.FC = () => {
       participantName: string;
       kafilahName: string;
       branchName: string;
+      levelName: string;
       stageName: string;
       questionId: string;
       questionCode: string;
@@ -176,6 +180,7 @@ export const BankSoalView: React.FC = () => {
             participantName: p.name,
             kafilahName: p.kafilahName,
             branchName: p.branchName,
+            levelName: p.levelName || '',
             stageName: aq.stageName || p.stageName,
             questionId: aq.questionId,
             questionCode: code,
@@ -203,6 +208,7 @@ export const BankSoalView: React.FC = () => {
           participantName: p.name,
           kafilahName: p.kafilahName,
           branchName: p.branchName,
+          levelName: p.levelName || '',
           stageName: p.stageName,
           questionId: p.questionId,
           questionCode: code,
@@ -223,11 +229,13 @@ export const BankSoalView: React.FC = () => {
         r.kafilahName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesBranch =
         selectedBranch === 'Semua Cabang' || r.branchName.includes(selectedBranch);
+      const matchesLevel =
+        selectedLevel === 'Semua Jenjang' || r.levelName.includes(selectedLevel);
       const matchesStage =
         selectedStage === 'Semua Babak' || r.stageName === selectedStage;
-      return matchesSearch && matchesBranch && matchesStage;
+      return matchesSearch && matchesBranch && matchesLevel && matchesStage;
     });
-  }, [participants, questions, searchQuery, selectedBranch, selectedStage]);
+  }, [participants, questions, searchQuery, selectedBranch, selectedLevel, selectedStage]);
 
   // Pages list for active preview question
   const previewPages = useMemo(() => {
@@ -244,33 +252,58 @@ export const BankSoalView: React.FC = () => {
     return pages.length > 0 ? pages : [previewQuestion.pageNumber];
   }, [previewQuestion]);
 
-  // Participants filtered for lottery
+  // Participants filtered for lottery (by Stage + Branch + Level)
   const eligibleLotteryParticipants = useMemo(() => {
     return participants.filter((p) => {
       const matchStage = !lotteryStage || p.stageName === lotteryStage;
       const matchBranch =
         lotteryBranch === 'Semua Cabang' || p.branchName.includes(lotteryBranch);
-      return matchStage && matchBranch;
+      const matchLevel =
+        lotteryLevel === 'Semua Jenjang' || (p.levelName || '').includes(lotteryLevel);
+      return matchStage && matchBranch && matchLevel;
     });
-  }, [participants, lotteryStage, lotteryBranch]);
+  }, [participants, lotteryStage, lotteryBranch, lotteryLevel]);
 
-  // Questions available for lottery
+  // Questions available for lottery (by Stage + Branch + Level)
   const eligibleLotteryQuestions = useMemo(() => {
     return questions.filter((q) => {
       const matchStage = !lotteryStage || q.stageName === lotteryStage;
+      const qBranch = q.branchName || q.branchAndLevel || '';
+      const qLevel = q.levelName || q.branchAndLevel || '';
       const matchBranch =
-        lotteryBranch === 'Semua Cabang' || q.branchAndLevel.includes(lotteryBranch);
-      return matchStage && matchBranch && q.status !== 'Nonaktif';
+        lotteryBranch === 'Semua Cabang' || qBranch.includes(lotteryBranch);
+      const matchLevel =
+        lotteryLevel === 'Semua Jenjang' || qLevel.includes(lotteryLevel);
+      return matchStage && matchBranch && matchLevel && q.status !== 'Nonaktif';
     });
-  }, [questions, lotteryStage, lotteryBranch]);
+  }, [questions, lotteryStage, lotteryBranch, lotteryLevel]);
 
-  // Initialize lottery participant selection when criteria change
+  // Initialize lottery participant & question pool selection when opening modal
   const handleOpenLotteryWorkflow = () => {
-    const defaultIds = eligibleLotteryParticipants.map((p) => p.id);
-    setSelectedParticipantIds(defaultIds);
+    setSelectedParticipantIds(eligibleLotteryParticipants.map((p) => p.id));
+    setSelectedQuestionPoolIds(eligibleLotteryQuestions.map((q) => q.id));
     setLotteryDrawResults(null);
     setLotteryFeedback('');
     setIsLotteryModalOpen(true);
+  };
+
+  const syncLotteryPoolsOnFilterChange = (newStage: string, newBranch: string, newLevel: string) => {
+    const newParts = participants.filter((p) => {
+      const matchStage = !newStage || p.stageName === newStage;
+      const matchBranch = newBranch === 'Semua Cabang' || p.branchName.includes(newBranch);
+      const matchLevel = newLevel === 'Semua Jenjang' || (p.levelName || '').includes(newLevel);
+      return matchStage && matchBranch && matchLevel;
+    });
+    const newQs = questions.filter((q) => {
+      const matchStage = !newStage || q.stageName === newStage;
+      const qBranch = q.branchName || q.branchAndLevel || '';
+      const qLevel = q.levelName || q.branchAndLevel || '';
+      const matchBranch = newBranch === 'Semua Cabang' || qBranch.includes(newBranch);
+      const matchLevel = newLevel === 'Semua Jenjang' || qLevel.includes(newLevel);
+      return matchStage && matchBranch && matchLevel && q.status !== 'Nonaktif';
+    });
+    setSelectedParticipantIds(newParts.map((p) => p.id));
+    setSelectedQuestionPoolIds(newQs.map((q) => q.id));
   };
 
   const handleToggleSelectAllParticipants = () => {
@@ -287,29 +320,51 @@ export const BankSoalView: React.FC = () => {
     );
   };
 
-  // Run draw simulation then generate mappings atomically
+  const handleToggleSelectAllQuestions = () => {
+    if (selectedQuestionPoolIds.length === eligibleLotteryQuestions.length) {
+      setSelectedQuestionPoolIds([]);
+    } else {
+      setSelectedQuestionPoolIds(eligibleLotteryQuestions.map((q) => q.id));
+    }
+  };
+
+  const handleToggleQuestionPool = (id: string) => {
+    setSelectedQuestionPoolIds((prev) =>
+      prev.includes(id) ? prev.filter((qId) => qId !== id) : [...prev, id]
+    );
+  };
+
+  // Run draw simulation using unbiased Fisher-Yates shuffle
   const handleExecuteDraw = () => {
     if (selectedParticipantIds.length === 0) {
       setLotteryFeedback('Pilih setidaknya 1 peserta untuk diundi.');
       return;
     }
+    if (selectedQuestionPoolIds.length === 0) {
+      setLotteryFeedback('Pilih setidaknya 1 soal (maqra) dalam Pool Soal untuk diundi.');
+      return;
+    }
 
     const selectedParts = participants.filter((p) => selectedParticipantIds.includes(p.id));
+    const explicitQuestionPool = questions.filter(
+      (q) => selectedQuestionPoolIds.includes(q.id) && q.status === 'Aktif'
+    );
 
-    // Validate each participant's branch & level pool
+    // Validate each participant's branch & level pool within the selected question pool
     for (const part of selectedParts) {
-      const partQuestions = questions.filter((q) => {
-        if (q.status !== 'Aktif') return false;
+      const partQuestions = explicitQuestionPool.filter((q) => {
         const matchesStage = !q.stageName || q.stageName === lotteryStage || lotteryStage === 'Semua Babak';
-        const matchesBranch = lotteryBranch === 'Semua Cabang'
-          ? (!q.branchAndLevel || q.branchAndLevel.includes(part.branchName) || part.branchName.includes(q.branchAndLevel))
-          : q.branchAndLevel.includes(lotteryBranch);
+        const qBranch = q.branchName || q.branchAndLevel || '';
+        const matchesBranch =
+          lotteryBranch === 'Semua Cabang'
+            ? !qBranch || qBranch.includes(part.branchName) || part.branchName.includes(qBranch)
+            : qBranch.includes(lotteryBranch);
         return matchesStage && matchesBranch;
       });
 
       if (partQuestions.length < lotteryQuestionsPerParticipant) {
         setLotteryFeedback(
-          `Tidak dapat melanjutkan: Peserta ${part.name} (${part.branchName}) membutuhkan ${lotteryQuestionsPerParticipant} soal unik, namun hanya tersedia ${partQuestions.length} soal aktif yang sesuai di Babak ${lotteryStage}.`
+          `Tidak dapat melanjutkan: Peserta ${part.name} (${part.branchName}) membutuhkan ${lotteryQuestionsPerParticipant} soal unik, namun hanya tersedia ${partQuestions.length} soal aktif yang tercentang di Pool Soal Babak ${lotteryStage}.`
         );
         return;
       }
@@ -329,12 +384,13 @@ export const BankSoalView: React.FC = () => {
       const batchUsed = new Set<string>();
 
       selectedParts.forEach((part) => {
-        const partQuestions = questions.filter((q) => {
-          if (q.status !== 'Aktif') return false;
+        const partQuestions = explicitQuestionPool.filter((q) => {
           const matchesStage = !q.stageName || q.stageName === lotteryStage || lotteryStage === 'Semua Babak';
-          const matchesBranch = lotteryBranch === 'Semua Cabang'
-            ? (!q.branchAndLevel || q.branchAndLevel.includes(part.branchName) || part.branchName.includes(q.branchAndLevel))
-            : q.branchAndLevel.includes(lotteryBranch);
+          const qBranch = q.branchName || q.branchAndLevel || '';
+          const matchesBranch =
+            lotteryBranch === 'Semua Cabang'
+              ? !qBranch || qBranch.includes(part.branchName) || part.branchName.includes(qBranch)
+              : qBranch.includes(lotteryBranch);
           return matchesStage && matchesBranch;
         });
 
@@ -354,7 +410,8 @@ export const BankSoalView: React.FC = () => {
         const unusedInBatch = candidatePool.filter((q) => !batchUsed.has(q.id));
         const pool = unusedInBatch.length >= lotteryQuestionsPerParticipant ? unusedInBatch : candidatePool;
 
-        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        // Unbiased Fisher-Yates shuffle
+        const shuffled = fisherYatesShuffle(pool);
         const picked = shuffled.slice(0, lotteryQuestionsPerParticipant);
 
         picked.forEach((q) => batchUsed.add(q.id));
@@ -369,18 +426,23 @@ export const BankSoalView: React.FC = () => {
 
       setLotteryDrawResults(results);
       setIsDrawingAnimation(false);
-    }, 400);
+    }, 350);
   };
 
   // Confirm and persist draw to MTQ Context — 100% IDENTICAL to preview, NO re-randomization!
   const handleConfirmPersistDraw = () => {
     if (!lotteryDrawResults || lotteryDrawResults.length === 0) return;
 
-    const res = commitLotteryDrawResults(lotteryDrawResults, lotteryStage);
+    const res = commitLotteryDrawResults(lotteryDrawResults, lotteryStage, {
+      questionPoolIds: selectedQuestionPoolIds,
+      branchName: lotteryBranch !== 'Semua Cabang' ? lotteryBranch : undefined,
+      levelName: lotteryLevel !== 'Semua Jenjang' ? lotteryLevel : undefined
+    });
 
     if (res.success) {
       setIsLotteryModalOpen(false);
       setLotteryDrawResults(null);
+      setFeedbackMessage({ type: 'success', text: res.message });
     } else {
       setLotteryFeedback(res.message);
     }
@@ -388,6 +450,10 @@ export const BankSoalView: React.FC = () => {
 
   // Open Add Question
   const handleOpenAdd = () => {
+    const defaultCabang = activeCabangList[0]?.name || cabangList[0]?.name || 'Tilawah Dewasa Putra';
+    const defaultJenjang = activeJenjangList[0]?.name || jenjangList[0]?.name || 'Dewasa';
+    const defaultStage = activeStages[0]?.name || stages[0]?.name || 'Penyisihan';
+
     setEditingQuestion(null);
     setFormCode(`MQ-TLW-${String(questions.length + 1).padStart(2, '0')}`);
     setFormTitle('Maqra Baru: QS. Maryam [19]: 1 - 15');
@@ -397,8 +463,9 @@ export const BankSoalView: React.FC = () => {
     setFormEndAyah(15);
     setFormPageStart(305);
     setFormPageEnd(305);
-    setFormBranch('Tilawah Dewasa Putra Ulya');
-    setFormStage('Penyisihan');
+    setFormBranchName(defaultCabang);
+    setFormLevelName(defaultJenjang);
+    setFormStage(defaultStage);
     setFormDesc('');
     setFormError('');
     setIsAddModalOpen(true);
@@ -406,6 +473,18 @@ export const BankSoalView: React.FC = () => {
 
   // Open Edit Question
   const handleOpenEdit = (q: Question) => {
+    const matchedCabang =
+      q.branchName ||
+      cabangList.find((c) => q.branchAndLevel.includes(c.name))?.name ||
+      q.branchAndLevel ||
+      activeCabangList[0]?.name ||
+      'Tilawah Dewasa Putra';
+    const matchedJenjang =
+      q.levelName ||
+      jenjangList.find((j) => q.branchAndLevel.includes(j.name))?.name ||
+      activeJenjangList[0]?.name ||
+      'Dewasa';
+
     setEditingQuestion(q);
     setFormCode(q.code);
     setFormTitle(q.title);
@@ -415,7 +494,8 @@ export const BankSoalView: React.FC = () => {
     setFormEndAyah(q.endAyah);
     setFormPageStart(q.pageStart || q.pageNumber);
     setFormPageEnd(q.pageEnd || q.pageNumber);
-    setFormBranch(q.branchAndLevel);
+    setFormBranchName(matchedCabang);
+    setFormLevelName(matchedJenjang);
     setFormStage(q.stageName);
     setFormDesc(q.description || '');
     setFormError('');
@@ -451,6 +531,10 @@ export const BankSoalView: React.FC = () => {
       pageNums.push(p);
     }
 
+    const matchedBranch = cabangList.find((c) => c.name === formBranchName);
+    const matchedLevel = jenjangList.find((j) => j.name === formLevelName);
+    const combinedBranchAndLevel = [formBranchName, formLevelName].filter(Boolean).join(' ');
+
     if (editingQuestion) {
       updateQuestion(editingQuestion.id, {
         code: formCode.toUpperCase(),
@@ -463,10 +547,15 @@ export const BankSoalView: React.FC = () => {
         pageStart: startP,
         pageEnd: endP,
         pageNumbers: pageNums,
-        branchAndLevel: formBranch,
+        branchId: matchedBranch?.id,
+        branchName: formBranchName,
+        levelId: matchedLevel?.id,
+        levelName: formLevelName,
+        branchAndLevel: combinedBranchAndLevel,
         stageName: formStage,
         description: formDesc
       });
+      setFeedbackMessage({ type: 'success', text: `Soal ${formCode.toUpperCase()} berhasil diperbarui.` });
     } else {
       addQuestion({
         code: formCode.toUpperCase(),
@@ -479,20 +568,66 @@ export const BankSoalView: React.FC = () => {
         pageStart: startP,
         pageEnd: endP,
         pageNumbers: pageNums,
-        branchAndLevel: formBranch,
+        branchId: matchedBranch?.id,
+        branchName: formBranchName,
+        levelId: matchedLevel?.id,
+        levelName: formLevelName,
+        branchAndLevel: combinedBranchAndLevel,
         stageName: formStage,
         status: 'Aktif',
         description: formDesc
       });
+      setFeedbackMessage({ type: 'success', text: `Soal ${formCode.toUpperCase()} berhasil ditambahkan.` });
     }
 
     setIsAddModalOpen(false);
   };
 
+  // Excel Import handlers
+  const handleExcelFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    try {
+      const buffer = await file.arrayBuffer();
+      const rows = parseWorkbookToRows(buffer);
+      const validation = validateQuestionImportRows(rows, {
+        cabangList,
+        jenjangList,
+        stages,
+        existingQuestions: questions
+      });
+      setImportValidation(validation);
+    } catch (err) {
+      setFeedbackMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Gagal membaca file Excel Bank Soal.'
+      });
+    }
+  };
+
+  const handleCommitExcelImport = async () => {
+    if (!importValidation || importValidation.validRows.length === 0) return;
+    setIsImporting(true);
+    try {
+      const res = await importQuestionsBatch(importValidation.validRows);
+      setFeedbackMessage({
+        type: res.succeeded > 0 ? 'success' : 'error',
+        text: `Berhasil mengimpor ${res.succeeded} dari ${res.total} soal / maqra.`
+      });
+      if (res.succeeded > 0) {
+        setIsImportModalOpen(false);
+        setImportValidation(null);
+        setImportFileName('');
+      }
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   // Open Single Question Manual Assignment
   const handleOpenManualAssign = (q: Question) => {
     setManualAssignQuestion(q);
-    // Find eligible participants in the same stage who don't already have this question
     const matchingParts = participants.filter((p) => {
       const matchStage = !q.stageName || p.stageName === q.stageName;
       const alreadyHas =
@@ -512,7 +647,6 @@ export const BankSoalView: React.FC = () => {
     setManualAssignFeedback(null);
   };
 
-  // Add question to target participant with strict validation and user feedback
   const handleAddQuestionToParticipant = () => {
     if (!manualAssignQuestion || !targetParticipantId) return;
 
@@ -541,7 +675,7 @@ export const BankSoalView: React.FC = () => {
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
@@ -549,14 +683,39 @@ export const BankSoalView: React.FC = () => {
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Kelola paket maqra, surah, ayat, rentang halaman mushaf, serta pengundian penetapan soal musabaqah
+            Kelola paket maqra terstruktur (Cabang, Jenjang, Babak), import Excel, serta undian acak Fisher-Yates
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => downloadQuestionExcelTemplate({ cabangList, jenjangList, stages })}
+            data-testid="download-question-template-btn"
+            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs px-3 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Template Excel</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setImportValidation(null);
+              setImportFileName('');
+              setIsImportModalOpen(true);
+            }}
+            data-testid="open-question-import-btn"
+            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-emerald-200 text-emerald-800 font-semibold text-xs px-3 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Import Excel</span>
+          </button>
+
           <button
             onClick={handleOpenLotteryWorkflow}
-            className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-semibold text-xs px-3.5 py-2.5 rounded-lg shadow-2xs transition-all cursor-pointer"
+            data-testid="open-lottery-modal-btn"
+            className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-semibold text-xs px-3.5 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
           >
             <Dice5 className="w-4 h-4 text-emerald-700" />
             <span>Undian Penentuan Soal</span>
@@ -564,7 +723,8 @@ export const BankSoalView: React.FC = () => {
 
           <button
             onClick={handleOpenAdd}
-            className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all cursor-pointer"
+            data-testid="add-question-btn"
+            className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah Soal / Maqra</span>
@@ -638,6 +798,27 @@ export const BankSoalView: React.FC = () => {
             {assignedMaqraRows.length}
           </span>
         </button>
+        <button
+          onClick={() => setActiveTab('riwayat_undian')}
+          data-testid="tab-riwayat-undian"
+          className={`pb-3 text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'riwayat_undian'
+              ? 'border-emerald-800 text-emerald-800'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <History className="w-4 h-4" />
+          <span>Riwayat & Audit Undian</span>
+          <span
+            className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
+              activeTab === 'riwayat_undian'
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {lotteryDrawLogs.length}
+          </span>
+        </button>
       </div>
 
       {/* Filter and Search Bar */}
@@ -664,9 +845,24 @@ export const BankSoalView: React.FC = () => {
             className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
           >
             <option value="Semua Cabang">Semua Cabang</option>
-            <option value="Tilawah Dewasa Putra">Tilawah Dewasa Putra</option>
-            <option value="Tilawah Dewasa Putri">Tilawah Dewasa Putri</option>
-            <option value="Hifzhil Qur’an">Hifzhil Qur’an</option>
+            {cabangList.map((c) => (
+              <option key={c.id} value={c.name}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={selectedLevel}
+            onChange={(e) => setSelectedLevel(e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
+          >
+            <option value="Semua Jenjang">Semua Jenjang</option>
+            {jenjangList.map((j) => (
+              <option key={j.id} value={j.name}>
+                {j.name}
+              </option>
+            ))}
           </select>
 
           <select
@@ -694,7 +890,7 @@ export const BankSoalView: React.FC = () => {
                   <th className="px-5 py-3 w-28">Kode Maqra</th>
                   <th className="px-5 py-3">Surah & Ayat</th>
                   <th className="px-4 py-3">Hal. Mushaf</th>
-                  <th className="px-4 py-3">Cabang & Babak</th>
+                  <th className="px-4 py-3">Cabang · Jenjang · Babak</th>
                   <th className="px-4 py-3">Status Penetapan</th>
                   <th className="px-5 py-3 text-right">Aksi</th>
                 </tr>
@@ -708,7 +904,6 @@ export const BankSoalView: React.FC = () => {
                   </tr>
                 ) : (
                   filteredQuestions.map((q, idx) => {
-                    // Check all participants assigned to this question
                     const assignedParts = participants.filter((p) => {
                       if (p.questionId === q.id) return true;
                       if (p.assignedQuestions?.some((aq) => aq.questionId === q.id)) return true;
@@ -742,13 +937,24 @@ export const BankSoalView: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-4 py-3.5">
-                          <p className="font-semibold text-slate-800">{q.branchAndLevel}</p>
-                          <span className="text-[10px] text-slate-500 font-medium">{q.stageName}</span>
+                          <p className="font-semibold text-slate-800">
+                            {q.branchName || q.branchAndLevel}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                            {q.levelName && (
+                              <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded font-semibold">
+                                {q.levelName}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-emerald-800 font-mono font-semibold">
+                              {q.stageName}
+                            </span>
+                          </div>
                         </td>
                         <td className="px-4 py-3.5">
                           {assignedParts.length > 0 ? (
                             <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
-                              Sudah
+                              Sudah ({assignedParts.length})
                             </span>
                           ) : (
                             <span className="inline-block bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
@@ -765,11 +971,7 @@ export const BankSoalView: React.FC = () => {
                             <Dice5 className="w-4 h-4 inline" />
                           </button>
                           <button
-                            onClick={() => {
-                              setPreviewQuestion(q);
-                              setPreviewCurrentPageIndex(0);
-                              setPreviewZoom(100);
-                            }}
+                            onClick={() => setPreviewQuestion(q)}
                             className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
                             title="Pratinjau Mushaf"
                           >
@@ -866,11 +1068,7 @@ export const BankSoalView: React.FC = () => {
                       <td className="px-5 py-3.5 text-right space-x-1.5">
                         {row.questionObj && (
                           <button
-                            onClick={() => {
-                              setPreviewQuestion(row.questionObj!);
-                              setPreviewCurrentPageIndex(0);
-                              setPreviewZoom(100);
-                            }}
+                            onClick={() => setPreviewQuestion(row.questionObj!)}
                             className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
                             title="Pratinjau Mushaf"
                           >
@@ -900,11 +1098,82 @@ export const BankSoalView: React.FC = () => {
         </div>
       )}
 
-      {/* Mushaf Preview Modal (Mode Halaman Tanpa Space Kanan/Kiri/Atas/Bawah & Tanpa Footer) */}
+      {/* Tab 3: Riwayat & Audit Undian Maqra */}
+      {activeTab === 'riwayat_undian' && (
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
+          {lotteryDrawLogs.length === 0 ? (
+            <div className="p-10 text-center text-slate-400 text-xs">
+              Belum ada riwayat eksekusi undian maqra pada tenant ini.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {lotteryDrawLogs.map((log) => (
+                <div key={log.id} className="p-5 space-y-3 hover:bg-slate-50/40">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 font-mono text-xs font-extrabold">
+                        Undian v{log.drawVersion}
+                      </span>
+                      <span className="font-bold text-sm text-slate-900">
+                        Babak {log.stageName}
+                      </span>
+                      {log.branchName && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                          {log.branchName}
+                        </span>
+                      )}
+                      {log.levelName && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                          {log.levelName}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 font-mono">
+                      Oleh <strong className="text-slate-800">{log.actorName}</strong> ·{' '}
+                      {new Date(log.createdAt).toLocaleString('id-ID')}
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-slate-600 flex flex-wrap gap-4">
+                    <span>
+                      Peserta Diundi: <strong>{log.participantIds.length} peserta</strong>
+                    </span>
+                    <span>
+                      Pool Soal Terpilih: <strong>{log.questionPoolIds.length} maqra</strong>
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                    {log.drawResults.map((r, i) => (
+                      <div
+                        key={`${log.id}-${r.participantId}-${i}`}
+                        className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex flex-col justify-between gap-1"
+                      >
+                        <span className="font-bold text-slate-900">{r.participantName}</span>
+                        <div className="flex flex-wrap gap-1">
+                          {r.assignedQuestionCodes.map((qt, qi) => (
+                            <span
+                              key={qi}
+                              className="text-[10px] font-mono bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded"
+                            >
+                              {qt}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Mushaf Preview Modal */}
       {previewQuestion && (
         <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 z-50">
           <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]">
-            {/* Header */}
             <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
               <div className="min-w-0 pr-2">
                 <div className="flex items-center gap-2">
@@ -930,7 +1199,6 @@ export const BankSoalView: React.FC = () => {
               </button>
             </div>
 
-            {/* Mushaf Viewer Content - Zero Padding Left/Right/Top/Bottom */}
             <div className="flex-1 overflow-y-auto p-0 m-0 bg-white flex flex-col items-stretch">
               {previewPages.map((pageNum) => (
                 <div key={pageNum} className="w-full p-0 m-0 bg-white">
@@ -950,32 +1218,31 @@ export const BankSoalView: React.FC = () => {
 
       {/* Manual Multi-Question Assignment Modal */}
       {manualAssignQuestion && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                  <Dice5 className="w-5 h-5 text-emerald-800" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900">
-                    Penetapan Maqra ke Peserta
-                  </h3>
-                  <p className="text-xs text-slate-500 font-mono">
-                    {manualAssignQuestion.code} · {manualAssignQuestion.title}
-                  </p>
-                </div>
-              </div>
+        <AppModal
+          isOpen={Boolean(manualAssignQuestion)}
+          onClose={() => setManualAssignQuestion(null)}
+          title="Penetapan Maqra ke Peserta"
+          subtitle={`${manualAssignQuestion.code} · ${manualAssignQuestion.title}`}
+          maxWidthClass="max-w-lg"
+          footer={
+            <div className="flex items-center justify-end gap-2.5">
               <button
                 onClick={() => setManualAssignQuestion(null)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                Selesai
+              </button>
+              <button
+                onClick={handleAddQuestionToParticipant}
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+              >
+                Tambahkan ke Peserta
               </button>
             </div>
-
-            {/* Maqra Details */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mb-4 text-xs space-y-2">
+          }
+        >
+          <div className="space-y-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs space-y-2">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="font-extrabold text-slate-900 text-sm">{manualAssignQuestion.title}</span>
                 <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
@@ -992,8 +1259,7 @@ export const BankSoalView: React.FC = () => {
               </p>
             </div>
 
-            {/* Currently assigned participants */}
-            <div className="mb-4">
+            <div>
               <label className="text-xs font-bold text-slate-700 block mb-1.5">
                 Peserta yang Saat Ini Memiliki Soal Ini di Babak {manualAssignQuestion.stageName}:
               </label>
@@ -1048,8 +1314,7 @@ export const BankSoalView: React.FC = () => {
               </div>
             </div>
 
-            {/* Target participant select to add */}
-            <div className="space-y-2 mb-6">
+            <div className="space-y-2">
               <label className="text-xs font-bold text-slate-700 block">
                 Pilih Peserta untuk Diberikan Maqra Ini:
               </label>
@@ -1088,9 +1353,6 @@ export const BankSoalView: React.FC = () => {
                   );
                 })}
               </select>
-              <p className="text-[11px] text-slate-500">
-                Catatan: Hanya peserta pada <strong>Babak {manualAssignQuestion.stageName}</strong> yang belum memiliki soal ini yang dapat dipilih untuk menjaga konsistensi kompetisi.
-              </p>
 
               {manualAssignFeedback && (
                 <div
@@ -1109,141 +1371,133 @@ export const BankSoalView: React.FC = () => {
                 </div>
               )}
             </div>
-
-            <div className="flex items-center justify-end gap-2.5">
-              <button
-                onClick={() => setManualAssignQuestion(null)}
-                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
-              >
-                Selesai
-              </button>
-              <button
-                onClick={handleAddQuestionToParticipant}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
-              >
-                Tambahkan ke Peserta
-              </button>
-            </div>
           </div>
-        </div>
+        </AppModal>
       )}
 
-      {/* Undian Penentuan Soal Workflow Modal */}
+      {/* Undian Penentuan Soal Workflow Modal (With Dual Checklists: Peserta + Pool Soal) */}
       {isLotteryModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 z-50">
-          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
-            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-800">
-                  <Dice5 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900">
-                    Alur Undian Penentuan Soal / Maqra
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Pengundian otomatis berbasis ruang lingkup babak dan penetapan multi-soal
-                  </p>
-                </div>
-              </div>
+        <AppModal
+          isOpen={isLotteryModalOpen}
+          onClose={() => setIsLotteryModalOpen(false)}
+          isBusy={isDrawingAnimation}
+          title="Alur Undian Penentuan Soal / Maqra"
+          subtitle="Pengundian acak Fisher-Yates berbasis Checklist Peserta dan Checklist Pool Soal (Maqra)"
+          maxWidthClass="max-w-3xl"
+          footer={
+            <div className="flex items-center justify-between">
               <button
+                type="button"
                 onClick={() => setIsLotteryModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg"
               >
-                <X className="w-5 h-5" />
+                Batal
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmPersistDraw}
+                disabled={!lotteryDrawResults || lotteryDrawResults.length === 0}
+                data-testid="commit-lottery-draw-btn"
+                className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-40 text-white text-xs font-bold rounded-lg shadow-2xs"
+              >
+                Terapkan & Simpan Hasil Undian
               </button>
             </div>
-
-            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
-              {/* Scope Filters */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Babak Perlombaan:</label>
-                  <select
-                    value={lotteryStage}
-                    onChange={(e) => {
-                      const newStg = e.target.value;
-                      setLotteryStage(newStg);
-                      setLotteryDrawResults(null);
-                      setLotteryFeedback('');
-                      const newEligible = participants.filter((p) => {
-                        const matchStage = !newStg || p.stageName === newStg;
-                        const matchBranch = lotteryBranch === 'Semua Cabang' || p.branchName.includes(lotteryBranch);
-                        return matchStage && matchBranch;
-                      });
-                      setSelectedParticipantIds(newEligible.map((p) => p.id));
-                    }}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
-                  >
-                    {stages.map((stg) => (
-                      <option key={stg.id} value={stg.name}>
-                        {stg.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Cabang / Golongan:</label>
-                  <select
-                    value={lotteryBranch}
-                    onChange={(e) => {
-                      const newBr = e.target.value;
-                      setLotteryBranch(newBr);
-                      setLotteryDrawResults(null);
-                      setLotteryFeedback('');
-                      const newEligible = participants.filter((p) => {
-                        const matchStage = !lotteryStage || p.stageName === lotteryStage;
-                        const matchBranch = newBr === 'Semua Cabang' || p.branchName.includes(newBr);
-                        return matchStage && matchBranch;
-                      });
-                      setSelectedParticipantIds(newEligible.map((p) => p.id));
-                    }}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
-                  >
-                    <option value="Semua Cabang">Semua Cabang</option>
-                    <option value="Tilawah Dewasa Putra">Tilawah Dewasa Putra</option>
-                    <option value="Tilawah Dewasa Putri">Tilawah Dewasa Putri</option>
-                    <option value="Hifzhil Qur’an">Hifzhil Qur’an</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Soal per Peserta:</label>
-                  <select
-                    value={lotteryQuestionsPerParticipant}
-                    onChange={(e) => {
-                      setLotteryQuestionsPerParticipant(Number(e.target.value));
-                      setLotteryDrawResults(null);
-                    }}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono font-bold"
-                  >
-                    <option value={1}>1 Soal per Peserta</option>
-                    <option value={2}>2 Soal per Peserta</option>
-                    <option value={3}>3 Soal per Peserta</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Pool info */}
-              <div className="flex items-center justify-between text-xs px-1">
-                <span className="text-slate-600">
-                  Pool Soal Tersedia:{' '}
-                  <strong className="text-emerald-800">{eligibleLotteryQuestions.length} Maqra</strong>
-                </span>
-                <span className="text-slate-600">
-                  Peserta Terpilih:{' '}
-                  <strong className="text-emerald-800">
-                    {selectedParticipantIds.length} dari {eligibleLotteryParticipants.length}
-                  </strong>
-                </span>
-              </div>
-
-              {/* Participant Selection Box */}
+          }
+        >
+          <div className="space-y-5">
+            {/* Scope Filters */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <label className="font-bold text-slate-700 block mb-1">Babak Perlombaan:</label>
+                <select
+                  value={lotteryStage}
+                  onChange={(e) => {
+                    const newStg = e.target.value;
+                    setLotteryStage(newStg);
+                    setLotteryDrawResults(null);
+                    setLotteryFeedback('');
+                    syncLotteryPoolsOnFilterChange(newStg, lotteryBranch, lotteryLevel);
+                  }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                >
+                  {stages.map((stg) => (
+                    <option key={stg.id} value={stg.name}>
+                      {stg.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Cabang Lomba:</label>
+                <select
+                  value={lotteryBranch}
+                  onChange={(e) => {
+                    const newBr = e.target.value;
+                    setLotteryBranch(newBr);
+                    setLotteryDrawResults(null);
+                    setLotteryFeedback('');
+                    syncLotteryPoolsOnFilterChange(lotteryStage, newBr, lotteryLevel);
+                  }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="Semua Cabang">Semua Cabang</option>
+                  {cabangList.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Jenjang Lomba:</label>
+                <select
+                  value={lotteryLevel}
+                  onChange={(e) => {
+                    const newLv = e.target.value;
+                    setLotteryLevel(newLv);
+                    setLotteryDrawResults(null);
+                    setLotteryFeedback('');
+                    syncLotteryPoolsOnFilterChange(lotteryStage, lotteryBranch, newLv);
+                  }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="Semua Jenjang">Semua Jenjang</option>
+                  {jenjangList.map((j) => (
+                    <option key={j.id} value={j.name}>
+                      {j.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Soal per Peserta:</label>
+                <select
+                  value={lotteryQuestionsPerParticipant}
+                  onChange={(e) => {
+                    setLotteryQuestionsPerParticipant(Number(e.target.value));
+                    setLotteryDrawResults(null);
+                  }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono font-bold"
+                >
+                  <option value={1}>1 Soal per Peserta</option>
+                  <option value={2}>2 Soal per Peserta</option>
+                  <option value={3}>3 Soal per Peserta</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Dual Checklists: Left = Checklist Peserta, Right = Checklist Pool Soal (Maqra) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Checklist Peserta */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-bold text-slate-700">
-                    Pilih Peserta yang Mengikuti Undian Ini:
+                    1. Checklist Peserta ({selectedParticipantIds.length}/{eligibleLotteryParticipants.length})
                   </label>
                   <button
                     type="button"
@@ -1259,12 +1513,11 @@ export const BankSoalView: React.FC = () => {
                 <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-48 overflow-y-auto bg-white text-xs">
                   {eligibleLotteryParticipants.length === 0 ? (
                     <div className="p-4 text-center text-slate-400">
-                      Tidak ada peserta yang cocok dengan kriteria babak/cabang ini.
+                      Tidak ada peserta sesuai filter ini.
                     </div>
                   ) : (
                     eligibleLotteryParticipants.map((p, idx) => {
                       const isSelected = selectedParticipantIds.includes(p.id);
-                      const currentQCount = p.assignedQuestions?.length || (p.questionId ? 1 : 0);
                       return (
                         <div
                           key={`${p.id}-${idx}`}
@@ -1273,7 +1526,7 @@ export const BankSoalView: React.FC = () => {
                             isSelected ? 'bg-emerald-50/50' : 'hover:bg-slate-50'
                           }`}
                         >
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex items-center gap-2">
                             <input
                               type="checkbox"
                               checked={isSelected}
@@ -1281,18 +1534,15 @@ export const BankSoalView: React.FC = () => {
                               className="rounded text-emerald-700 focus:ring-emerald-600 cursor-pointer"
                             />
                             <div>
-                              <span className="font-mono font-bold text-slate-900 mr-2">
+                              <span className="font-mono font-bold text-slate-900 mr-1.5">
                                 #{p.lotteryNumber}
                               </span>
                               <span className="font-semibold text-slate-800">{p.name}</span>
-                              <span className="text-[11px] text-slate-400 ml-2">
-                                ({p.kafilahName})
+                              <span className="text-[10px] text-slate-400 block">
+                                {p.branchName} · {p.levelName || 'Umum'}
                               </span>
                             </div>
                           </div>
-                          <span className="text-[10px] font-medium text-slate-500">
-                            {currentQCount} soal saat ini
-                          </span>
                         </div>
                       );
                     })
@@ -1300,284 +1550,517 @@ export const BankSoalView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Action Button to Roll */}
-              <div className="flex items-center justify-center pt-2">
-                <button
-                  type="button"
-                  onClick={handleExecuteDraw}
-                  disabled={isDrawingAnimation || selectedParticipantIds.length === 0}
-                  className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer"
+              {/* Checklist Pool Soal (Maqra) */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    2. Checklist Pool Soal ({selectedQuestionPoolIds.length}/{eligibleLotteryQuestions.length})
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleToggleSelectAllQuestions}
+                    className="text-[11px] font-semibold text-emerald-800 hover:underline"
+                  >
+                    {selectedQuestionPoolIds.length === eligibleLotteryQuestions.length
+                      ? 'Batalkan Semua'
+                      : 'Pilih Semua'}
+                  </button>
+                </div>
+
+                <div
+                  data-testid="lottery-question-pool-list"
+                  className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-48 overflow-y-auto bg-white text-xs"
                 >
-                  <RefreshCw className={`w-4 h-4 ${isDrawingAnimation ? 'animate-spin' : ''}`} />
-                  <span>{isDrawingAnimation ? 'Mengundi Secara Acak...' : 'Mulai Pengundian Acak'}</span>
-                </button>
-              </div>
-
-              {lotteryFeedback && (
-                <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>{lotteryFeedback}</span>
-                </div>
-              )}
-
-              {/* Draw Results Preview */}
-              {lotteryDrawResults && (
-                <div className="border border-emerald-200 bg-emerald-50/30 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-xs text-emerald-900 uppercase tracking-wider flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
-                      Hasil Pratinjau Undian ({lotteryDrawResults.length} Peserta)
-                    </h4>
-                    <span className="text-[10px] font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
-                      Belum Disimpan
-                    </span>
-                  </div>
-
-                  <div className="space-y-2 max-h-56 overflow-y-auto">
-                    {lotteryDrawResults.map((res, idx) => (
-                      <div
-                        key={`${res.participantId}-${idx}`}
-                        className="bg-white p-2.5 rounded-lg border border-emerald-100 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-1.5"
-                      >
-                        <span className="font-bold text-slate-900">{res.participantName}</span>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {res.questionTitles.map((t, idx) => (
-                            <span
-                              key={idx}
-                              className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-medium"
-                            >
-                              {t}
-                            </span>
-                          ))}
+                  {eligibleLotteryQuestions.length === 0 ? (
+                    <div className="p-4 text-center text-slate-400">
+                      Tidak ada soal aktif sesuai filter ini.
+                    </div>
+                  ) : (
+                    eligibleLotteryQuestions.map((q, idx) => {
+                      const isSelected = selectedQuestionPoolIds.includes(q.id);
+                      return (
+                        <div
+                          key={`${q.id}-${idx}`}
+                          onClick={() => handleToggleQuestionPool(q.id)}
+                          className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                            isSelected ? 'bg-emerald-50/50' : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              className="rounded text-emerald-700 focus:ring-emerald-600 cursor-pointer shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <span className="font-mono font-bold text-emerald-800 mr-1.5">
+                                {q.code}
+                              </span>
+                              <span className="font-semibold text-slate-800 truncate">
+                                {q.title}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block">
+                                Hal. {q.pageStart || q.pageNumber} · {q.branchName || q.branchAndLevel}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      );
+                    })
+                  )}
                 </div>
-              )}
+              </div>
             </div>
 
-            {/* Modal Footer */}
-            <div className="p-3 sm:p-4 border-t border-slate-200 bg-white flex items-center justify-between">
+            {/* Action Button to Roll */}
+            <div className="flex items-center justify-center pt-1">
               <button
                 type="button"
-                onClick={() => setIsLotteryModalOpen(false)}
-                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg"
+                onClick={handleExecuteDraw}
+                disabled={
+                  isDrawingAnimation ||
+                  selectedParticipantIds.length === 0 ||
+                  selectedQuestionPoolIds.length === 0
+                }
+                data-testid="execute-lottery-draw-btn"
+                className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <RefreshCw className={`w-4 h-4 ${isDrawingAnimation ? 'animate-spin' : ''}`} />
+                <span>
+                  {isDrawingAnimation ? 'Mengundi Secara Acak (Fisher-Yates)...' : 'Mulai Pengundian Acak'}
+                </span>
+              </button>
+            </div>
+
+            {lotteryFeedback && (
+              <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{lotteryFeedback}</span>
+              </div>
+            )}
+
+            {/* Draw Results Preview */}
+            {lotteryDrawResults && (
+              <div className="border border-emerald-200 bg-emerald-50/30 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-xs text-emerald-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                    Hasil Pratinjau Undian ({lotteryDrawResults.length} Peserta)
+                  </h4>
+                  <span className="text-[10px] font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                    Siap Diterapkan
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {lotteryDrawResults.map((res, idx) => (
+                    <div
+                      key={`${res.participantId}-${idx}`}
+                      className="bg-white p-2.5 rounded-lg border border-emerald-100 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-1.5"
+                    >
+                      <span className="font-bold text-slate-900">{res.participantName}</span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {res.questionTitles.map((t, i) => (
+                          <span
+                            key={i}
+                            className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-medium"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </AppModal>
+      )}
+
+      {/* Add / Edit Question Modal (Separated Cabang, Jenjang, Babak) */}
+      {isAddModalOpen && (
+        <AppModal
+          isOpen={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          title={editingQuestion ? 'Edit Soal / Maqra' : 'Tambah Soal / Maqra Baru'}
+          subtitle="Pilih Cabang, Jenjang, dan Babak secara terpisah sesuai Master Data"
+          maxWidthClass="max-w-xl"
+          footer={
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsAddModalOpen(false)}
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700"
               >
                 Batal
               </button>
-
               <button
-                type="button"
-                onClick={handleConfirmPersistDraw}
-                disabled={!lotteryDrawResults || lotteryDrawResults.length === 0}
-                className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-40 text-white text-xs font-bold rounded-lg shadow-2xs"
+                type="submit"
+                form="question-form"
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-2xs"
               >
-                Terapkan & Simpan Hasil Undian
+                {editingQuestion ? 'Simpan Perubahan' : 'Tambah Maqra'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add / Edit Question Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-              <h3 className="font-extrabold text-base text-slate-900">
-                {editingQuestion ? 'Edit Soal / Maqra' : 'Tambah Soal / Maqra Baru'}
-              </h3>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
+          }
+        >
+          <form id="question-form" onSubmit={handleSaveQuestion} className="space-y-4">
             {formError && (
-              <div className="p-3 mb-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
                 <span>{formError}</span>
               </div>
             )}
 
-            <form onSubmit={handleSaveQuestion} className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    Kode Soal
-                  </label>
-                  <input
-                    type="text"
-                    value={formCode}
-                    onChange={(e) => setFormCode(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
-                    placeholder="MQ-TLW-05"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    Hal. Awal (1-604)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={604}
-                    value={formPageStart}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      setFormPageStart(v);
-                      if (formPageEnd < v) setFormPageEnd(v);
-                    }}
-                    required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    Hal. Akhir (1-604)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={604}
-                    value={formPageEnd}
-                    onChange={(e) => setFormPageEnd(Number(e.target.value))}
-                    required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
-                  />
-                </div>
-              </div>
-
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Judul Maqra
+                  Kode Soal *
                 </label>
                 <input
                   type="text"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
+                  value={formCode}
+                  onChange={(e) => setFormCode(e.target.value)}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  placeholder="Maqra 05: QS. Maryam [19]: 16 - 30"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                  placeholder="MQ-TLW-05"
                 />
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    Nama Surah
-                  </label>
-                  <input
-                    type="text"
-                    value={formSurah}
-                    onChange={(e) => setFormSurah(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    Ayat Awal
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={formStartAyah}
-                    onChange={(e) => setFormStartAyah(Number(e.target.value))}
-                    required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    Ayat Akhir
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={formEndAyah}
-                    onChange={(e) => setFormEndAyah(Number(e.target.value))}
-                    required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    Cabang & Jenjang
-                  </label>
-                  <select
-                    value={formBranch}
-                    onChange={(e) => setFormBranch(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
-                  >
-                    {branchAndLevelOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    Babak
-                  </label>
-                  <select
-                    value={formStage}
-                    onChange={(e) => setFormStage(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
-                  >
-                    {stages.map((stg) => (
-                      <option key={stg.id} value={stg.name}>
-                        {stg.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
 
               <div>
                 <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Catatan / Keterangan Maqam
+                  Hal. Awal (1-604) *
                 </label>
-                <textarea
-                  value={formDesc}
-                  onChange={(e) => setFormDesc(e.target.value)}
-                  rows={2}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  placeholder="Instruksi pembacaan atau nada awal..."
+                <input
+                  type="number"
+                  min={1}
+                  max={604}
+                  value={formPageStart}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setFormPageStart(v);
+                    if (formPageEnd < v) setFormPageEnd(v);
+                  }}
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                  Hal. Akhir (1-604) *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={604}
+                  value={formPageEnd}
+                  onChange={(e) => setFormPageEnd(Number(e.target.value))}
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                Judul Maqra *
+              </label>
+              <input
+                type="text"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+                required
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                placeholder="Maqra 05: QS. Maryam [19]: 16 - 30"
+              />
+            </div>
+
+            <div className="grid grid-cols-4 gap-3">
+              <div className="col-span-2">
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                  Nama Surah *
+                </label>
+                <input
+                  type="text"
+                  value={formSurah}
+                  onChange={(e) => setFormSurah(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                  Ayat Awal *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={formStartAyah}
+                  onChange={(e) => setFormStartAyah(Number(e.target.value))}
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                  Ayat Akhir *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={formEndAyah}
+                  onChange={(e) => setFormEndAyah(Number(e.target.value))}
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                  Cabang Lomba (Master Data) *
+                </label>
+                <select
+                  value={formBranchName}
+                  onChange={(e) => setFormBranchName(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  {activeCabangList.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                  {editingQuestion &&
+                    formBranchName &&
+                    !activeCabangList.some((c) => c.name === formBranchName) && (
+                      <option value={formBranchName}>{formBranchName} (Historis)</option>
+                    )}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                  Jenjang Lomba (Master Data) *
+                </label>
+                <select
+                  value={formLevelName}
+                  onChange={(e) => setFormLevelName(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  {activeJenjangList.map((j) => (
+                    <option key={j.id} value={j.name}>
+                      {j.name}
+                    </option>
+                  ))}
+                  {editingQuestion &&
+                    formLevelName &&
+                    !activeJenjangList.some((j) => j.name === formLevelName) && (
+                      <option value={formLevelName}>{formLevelName} (Historis)</option>
+                    )}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                  Babak (Master Data) *
+                </label>
+                <select
+                  value={formStage}
+                  onChange={(e) => setFormStage(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  {activeStages.map((stg) => (
+                    <option key={stg.id} value={stg.name}>
+                      {stg.name}
+                    </option>
+                  ))}
+                  {editingQuestion &&
+                    formStage &&
+                    !activeStages.some((s) => s.name === formStage) && (
+                      <option value={formStage}>{formStage} (Historis)</option>
+                    )}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                Catatan / Keterangan Maqam
+              </label>
+              <textarea
+                value={formDesc}
+                onChange={(e) => setFormDesc(e.target.value)}
+                rows={2}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                placeholder="Instruksi pembacaan atau nada awal..."
+              />
+            </div>
+          </form>
+        </AppModal>
+      )}
+
+      {/* Modal Import Excel Bank Soal */}
+      {isImportModalOpen && (
+        <AppModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          isBusy={isImporting}
+          title="Import Bank Soal / Maqra dari Excel (.xlsx)"
+          subtitle="Validasi otomatis terhadap Cabang, Jenjang, Babak, dan rentang halaman Mushaf Madinah (1-604)"
+          maxWidthClass="max-w-3xl"
+          footer={
+            <div className="flex items-center justify-between">
+              <div>
+                {importValidation && importValidation.errors.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadImportErrorReport(importValidation.errors, 'Error_Import_Bank_Soal_MTQ.xlsx')
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Unduh Laporan Baris Error ({importValidation.errors.length})</span>
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700"
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
                 >
                   Batal
                 </button>
                 <button
-                  type="submit"
-                  className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-2xs"
+                  type="button"
+                  disabled={!importValidation || importValidation.validRows.length === 0 || isImporting}
+                  onClick={handleCommitExcelImport}
+                  data-testid="commit-question-import-btn"
+                  className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 disabled:bg-slate-300 rounded-lg"
                 >
-                  {editingQuestion ? 'Simpan Perubahan' : 'Tambah Maqra'}
+                  {isImporting
+                    ? 'Mengimpor...'
+                    : `Impor ${importValidation?.validRows.length || 0} Soal Valid`}
                 </button>
               </div>
-            </form>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="p-4 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-900">
+                    {importFileName || 'Pilih file Excel (.xlsx / .xls) sesuai Template Bank Soal'}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Pastikan nama Cabang, Jenjang, dan Babak sesuai dengan sheet Referensi Master Data.
+                  </p>
+                </div>
+              </div>
+              <label className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg cursor-pointer shrink-0">
+                Pilih File Excel
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleExcelFileChange}
+                  data-testid="question-excel-file-input"
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {importValidation && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <span className="text-slate-500 block">Total Baris Dibaca</span>
+                    <span className="text-base font-extrabold text-slate-900 font-mono">
+                      {importValidation.totalRows}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                    <span className="text-emerald-700 block">Soal Valid (Siap Impor)</span>
+                    <span className="text-base font-extrabold text-emerald-900 font-mono">
+                      {importValidation.validRows.length}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
+                    <span className="text-rose-700 block">Baris Ditolak / Error</span>
+                    <span className="text-base font-extrabold text-rose-900 font-mono">
+                      {importValidation.errors.length}
+                    </span>
+                  </div>
+                </div>
+
+                {importValidation.errors.length > 0 && (
+                  <div className="border border-rose-200 rounded-xl overflow-hidden">
+                    <div className="bg-rose-50 px-3 py-2 text-xs font-bold text-rose-900 border-b border-rose-200">
+                      Detail Baris Ditolak ({importValidation.errors.length})
+                    </div>
+                    <div className="max-h-40 overflow-y-auto divide-y divide-rose-100 text-xs">
+                      {importValidation.errors.map((err, i) => (
+                        <div key={i} className="px-3 py-2 flex items-start gap-2 text-rose-800">
+                          <span className="font-mono font-bold shrink-0">Baris #{err.rowNumber}:</span>
+                          <span>
+                            <strong>{err.identifier}</strong> — {err.reasons.join(' ')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {importValidation.validRows.length > 0 && (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 border-b border-slate-200">
+                      Pratinjau Soal Valid ({importValidation.validRows.length})
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                      <table className="w-full text-left text-[11px]">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                          <tr>
+                            <th className="py-1.5 px-3">Kode</th>
+                            <th className="py-1.5 px-3">Judul Maqra</th>
+                            <th className="py-1.5 px-3">Halaman</th>
+                            <th className="py-1.5 px-3">Cabang & Jenjang</th>
+                            <th className="py-1.5 px-3">Babak</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {importValidation.validRows.slice(0, 20).map((r, i) => (
+                            <tr key={i}>
+                              <td className="py-1.5 px-3 font-mono font-bold text-emerald-700">
+                                {r.code}
+                              </td>
+                              <td className="py-1.5 px-3 font-semibold text-slate-900">{r.title}</td>
+                              <td className="py-1.5 px-3 font-mono">
+                                {r.pageStart}-{r.pageEnd}
+                              </td>
+                              <td className="py-1.5 px-3">
+                                {r.branchName} ({r.levelName})
+                              </td>
+                              <td className="py-1.5 px-3 font-mono">{r.stageName}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </div>
+        </AppModal>
       )}
     </div>
   );
 };
-

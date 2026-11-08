@@ -1,0 +1,1805 @@
+# MASTER PROMPT
+# REKONSTRUKSI, PERBAIKAN MENYELURUH, DAN PENYEMPURNAAN MTQ MANAGEMENT SYSTEM
+
+## 1. IDENTITAS DAN MANDAT PEKERJAAN
+
+Anda bertindak sebagai tim engineering senior yang terdiri dari:
+
+1. Principal Software Architect.
+2. Senior Full-Stack Engineer.
+3. Senior React & TypeScript Engineer.
+4. Senior Supabase & PostgreSQL Engineer.
+5. Database Security Engineer.
+6. DevOps Engineer.
+7. Senior QA Automation Engineer.
+8. UI/UX Engineer.
+
+Anda mendapatkan mandat untuk melakukan PERBAIKAN MENYELURUH terhadap aplikasi MTQ Management System.
+
+Repository:
+https://github.com/jabdtech2025-blip/mtq-management-system.git
+
+Branch acuan audit:
+`main`
+
+Commit yang menjadi dasar audit sebelumnya:
+`134ea6211011720d2e1cb85e55c6e8ceec87b0c0`
+
+Stack teknologi:
+- React
+- TypeScript
+- Vite
+- Supabase Auth
+- PostgreSQL
+- Supabase Realtime
+- Supabase Edge Functions
+- Playwright
+- GitHub Actions
+- Netlify
+
+### MANDAT UTAMA
+
+Tugas Anda BUKAN hanya melakukan audit ulang, menulis rekomendasi, atau memberikan daftar potensi perbaikan.
+
+Anda WAJIB MELAKSANAKAN PERBAIKAN LANGSUNG PADA SOURCE CODE.
+
+Ruang lingkup pekerjaan mencakup:
+
+- Memperbaiki bug yang sudah ditemukan.
+- Menghilangkan inkonsistensi arsitektur.
+- Melengkapi fitur yang belum tersedia.
+- Memperbaiki hubungan frontend, backend, dan database.
+- Memperbaiki alur penggunaan aplikasi dari awal hingga akhir.
+- Meningkatkan keamanan dan integritas data.
+- Memperbaiki seluruh pengujian otomatis yang bermasalah.
+- Memastikan seluruh fitur bekerja melalui pengujian nyata.
+
+Jangan berhenti pada satu atau dua bug yang berhasil diperbaiki.
+
+Tujuan akhir adalah menghasilkan sistem manajemen MTQ yang dapat digunakan dalam penyelenggaraan kompetisi sesungguhnya, dengan alur administrasi, pengundian, penilaian, pengesahan, dan pengelolaan hasil yang konsisten.
+
+---
+
+# 2. ATURAN WAJIB SEBELUM MEMULAI IMPLEMENTASI
+
+## 2.1 Periksa kondisi repository terkini
+
+Sebelum melakukan perubahan:
+
+1. Periksa branch dan commit terbaru.
+2. Pastikan apakah repository telah berubah setelah commit acuan audit.
+3. Periksa struktur direktori terbaru.
+4. Periksa package.json dan package-lock.json.
+5. Periksa seluruh migrasi SQL.
+6. Periksa schema.sql.
+7. Periksa status dan konfigurasi GitHub Actions.
+8. Periksa implementasi aktual setiap fitur yang masuk ruang lingkup pekerjaan.
+
+Dokumen audit sebelumnya merupakan referensi diagnosis, bukan pengganti pemeriksaan source code terkini.
+
+Apabila suatu masalah ternyata sudah diperbaiki pada commit terbaru, jangan mengulang perubahan yang tidak diperlukan. Verifikasi perbaikannya dan lanjutkan ke masalah lainnya.
+
+Jangan menganggap bahwa seluruh temuan audit masih identik dengan keadaan repository saat ini.
+
+## 2.2 Buat branch khusus
+
+Jangan melakukan seluruh perubahan langsung pada branch utama.
+
+Gunakan branch khusus:
+
+`remediation/complete-system-improvement`
+
+Pertahankan seluruh histori perubahan melalui Git.
+
+Buat commit secara terstruktur berdasarkan kelompok pekerjaan, bukan satu commit besar yang sulit ditelusuri.
+
+## 2.3 Lindungi data dan sistem produksi
+
+Ini adalah ketentuan mutlak.
+
+- Jangan menghapus database produksi.
+- Jangan melakukan reset database.
+- Jangan menghapus tabel produksi.
+- Jangan menjalankan migrasi destruktif.
+- Jangan mengubah data kompetisi resmi tanpa mekanisme yang aman.
+- Jangan mengubah nilai penilaian historis secara otomatis.
+- Jangan mengganti kredensial produksi melalui tindakan yang tidak diotorisasi.
+- Jangan melakukan deployment produksi tanpa persetujuan eksplisit.
+
+Gunakan lingkungan staging untuk pengujian yang berpotensi mengubah data.
+
+Jika akses ke staging tidak tersedia, tetap selesaikan implementasi, pengujian lokal, dan dokumentasi prosedur pengujian remote. Nyatakan dengan jujur bagian yang belum bisa diverifikasi.
+
+## 2.4 Prinsip implementasi
+
+Seluruh perubahan harus mengikuti prinsip:
+
+- Correctness over speed.
+- Security by design.
+- Data integrity first.
+- Backward compatibility.
+- Single source of truth.
+- Reusable architecture.
+- Incremental implementation.
+- Test-driven verification.
+- No silent failures.
+- No fabricated test results.
+
+Jangan melakukan refactoring besar hanya untuk membuat kode terlihat lebih rapi jika tidak ada manfaat teknis yang jelas.
+
+---
+
+# 3. TAHAP PERTAMA — AUDIT ULANG DAN PEMETAAN SISTEM
+
+Lakukan pemeriksaan menyeluruh terhadap seluruh aplikasi.
+
+Periksa setidaknya:
+
+### A. Authentication
+- Login.
+- Registrasi.
+- Logout.
+- Session restoration.
+- Password recovery.
+- Password update.
+- Profile hydration.
+- Membership resolution.
+- Role resolution.
+- Route protection.
+
+### B. User management
+- Super Admin.
+- Admin.
+- Hakim.
+- Tenant membership.
+- User provisioning.
+- Account invitation.
+- Account activation.
+- Account deactivation.
+
+### C. Master data
+- Cabang.
+- Golongan.
+- Jenjang/marhalah.
+- Babak.
+- Rubrik.
+- Kategori kesalahan.
+- Penugasan hakim.
+
+### D. Manajemen peserta
+- Kafilah/grup.
+- Peserta.
+- Identitas peserta.
+- Relasi peserta.
+- Status peserta.
+- Penetapan peserta pada babak.
+
+### E. Bank soal
+- Kode maqra.
+- Nama maqra.
+- Identitas surah.
+- Ayat.
+- Halaman mushaf.
+- Cabang.
+- Jenjang.
+- Babak.
+- Status soal.
+
+### F. Pengundian
+- Pemilihan peserta.
+- Pemilihan pool soal.
+- Pengacakan.
+- Preview.
+- Penyimpanan hasil.
+- Riwayat undian.
+
+### G. Penilaian
+- Assignment hakim.
+- Input kesalahan.
+- Pengurangan nilai.
+- Anotasi mushaf.
+- Skor akhir.
+- Draft assessment.
+- Finalisasi.
+- Penguncian nilai.
+
+### H. Hasil kompetisi
+- Rekap nilai.
+- Ranking.
+- Tie-break.
+- Kelulusan.
+- Pengesahan babak.
+- Snapshot hasil.
+
+### I. Infrastruktur
+- Supabase.
+- PostgreSQL.
+- RLS.
+- RPC.
+- Edge Functions.
+- Realtime.
+- Local persistence.
+- Offline handling.
+- CI/CD.
+
+Buat peta hubungan antarentitas dan dependensi fitur.
+
+Identifikasi fungsi yang digunakan oleh beberapa modul sekaligus agar perubahan pada satu bagian tidak merusak bagian lain.
+
+---
+
+# 4. PRIORITAS P0 — PERBAIKAN KEAMANAN DAN BUG KRITIS
+
+Bagian ini harus dikerjakan paling awal.
+
+## 4.1 Penanganan kredensial pengujian yang terekspos
+
+Temuan audit menemukan kredensial pengujian ditulis secara literal pada:
+
+`tests/e2e/06-live-credentials-audit.spec.ts`
+
+Lakukan:
+
+1. Periksa seluruh repository dan riwayat Git yang relevan untuk mencari kredensial hardcoded.
+2. Jangan menampilkan kembali password atau token dalam output laporan.
+3. Pindahkan konfigurasi autentikasi E2E ke environment variables atau GitHub Actions Secrets.
+4. Pastikan kredensial tidak muncul pada source code, log, screenshot, trace, atau laporan CI.
+5. Ubah test agar tidak dapat dijalankan menggunakan kredensial kosong atau contoh yang tidak valid.
+6. Berikan instruksi rotasi kredensial kepada pemilik akun jika kredensial tersebut pernah digunakan.
+7. Identifikasi apakah diperlukan pembersihan riwayat Git.
+
+Jangan melakukan rewrite riwayat branch bersama atau tindakan yang berpotensi menghilangkan histori repository tanpa izin eksplisit.
+
+Setelah itu, cari kemungkinan kebocoran rahasia lainnya.
+
+Prioritas: P0.
+
+## 4.2 Perbaikan BUG PENILAIAN 0 KESALAHAN
+
+Temuan audit membuktikan bahwa proses konfirmasi penampilan sempurna belum dapat diselesaikan dengan benar.
+
+File utama:
+
+- `src/components/penilaian/PenilaianDualPanelView.tsx`
+- `src/context/MtqContext.tsx`
+
+Temuan sebelumnya:
+
+State `isFlawlessConfirmed` sudah dibuat, tetapi checkbox yang mengaktifkannya tidak tersedia dan tidak ditemukan pemanggilan `setIsFlawlessConfirmed(true)`.
+
+Akibatnya, hakim tidak bisa menyelesaikan finalisasi ketika tidak ditemukan kesalahan.
+
+Selain itu, inisialisasi assessment dan finalisasi dapat mengalami race condition karena proses penyimpanan asynchronous tidak ditunggu secara benar.
+
+### Perilaku yang WAJIB diwujudkan
+
+Alur penampilan sempurna harus menjadi:
+
+1. Hakim membuka lembar penilaian peserta.
+2. Hakim melakukan penilaian seperti biasa.
+3. Jika tidak terdapat kesalahan maupun pengurangan, sistem menyediakan opsi konfirmasi penampilan sempurna.
+4. Hakim membaca dan mencentang pernyataan:
+
+   "Saya mengonfirmasi bahwa peserta tampil sempurna tanpa kesalahan."
+
+5. Sistem memvalidasi seluruh kriteria penilaian.
+6. Sistem membuat draft assessment berdasarkan rubrik aktif, dengan pengurangan nol.
+7. Sistem menyimpan draft ke Supabase.
+8. Sistem menunggu konfirmasi keberhasilan penyimpanan.
+9. Sistem memperoleh ID assessment yang benar-benar tersimpan.
+10. Sistem menjalankan proses finalisasi menggunakan identitas assessment tersebut.
+11. Server memvalidasi finalisasi.
+12. Setelah server menyatakan berhasil, UI menampilkan status final.
+13. Lembar penilaian dikunci.
+
+### Ketentuan penting
+
+- Skor penuh tidak otomatis berarti hakim telah mengonfirmasi penampilan sempurna.
+- Konfirmasi harus dilakukan secara eksplisit oleh hakim.
+- Jangan mengasumsikan skor maksimal selalu 100; gunakan konfigurasi rubrik aktual.
+- Penilaian tanpa kesalahan tetap harus mempunyai record resmi.
+- Data anotasi tetap harus dipertahankan.
+- Riwayat penilaian harus tetap tersedia.
+- Finalisasi harus menggunakan mekanisme keamanan server yang sama dengan penilaian lainnya.
+
+### Perbaikan arsitektur
+
+Audit menunjukkan bahwa `initializeAssessment()` memperbarui state kemudian memulai penyimpanan remote secara asynchronous.
+
+Jangan lagi membuat alur finalisasi bergantung pada state React yang belum tentu sudah diperbarui.
+
+Perbaiki arsitektur agar:
+
+- Inisialisasi assessment bersifat asynchronous.
+- Hasil inisialisasi mengembalikan identitas assessment dan status persistensi.
+- Proses berikutnya menunggu hasil operasi sebelumnya.
+- Finalisasi tidak bergantung pada closure state yang sudah usang.
+- Penanganan error dan retry jelas.
+- Tidak tercipta duplikasi assessment akibat retry.
+
+Pertimbangkan membuat RPC atau transaksi database yang menggabungkan operasi yang secara bisnis harus bersifat atomik.
+
+RPC wajib melakukan validasi identitas hakim, assignment, status assessment, dan izin finalisasi.
+
+### Skenario pengujian wajib
+
+A. Peserta mempunyai kesalahan dan pengurangan nilai.
+
+B. Peserta tidak mempunyai kesalahan sama sekali.
+
+C. Hakim memberikan konfirmasi penampilan sempurna kemudian membatalkannya.
+
+D. Koneksi terputus ketika draft sedang disimpan.
+
+E. Pengguna melakukan klik finalisasi berulang kali.
+
+F. Server menolak finalisasi.
+
+G. Halaman di-refresh setelah finalisasi.
+
+H. Hakim mencoba memodifikasi lembar yang sudah terkunci.
+
+I. Pengguna mencoba memanggil finalisasi secara langsung melalui Data API tanpa otorisasi.
+
+Semua skenario harus diuji.
+
+Prioritas: P0.
+
+---
+
+# 5. PERBAIKAN AUTENTIKASI DAN RACE CONDITION LOGIN/LOGOUT
+
+File utama:
+
+- `src/App.tsx`
+- `src/context/MtqContext.tsx`
+- `src/services/supabaseDataService.ts`
+
+Audit menemukan beberapa jalur pemuatan profil dan workspace yang berjalan tumpang tindih:
+
+1. `signInWithPassword()`.
+2. `signInWithSupabase()`.
+3. `onAuthStateChange()`.
+4. `refreshSupabaseConnection()`.
+
+Logout juga berpotensi memicu pemrosesan perubahan sesi dari beberapa jalur.
+
+Ini merupakan kandidat race condition yang harus direproduksi sebelum akar masalah dinyatakan pasti.
+
+### Tugas implementasi
+
+Rancang ulang lifecycle autentikasi agar mempunyai satu mekanisme pengendalian sesi yang konsisten.
+
+Pastikan:
+
+- Tidak ada pemuatan profil ganda yang tidak diperlukan.
+- Event autentikasi tidak menghasilkan proses hidrasi yang saling menimpa.
+- Respons permintaan lama tidak dapat mengubah identitas sesi terbaru.
+- Pergantian tenant tidak menyebabkan perubahan identitas pengguna.
+- Logout menyelesaikan pengosongan state sebelum aplikasi menampilkan workspace baru.
+- Error `signOut()` diperiksa.
+- Login gagal menampilkan pesan yang benar.
+- Exception ditangani dengan benar.
+- Listener tidak didaftarkan berkali-kali.
+- Semua subscription dibersihkan ketika tidak diperlukan.
+- Route terlindungi selama pemeriksaan autentikasi berlangsung.
+
+Pertimbangkan penggunaan request generation ID, session identity check, atau pendekatan concurrency control yang tepat.
+
+Jangan menggunakan timeout arbitrer sebagai solusi race condition.
+
+### Pengujian wajib
+
+1. Login akun A.
+2. Refresh halaman.
+3. Logout.
+4. Login akun B.
+5. Pastikan data akun A tidak muncul.
+6. Logout dan login kembali akun A.
+7. Lakukan login/logout secara berulang.
+8. Uji kegagalan jaringan ketika login.
+9. Uji kegagalan pemuatan profil.
+10. Uji akun tanpa membership.
+11. Uji membership nonaktif.
+12. Uji perpindahan tenant yang sah.
+
+Pastikan hasil akhirnya konsisten antara Supabase Auth, profile, membership, tenant, dan workspace.
+
+Prioritas: P0/P1 sesuai hasil reproduksi.
+
+---
+
+# 6. PERBAIKAN MASTER DATA — SINGLE SOURCE OF TRUTH
+
+Temuan audit memperlihatkan bahwa master data sudah tersedia, tetapi belum digunakan secara konsisten oleh seluruh form.
+
+Masalah yang ditemukan:
+
+- `levelName` peserta diisi tetap sebagai Ulya.
+- Pilihan cabang masih hardcoded.
+- Form Bank Soal menggabungkan cabang dan jenjang menjadi string.
+- Filter undian masih memakai pilihan tetap.
+- Pilihan lama yang nonaktif masih dapat muncul.
+- Hidrasi soal tidak mempertahankan informasi jenjang secara benar.
+
+### Target
+
+Jadikan master data sebagai satu-satunya sumber pilihan operasional.
+
+Seluruh dropdown relevan harus mengambil data dari database master tenant yang sedang aktif.
+
+Data nonaktif tidak boleh digunakan untuk pendaftaran atau pembuatan baru.
+
+Data historis yang sudah terpakai tetap harus dapat ditampilkan dengan benar tanpa mengaktifkan kembali pilihan yang sudah nonaktif.
+
+### Pisahkan identitas entitas
+
+Jangan menggabungkan:
+
+- Cabang.
+- Golongan.
+- Jenjang/marhalah.
+- Babak.
+
+sebagai satu string.
+
+Simpan relasi masing-masing menggunakan identifier yang sesuai dengan schema.
+
+Contoh konseptual:
+
+- `branch_id`
+- `level_id`
+- `stage_id`
+
+Untuk golongan, gunakan struktur master terpisah jika memang demikian model kompetisi yang berlaku.
+
+Jangan mengasumsikan golongan selalu sama dengan jenjang.
+
+### Implementasi
+
+1. Perbaiki semua form tambah dan edit peserta.
+2. Perbaiki semua form tambah dan edit soal.
+3. Perbaiki filter bank soal.
+4. Perbaiki filter peserta.
+5. Perbaiki konfigurasi undian.
+6. Perbaiki penampilan detail data.
+7. Perbaiki proses import Excel.
+8. Perbaiki hidrasi data setelah refresh.
+9. Pastikan perubahan master data tercermin konsisten pada seluruh modul.
+
+Tidak boleh ada nilai jenjang atau cabang yang dipaksakan secara hardcoded.
+
+### Pengujian
+
+Buat master jenjang baru.
+
+Pastikan jenjang tersebut muncul di seluruh dropdown yang relevan tanpa perlu mengubah source code.
+
+Nonaktifkan jenjang.
+
+Pastikan jenjang tidak dapat dipilih untuk data baru tetapi data lama tetap tampil.
+
+Prioritas: P1.
+
+---
+
+# 7. PENYEMPURNAAN MANAJEMEN PESERTA
+
+File utama:
+
+`src/components/kafilah/KafilahPesertaView.tsx`
+
+Saat ini tampilan per grup sudah ada, tetapi tampilan seluruh peserta secara mandiri belum tersedia.
+
+## 7.1 Dua mode tampilan
+
+Buat segmented control atau mekanisme perpindahan yang jelas:
+
+**MODE 1 — PER GRUP**
+
+Pertahankan kemampuan yang telah tersedia:
+
+- Daftar grup/kafilah.
+- Detail grup.
+- Daftar anggota grup.
+- Tambah peserta.
+- Edit peserta.
+- Hapus peserta.
+
+**MODE 2 — PER PESERTA**
+
+Buat halaman/tampilan daftar peserta secara mandiri.
+
+Seluruh peserta ditampilkan dalam satu tabel, tanpa mengharuskan admin membuka satu grup terlebih dahulu.
+
+Fitur yang harus tersedia:
+
+- Pencarian nama peserta.
+- Filter grup/kafilah.
+- Filter cabang.
+- Filter golongan jika tersedia.
+- Filter jenjang.
+- Filter babak jika relevan.
+- Sorting.
+- Pagination.
+- Detail peserta.
+- Tambah peserta.
+- Edit peserta.
+- Hapus peserta sesuai izin.
+
+Perpindahan kedua mode tidak boleh mengubah atau menggandakan data.
+
+Kedua tampilan harus menggunakan sumber data yang sama.
+
+## 7.2 Lengkapi struktur data peserta
+
+Struktur yang diharapkan:
+
+1. Nomor urut administratif.
+2. ID peserta.
+3. Nama lengkap.
+4. Nama ayah.
+5. Jenis kelamin.
+6. Asal kota/kabupaten.
+7. Asal wilayah/provinsi.
+8. Lembaga asal.
+9. Grup/kafilah.
+10. Jenjang/marhalah.
+11. Cabang.
+12. Babak.
+13. Status peserta.
+14. Nomor undian.
+15. Data maqra sesuai alur kompetisi.
+
+Gunakan nama field dan tipe data yang konsisten dengan standar project.
+
+### Perhatian penting
+
+Nomor urut administratif tidak boleh disamakan dengan nomor undian.
+
+Lembaga asal tidak boleh digabung dengan grup/kafilah.
+
+Contoh:
+
+- Lembaga asal: Pondok Pesantren Al-Fulan.
+- Grup/kafilah: Kabupaten Banyumas.
+- Asal kota: Purwokerto.
+- Asal wilayah: Jawa Tengah.
+
+Satu kafilah dapat membawa peserta dari beberapa lembaga asal.
+
+Pastikan struktur database mendukung kondisi tersebut.
+
+## 7.3 Perbaikan database peserta
+
+Periksa tabel `participants`.
+
+Buat migrasi incremental untuk menambahkan atribut yang belum tersedia.
+
+Periksa:
+
+- TypeScript interface.
+- Form create.
+- Form edit.
+- Validation schema.
+- Service layer.
+- Query database.
+- RPC jika diperlukan.
+- Import/export.
+- Detail view.
+- Filtering.
+- Realtime.
+
+Jangan sekadar menambahkan input pada frontend.
+
+Data harus benar-benar tersimpan dan dapat dibaca kembali setelah reload.
+
+Untuk nomor urut, tentukan aturan uniqueness yang sesuai dengan ruang lingkup event atau grup dan jangan menggunakan nomor undian sebagai pengganti.
+
+### Data lama
+
+Jangan menghilangkan data peserta lama.
+
+Buat mekanisme migrasi dan penanganan nilai kosong yang aman.
+
+Jangan mengarang data ayah, kota, wilayah, atau lembaga untuk peserta lama.
+
+Prioritas: P1.
+
+---
+
+# 8. IMPLEMENTASI IMPORT EXCEL PESERTA DAN BANK SOAL
+
+Dua fitur import Excel merupakan kebutuhan wajib.
+
+Gunakan library yang sesuai dan kompatibel dengan project.
+
+Pastikan dependency tercatat secara benar pada package.json dan package-lock.json.
+
+## 8.1 IMPORT PESERTA
+
+Sediakan tombol:
+
+- Download Template Excel.
+- Import Excel.
+
+Alur import:
+
+1. Admin mengunduh template.
+2. Admin mengisi data peserta.
+3. Admin mengunggah file Excel.
+4. Sistem memvalidasi format file.
+5. Sistem membaca workbook.
+6. Sistem mendeteksi header.
+7. Sistem memetakan kolom.
+8. Sistem menampilkan preview.
+9. Sistem memvalidasi setiap baris.
+10. Sistem menampilkan ringkasan.
+11. Admin mengonfirmasi import.
+12. Sistem memproses data.
+13. Sistem menampilkan hasil akhir.
+
+### Validasi peserta
+
+Minimal periksa:
+
+- Nama kosong.
+- ID peserta duplikat.
+- Nomor urut administratif tidak valid.
+- Nomor undian konflik sesuai aturan yang berlaku.
+- Jenis kelamin tidak valid.
+- Grup/kafilah tidak ditemukan.
+- Lembaga asal kosong jika diwajibkan.
+- Jenjang tidak ditemukan.
+- Cabang tidak ditemukan.
+- Relasi jenjang dan cabang tidak sesuai.
+- Field numerik tidak valid.
+- Nilai status tidak dikenal.
+
+Validasi harus disesuaikan dengan ketentuan wajib dan opsional setiap field yang benar-benar berlaku pada sistem.
+
+### Hasil import
+
+Tampilkan:
+
+- Total baris.
+- Jumlah valid.
+- Jumlah tidak valid.
+- Jumlah berhasil.
+- Jumlah gagal.
+- Detail kesalahan setiap baris.
+
+Sediakan download laporan kesalahan.
+
+Jangan menghilangkan baris yang gagal secara diam-diam.
+
+Hindari duplikasi ketika file yang sama diimpor ulang.
+
+Terapkan strategi transaksi atau batch processing yang dapat dipulihkan dan memberikan hasil yang transparan.
+
+## 8.2 IMPORT BANK SOAL
+
+Sediakan mekanisme yang serupa.
+
+Kolom template minimal:
+
+1. Kode maqra.
+2. Nama maqra.
+3. Nama surah.
+4. Nomor surah.
+5. Ayat awal.
+6. Ayat akhir.
+7. Halaman awal.
+8. Halaman akhir.
+9. Cabang.
+10. Jenjang/marhalah.
+11. Babak.
+12. Keterangan.
+13. Status jika diperlukan.
+
+### Validasi maqra
+
+- Kode maqra wajib.
+- Kode maqra tidak boleh duplikat dalam ruang lingkup yang ditentukan.
+- Nama maqra tidak kosong.
+- Nomor surah valid.
+- Ayat awal dan akhir valid.
+- Ayat awal tidak melebihi ayat akhir.
+- Halaman awal dan akhir valid.
+- Halaman awal tidak melebihi halaman akhir.
+- Cabang harus ditemukan.
+- Jenjang harus ditemukan.
+- Babak harus ditemukan.
+- Relasi antarentitas harus sesuai.
+- Status harus valid.
+
+Jika ada nilai master yang tidak ditemukan, jangan membuat master data secara otomatis tanpa izin administrator.
+
+### Pengamanan import
+
+Import harus mematuhi:
+
+- Tenant context.
+- Authorization.
+- RLS.
+- Database constraints.
+- Validasi server-side.
+
+Jangan menganggap validasi frontend sudah cukup.
+
+Prioritas: P1.
+
+---
+
+# 9. PENYEMPURNAAN STRUKTUR BANK SOAL
+
+File utama:
+
+`src/components/bankSoal/BankSoalView.tsx`
+
+Tabel `questions` yang diperiksa sebelumnya belum mempunyai `level_id`.
+
+Sementara frontend menggunakan string gabungan cabang dan jenjang.
+
+Hal tersebut berpotensi menghilangkan informasi jenjang saat data dimuat kembali.
+
+### Target struktur
+
+Setiap soal/maqra harus dapat diidentifikasi melalui:
+
+- Kode.
+- Nama.
+- Surah.
+- Nomor surah.
+- Ayat awal.
+- Ayat akhir.
+- Halaman awal.
+- Halaman akhir.
+- Cabang.
+- Jenjang/marhalah.
+- Babak.
+- Status.
+- Tenant/event yang memiliki data tersebut.
+
+Tambahkan `level_id` melalui migrasi incremental setelah memeriksa schema terkini.
+
+Perbaiki:
+
+- TypeScript model.
+- Form tambah.
+- Form edit.
+- Detail soal.
+- Filter.
+- Pencarian.
+- Import Excel.
+- Data service.
+- Supabase query.
+- Relasi database.
+
+Gunakan relasi ID, bukan menyimpan gabungan nama cabang dan jenjang sebagai sumber kebenaran.
+
+### Kompatibilitas data lama
+
+Data lama yang sudah ada harus tetap terbaca.
+
+Jika data lama hanya memiliki `branch_id` tanpa `level_id`, lakukan identifikasi dan penanganan yang aman.
+
+Jangan menebak jenjang berdasarkan nama soal.
+
+Sediakan mekanisme pelengkapan data untuk record yang belum mempunyai jenjang apabila diperlukan.
+
+Jangan menghapus record lama yang belum dapat dipetakan.
+
+Prioritas: P1.
+
+---
+
+# 10. PENYEMPURNAAN SISTEM UNDIAN MAQRA
+
+Periksa implementasi undian yang sudah ada dan pertahankan kemampuan yang masih benar.
+
+Saat ini sistem telah mendukung:
+
+- Pemilihan babak.
+- Pemilihan cabang.
+- Pemilihan peserta.
+- Jumlah soal per peserta.
+- Pengacakan.
+- Preview.
+- Penyimpanan hasil.
+
+Namun, checklist pool soal belum tersedia.
+
+## 10.1 Alur undian baru
+
+Buat alur sebagai berikut:
+
+1. Admin memilih babak.
+2. Admin memilih cabang.
+3. Admin memilih jenjang/marhalah.
+4. Sistem memuat peserta yang memenuhi syarat.
+5. Admin mencentang peserta yang mengikuti undian.
+6. Sistem memuat maqra yang sesuai dengan filter tersebut.
+7. Sistem menampilkan seluruh kandidat maqra.
+8. Admin mencentang maqra yang dimasukkan ke pool undian.
+9. Sistem menghitung jumlah maqra yang tersedia.
+10. Sistem memvalidasi jumlah soal yang diminta.
+11. Admin menjalankan pengundian.
+12. Sistem menampilkan preview.
+13. Admin memeriksa hasil.
+14. Admin mengonfirmasi.
+15. Sistem menyimpan hasil secara permanen.
+
+### Ketentuan penting
+
+Pool soal yang dipilih secara manual harus menjadi batas mutlak sumber pengundian.
+
+Jangan sampai soal yang tidak dicentang ikut terpilih.
+
+Perubahan filter harus memperbarui daftar kandidat secara konsisten.
+
+Jangan mencampurkan maqra dari jenjang, cabang, atau babak lain.
+
+Jangan melakukan penyimpanan sebelum admin mengonfirmasi preview.
+
+## 10.2 Perbaikan algoritma random
+
+Ganti pola:
+
+`sort(() => Math.random() - 0.5)`
+
+dengan algoritma Fisher-Yates Shuffle yang benar.
+
+Pastikan algoritma menghasilkan pengacakan yang tidak memiliki bias dari metode pengurutan tersebut.
+
+Jika diperlukan untuk transparansi, gunakan sumber randomness yang sesuai pada lingkungan eksekusinya.
+
+## 10.3 Audit log pengundian
+
+Setiap pengundian harus memiliki rekaman:
+
+- Identitas admin.
+- Tenant/event.
+- Waktu pengundian.
+- Babak.
+- Cabang.
+- Jenjang.
+- Peserta yang diikutkan.
+- Pool soal yang digunakan.
+- Konfigurasi jumlah maqra.
+- Hasil undian.
+- Riwayat pengundian ulang jika ada.
+
+Hasil yang sudah disimpan harus dapat ditelusuri.
+
+Jangan mengizinkan pengundian ulang mengubah data sebelumnya secara diam-diam.
+
+Gunakan mekanisme versi atau riwayat undian yang menjaga keutuhan hasil lama.
+
+### Pengujian
+
+- Tidak ada peserta yang tidak dipilih ikut diundi.
+- Tidak ada maqra di luar pool yang terpilih.
+- Jumlah maqra sesuai konfigurasi.
+- Filter konsisten.
+- Preview sesuai hasil yang disimpan.
+- Pengundian ulang tidak merusak histori.
+- Refresh halaman tetap menampilkan hasil yang benar.
+
+Prioritas: P1.
+
+---
+
+# 11. PENINGKATAN KETAHANAN DATA LIVE — PENDING SYNC / LOCAL OUTBOX
+
+Temuan audit menunjukkan bahwa penyimpanan lokal rutin dinonaktifkan pada mode live.
+
+Jangan hanya mengaktifkan kembali seluruh penyimpanan state live ke localStorage.
+
+Bangun mekanisme penyimpanan perubahan yang belum berhasil dikirim ke server.
+
+### Tujuan
+
+Pengguna tidak kehilangan perubahan ketika koneksi internet terputus sebelum perubahan tersimpan di Supabase.
+
+### Arsitektur yang diharapkan
+
+Implementasikan pendekatan Outbox / Pending Sync.
+
+Alur:
+
+1. Pengguna membuat perubahan.
+2. Perubahan dicatat ke antrean lokal secara persisten.
+3. Sistem memberi status pending.
+4. Sistem mencoba mengirim perubahan ke Supabase.
+5. Server mengonfirmasi penyimpanan.
+6. Sistem mengubah status menjadi synced.
+7. Data yang telah dikonfirmasi dapat dibersihkan dari antrean sesuai kebijakan retensi.
+
+Jika koneksi gagal:
+
+1. Perubahan tetap tersimpan pada perangkat.
+2. Status ditampilkan sebagai pending/unsynced.
+3. Sistem mencoba mengirim kembali ketika koneksi pulih.
+4. Sistem memeriksa apakah operasi sudah pernah berhasil agar tidak terjadi duplikasi.
+5. Jika konflik terjadi, tampilkan informasi yang jelas.
+6. Jangan menimpa data server secara membabi buta.
+
+### Teknologi penyimpanan
+
+Pertimbangkan IndexedDB sebagai penyimpanan antrean lokal untuk operasi terstruktur dan berjumlah banyak.
+
+localStorage dapat digunakan untuk preferensi ringan, tetapi jangan dijadikan database utama aplikasi.
+
+### Jenis data yang harus dipertimbangkan
+
+- Perubahan peserta.
+- Pendaftaran peserta.
+- Data kafilah.
+- Perubahan bank soal.
+- Penetapan maqra.
+- Draft penilaian.
+- Anotasi mushaf.
+
+Implementasikan sesuai kebutuhan aktual dan model penyimpanan aplikasi.
+
+### Persyaratan teknis
+
+- Setiap operasi mempunyai identitas unik.
+- Operasi harus idempotent.
+- Terdapat mekanisme retry.
+- Terdapat status pending, syncing, synced, dan failed.
+- Terdapat mekanisme deteksi konflik.
+- Queue harus dapat dipulihkan setelah browser ditutup atau di-refresh.
+- Jangan menyimpan password, access token, atau refresh token pada backup aplikasi sendiri.
+- Supabase Auth tetap menjadi pengelola sesi autentikasi.
+
+### Batasan yang sangat penting
+
+Finalisasi penilaian dan pengesahan babak TIDAK BOLEH dianggap berhasil hanya karena data tersimpan pada antrean lokal.
+
+Operasi resmi yang mengunci nilai atau mengesahkan hasil harus menunggu konfirmasi sukses dari server.
+
+Jika offline, tindakan resmi harus ditahan sampai server dapat mengonfirmasi.
+
+Jangan menyamakan pending dengan saved.
+
+Prioritas: P1.
+
+---
+
+# 12. INDIKATOR STATUS KONEKSI DAN SINKRONISASI
+
+File utama:
+
+`src/components/layout/TopHeader.tsx`
+
+Audit menemukan bahwa informasi syncStatus dan connectionInfo sudah tersedia pada context, tetapi belum ditampilkan pada header.
+
+Tambahkan indikator status yang akurat.
+
+### Status 1 — Connected
+
+Menunjukkan koneksi aktif dan tidak ada perubahan yang belum tersinkron.
+
+### Status 2 — Syncing
+
+Menunjukkan terdapat operasi penyimpanan atau sinkronisasi yang sedang berlangsung.
+
+### Status 3 — Offline
+
+Menunjukkan sistem tidak dapat berkomunikasi dengan backend.
+
+### Status 4 — Unsynced
+
+Menunjukkan terdapat perubahan lokal yang belum mendapatkan konfirmasi penyimpanan dari backend.
+
+### Aturan status
+
+Jangan menampilkan Connected hanya karena:
+
+- Supabase URL tersedia.
+- Supabase client berhasil dibuat.
+- Browser mendeteksi internet.
+- Terakhir kali berhasil terhubung beberapa menit sebelumnya.
+
+Gunakan kondisi koneksi dan hasil operasi backend yang benar-benar dapat diverifikasi.
+
+Perhatikan pula kemungkinan:
+
+- Request timeout.
+- Error autentikasi.
+- Koneksi terputus.
+- Operasi gagal.
+- Queue pending.
+- Reconnect.
+- Konflik sinkronisasi.
+
+Indikator harus merepresentasikan kondisi sebenarnya.
+
+Jangan membuat status visual yang menyesatkan.
+
+Pastikan indikator tidak mengganggu ruang kerja hakim maupun administrator.
+
+Prioritas: P1/P2.
+
+---
+
+# 13. PENYEMPURNAAN DATABASE DAN MIGRASI SUPABASE
+
+Audit sebelumnya mengidentifikasi dua migrasi terbaru:
+
+1. `20261029_security_and_crud_hardening.sql`
+2. `20261030_auth_provisioning_and_bootstrap.sql`
+
+Audit juga mencatat perbedaan SHA schema terbaru repository dan schema yang sebelumnya dilaporkan sudah dijalankan pada proyek Supabase.
+
+Jangan mengasumsikan migrasi tersebut sudah dijalankan atau belum dijalankan pada remote.
+
+### Tugas Anda
+
+1. Periksa seluruh migrasi yang ada.
+2. Periksa urutan migrasi.
+3. Bandingkan schema.sql dengan kumpulan migrasi.
+4. Identifikasi perbedaan struktur database.
+5. Identifikasi kemungkinan schema drift.
+6. Periksa signature RPC.
+7. Periksa foreign key.
+8. Periksa unique constraints.
+9. Periksa index.
+10. Periksa RLS.
+11. Periksa fungsi SECURITY DEFINER.
+12. Periksa hak EXECUTE function.
+13. Periksa trigger.
+14. Periksa aturan tenant isolation.
+15. Periksa akses setiap role.
+
+### Migrasi untuk perbaikan
+
+Buat migrasi incremental baru untuk kebutuhan:
+
+- Field tambahan peserta.
+- Relasi `level_id` pada soal.
+- Relasi master data lainnya yang memang diperlukan.
+- Pending sync jika memerlukan backend support.
+- Riwayat dan audit undian.
+- Finalisasi penilaian jika perlu diperbaiki di level database.
+- Constraints dan index baru.
+
+Jangan menulis ulang seluruh database dari nol.
+
+Jangan mengubah struktur tabel secara destruktif.
+
+Gunakan pendekatan expand-and-contract jika perubahan berpotensi memengaruhi aplikasi yang sedang berjalan.
+
+### Penanganan data historis
+
+Jika field baru belum mempunyai nilai:
+
+- Jangan mengisi data dengan tebakan.
+- Jangan memaksa semua field lama menjadi seolah-olah valid.
+- Gunakan nilai nullable atau mekanisme backfill yang dapat dibuktikan.
+- Sediakan prosedur penyelesaian data yang belum lengkap.
+
+### RLS dan keamanan
+
+Pastikan semua akses dilindungi oleh kebijakan database.
+
+Frontend filtering tidak boleh menjadi satu-satunya perlindungan.
+
+Uji akses langsung ke Data API.
+
+Pastikan:
+
+- Data tenant A tidak dapat diakses tenant B.
+- Hakim hanya dapat mengakses penugasan yang sah.
+- Admin tidak dapat meningkatkan role sendiri.
+- Pengguna tanpa membership tidak mendapatkan akses workspace.
+- Membership nonaktif tidak memberikan akses.
+- Finalisasi tidak dapat dilakukan melalui jalur yang tidak sah.
+- Data historis yang telah disahkan tidak dapat dimodifikasi sembarangan.
+
+Jangan menghapus proteksi keamanan yang sudah ada hanya karena menyebabkan fitur frontend gagal.
+
+Perbaiki integrasi frontend dan backend, bukan menurunkan tingkat keamanan.
+
+Prioritas: P0/P1.
+
+---
+
+# 14. STANDARDISASI MODAL DAN FORMULIR
+
+Audit menunjukkan setiap halaman mengimplementasikan modal sendiri dengan variasi struktur, padding, scrolling, dan footer.
+
+Bangun fondasi modal/dialog bersama yang dapat digunakan ulang.
+
+### Komponen standar
+
+Buat komponen reusable sesuai arsitektur project.
+
+Setiap modal harus mempunyai:
+
+1. Header.
+2. Judul.
+3. Deskripsi opsional.
+4. Tombol close.
+5. Body.
+6. Scroll behavior yang benar.
+7. Footer.
+8. Tombol aksi utama.
+9. Tombol aksi sekunder.
+10. State loading.
+11. State validation.
+12. Error handling.
+
+### Ketentuan UX
+
+- Modal tidak boleh melebihi viewport.
+- Body dapat di-scroll.
+- Footer tetap dapat diakses ketika form panjang.
+- Ukuran modal dapat menyesuaikan jenis formulir.
+- Tombol simpan tidak dapat diklik berkali-kali saat proses berlangsung.
+- Closing modal ketika ada perubahan belum tersimpan harus ditangani dengan tepat.
+- Escape dan focus management harus didukung secara wajar.
+- Perilaku keyboard dan aksesibilitas dasar harus diperhatikan.
+
+Jangan memaksakan semua modal mempunyai ukuran yang sama.
+
+Yang harus seragam adalah standar struktur dan perilakunya.
+
+### Halaman yang harus diperiksa
+
+- Grup & Peserta.
+- Bank Soal.
+- Undian.
+- Master Data.
+- Manajemen Pengguna.
+- Penilaian.
+- Konfigurasi babak.
+- Penugasan hakim.
+
+Pertahankan identitas desain aplikasi.
+
+Jangan melakukan redesign total yang tidak dibutuhkan.
+
+Prioritas: P2.
+
+---
+
+# 15. PERBAIKAN CI/CD DAN PLAYWRIGHT
+
+Audit menemukan GitHub Actions gagal pada proses `npm ci` karena package-lock.json belum memuat dependency Playwright yang telah ditambahkan ke package.json.
+
+Selain itu, lingkungan pengujian belum memiliki browser Chromium yang diperlukan.
+
+### 15.1 Dependency consistency
+
+Periksa package.json dan package-lock.json.
+
+Sinkronkan keduanya menggunakan mekanisme npm yang benar.
+
+Pastikan perintah berikut dapat berjalan:
+
+- `npm ci`
+- Type checking.
+- `npm test`
+- `npm run lint`
+- `npm run build`
+
+Jika script tertentu belum tersedia, buat script yang konsisten dengan struktur project.
+
+Jangan hanya menghilangkan pemeriksaan yang gagal.
+
+### 15.2 Playwright setup
+
+Pastikan:
+
+- Versi Playwright konsisten.
+- Browser yang diperlukan ter-install di CI.
+- System dependencies tersedia.
+- Base URL benar.
+- Test environment terisolasi.
+- Environment variables dikonfigurasi dengan aman.
+- Test-results dan playwright-report tidak dikomit sebagai source code.
+- Screenshot, video, dan trace disimpan sebagai artefak CI sesuai kebutuhan.
+
+Tambahkan direktori yang relevan ke `.gitignore`.
+
+### 15.3 Pemisahan test
+
+Pisahkan dengan jelas:
+
+1. Unit tests.
+2. Integration tests.
+3. Demo mode E2E.
+4. Live staging E2E.
+
+Jangan menjalankan test live dengan kredensial produksi atau data kompetisi sungguhan.
+
+Gunakan akun khusus staging.
+
+Pastikan test live tidak dijalankan secara tidak sengaja oleh workflow yang menggunakan konfigurasi demo.
+
+### 15.4 Workflow CI
+
+Buat pipeline yang memiliki tahapan terstruktur:
+
+1. Install dependencies.
+2. Type check.
+3. Lint.
+4. Unit test.
+5. Build.
+6. E2E test.
+7. Upload test artifacts jika diperlukan.
+
+Tahapan harus memberikan informasi kegagalan yang jelas.
+
+Jangan mengabaikan error hanya agar pipeline berstatus hijau.
+
+### 15.5 E2E testing
+
+Uji keseluruhan perjalanan pengguna.
+
+Pengujian minimal harus mencakup:
+
+**Autentikasi**
+- Login.
+- Login gagal.
+- Session persistence.
+- Refresh.
+- Logout.
+- Login akun berbeda.
+
+**Administrasi**
+- Manajemen master data.
+- Pembuatan grup.
+- Penambahan peserta.
+- Edit peserta.
+- Penghapusan peserta.
+- Tampilan per grup.
+- Tampilan per peserta.
+- Import peserta.
+- Import soal.
+
+**Bank soal**
+- Pembuatan maqra.
+- Edit maqra.
+- Relasi cabang.
+- Relasi jenjang.
+- Relasi babak.
+- Filter.
+
+**Undian**
+- Pemilihan peserta.
+- Pemilihan pool maqra.
+- Pengacakan.
+- Preview.
+- Penyimpanan.
+- Audit history.
+
+**Penilaian**
+- Input kesalahan.
+- Pengurangan nilai.
+- Anotasi.
+- Simpan draft.
+- Penilaian 0 kesalahan.
+- Finalisasi.
+- Penguncian.
+
+**Hasil**
+- Rekap penilaian.
+- Ranking.
+- Tie-break.
+- Pengesahan babak.
+- Snapshot hasil.
+
+**Ketahanan sistem**
+- Internet terputus.
+- Reconnect.
+- Pending sync.
+- Retry.
+- Konflik data.
+- Refresh saat masih ada data pending.
+
+Prioritas: P1.
+
+---
+
+# 16. PENGUJIAN INTEGRASI DAN DATA INTEGRITY
+
+Jangan hanya menguji tampilan.
+
+Semua fungsi kritis harus diuji sampai tingkat database.
+
+### A. Pengujian persistence
+
+Setelah membuat atau mengubah data:
+
+1. Pastikan operasi sukses.
+2. Refresh browser.
+3. Ambil data ulang dari Supabase.
+4. Pastikan nilai tidak berubah.
+5. Login ulang.
+6. Pastikan data masih benar.
+
+### B. Pengujian tenant isolation
+
+Buat dua tenant staging.
+
+Coba akses data tenant lainnya melalui:
+
+- UI.
+- Data API.
+- RPC.
+- Query langsung dengan session role yang sesuai.
+
+Pastikan semua akses yang tidak sah ditolak.
+
+### C. Pengujian kompetisi
+
+Gunakan data simulasi yang mencakup:
+
+- Beberapa grup.
+- Banyak peserta.
+- Beberapa cabang.
+- Beberapa jenjang.
+- Beberapa babak.
+- Banyak maqra.
+- Beberapa hakim.
+- Penilaian dengan kesalahan.
+- Penilaian tanpa kesalahan.
+- Nilai sama.
+- Decimal deduction.
+- Peserta tidak lengkap penilaiannya.
+
+### D. Pengujian concurrency
+
+Uji:
+
+- Dua pengguna mengakses data yang sama.
+- Dua hakim sesuai assignment.
+- Proses penyimpanan berulang.
+- Finalisasi bersamaan.
+- Retry request.
+- Perubahan data saat sinkronisasi.
+- Konflik update.
+
+Jangan membiarkan operasi ganda menghasilkan duplikasi atau status yang tidak konsisten.
+
+---
+
+# 17. STANDAR UI/UX KESELURUHAN
+
+Pertahankan arah desain yang sudah dibangun:
+
+- Modern.
+- Minimal.
+- Profesional.
+- Bersih.
+- Tablet-first.
+- Mudah digunakan.
+- Konsisten.
+- Tidak terlalu ramai.
+
+Prioritaskan kemudahan penggunaan pada:
+
+1. Dashboard admin.
+2. Grup & Peserta.
+3. Bank Soal.
+4. Undian.
+5. Workspace hakim.
+6. Halaman penilaian.
+
+Semua tombol harus memiliki fungsi nyata.
+
+Tidak boleh ada:
+
+- Tombol dummy.
+- Placeholder action.
+- Form yang tidak menyimpan data.
+- Filter yang hanya mengubah tampilan tanpa mengubah hasil data.
+- Loading tanpa akhir.
+- Error yang ditelan.
+- Modal yang tidak dapat ditutup.
+- Data yang berubah tanpa konfirmasi.
+
+Untuk workspace hakim, prioritaskan kecepatan dan ketepatan input daripada dekorasi.
+
+Jangan mengubah komponen penilaian yang sudah benar secara visual tanpa alasan fungsional.
+
+Pastikan seluruh halaman tetap nyaman pada desktop, tablet, dan mobile.
+
+---
+
+# 18. STRATEGI EKSEKUSI WAJIB
+
+Jangan mengerjakan semua perubahan sekaligus tanpa kontrol.
+
+Gunakan urutan berikut.
+
+## FASE 1 — Critical security & stabilization
+
+Kerjakan:
+
+- Penanganan kredensial terekspos.
+- Bug penilaian 0 kesalahan.
+- Race condition inisialisasi/finalisasi.
+- Pemeriksaan login/logout.
+- Perbaikan dependency lockfile.
+- Pemulihan CI.
+
+Target: seluruh risiko kritis ditangani.
+
+## FASE 2 — Database dan master data
+
+Kerjakan:
+
+- Perluasan struktur peserta.
+- Relasi jenjang pada soal.
+- Konsistensi hubungan master data.
+- Penghapusan dropdown hardcoded.
+- Migrasi data lama.
+- RLS dan database constraints.
+
+Target: fondasi data konsisten.
+
+## FASE 3 — Manajemen peserta
+
+Kerjakan:
+
+- Mode per grup.
+- Mode per peserta.
+- Field peserta lengkap.
+- CRUD.
+- Filter dan pencarian.
+- Import Excel.
+- Data persistence.
+
+Target: administrasi peserta lengkap.
+
+## FASE 4 — Bank soal
+
+Kerjakan:
+
+- Model relasi soal.
+- Form tambah/edit.
+- Dropdown dinamis.
+- Filter dinamis.
+- Import Excel.
+- Validasi.
+- Data persistence.
+
+Target: bank soal konsisten.
+
+## FASE 5 — Undian maqra
+
+Kerjakan:
+
+- Filter babak.
+- Filter cabang.
+- Filter jenjang.
+- Checklist peserta.
+- Checklist maqra.
+- Fisher-Yates.
+- Preview.
+- Penyimpanan.
+- Audit log.
+
+Target: proses undian akurat dan transparan.
+
+## FASE 6 — Sync dan reliability
+
+Kerjakan:
+
+- Outbox/pending sync.
+- IndexedDB atau mekanisme penyimpanan lokal yang sesuai.
+- Retry.
+- Konflik sinkronisasi.
+- Connected indicator.
+- Offline handling.
+
+Target: perubahan tidak hilang saat jaringan terganggu.
+
+## FASE 7 — Standardisasi UI
+
+Kerjakan:
+
+- Modal bersama.
+- Form consistency.
+- Loading/error/empty state.
+- Tablet responsiveness.
+- Perbaikan navigasi.
+
+Target: pengalaman pengguna konsisten.
+
+## FASE 8 — Comprehensive testing
+
+Kerjakan:
+
+- Unit tests.
+- Integration tests.
+- Database/RLS tests.
+- Playwright E2E.
+- CI.
+- Build.
+- Regression tests.
+
+Target: seluruh skenario kritis terverifikasi.
+
+Jangan memulai perubahan fase berikutnya dengan mengabaikan kerusakan pada fase sebelumnya.
+
+Namun, jika terdapat dependensi teknis yang mengharuskan implementasi fase dilakukan secara beririsan, atur urutannya dengan aman dan dokumentasikan alasan teknisnya.
+
+---
+
+# 19. ACCEPTANCE CRITERIA — DEFINISI SELESAI
+
+Aplikasi hanya dapat dinyatakan selesai apabila seluruh kriteria berikut telah dipenuhi.
+
+## Authentication
+
+- Login berhasil.
+- Logout berhasil.
+- Login kembali berhasil.
+- Session persistence berjalan.
+- Pergantian akun tidak membawa state akun lama.
+- Tidak terdapat konflik hidrasi sesi.
+
+## Security
+
+- Tidak ada kredensial hardcoded yang masih aktif di source code.
+- RLS diterapkan.
+- Tenant isolation diverifikasi.
+- Role berjalan sesuai hak.
+- Hakim hanya dapat mengakses assignment yang sah.
+- Finalisasi terlindungi di server.
+
+## Master data
+
+- Dropdown tidak lagi bergantung pada pilihan hardcoded.
+- Master aktif tersedia di seluruh form terkait.
+- Master nonaktif tidak dapat dipakai pada data baru.
+- Data historis tetap aman.
+
+## Peserta
+
+- Tampilan per grup berfungsi.
+- Tampilan per peserta berfungsi.
+- Seluruh field peserta tersimpan.
+- CRUD berhasil.
+- Filter dan pencarian bekerja.
+- Import Excel berhasil.
+- Data tetap benar setelah reload.
+
+## Bank soal
+
+- Cabang tersimpan terpisah.
+- Jenjang tersimpan terpisah.
+- Babak tersimpan terpisah.
+- Form tambah/edit benar.
+- Import Excel berhasil.
+- Filter bekerja.
+- Data tetap benar setelah reload.
+
+## Undian
+
+- Admin dapat memilih peserta.
+- Admin dapat memilih pool maqra.
+- Tidak ada soal di luar pool yang terpilih.
+- Pengacakan menggunakan Fisher-Yates.
+- Preview benar.
+- Hasil tersimpan.
+- Riwayat undian terjaga.
+
+## Penilaian
+
+- Input kesalahan bekerja.
+- Pengurangan nilai bekerja.
+- Anotasi tersimpan.
+- Penilaian sempurna dapat difinalisasi melalui konfirmasi eksplisit.
+- Tidak ada race condition antara inisialisasi dan finalisasi.
+- Lembar yang sudah final terkunci.
+- Nilai historis tetap aman.
+
+## Synchronization
+
+- Connected ditampilkan berdasarkan bukti koneksi.
+- Syncing bekerja.
+- Offline terdeteksi.
+- Pending sync terdeteksi.
+- Retry berjalan.
+- Data pending bertahan setelah refresh.
+- Tidak ada duplikasi saat retry.
+- Tindakan finalisasi membutuhkan konfirmasi server.
+
+## Testing
+
+- npm ci berhasil.
+- Type checking berhasil.
+- Lint berhasil.
+- Unit tests berhasil.
+- Integration tests berhasil.
+- RLS tests berhasil.
+- Playwright E2E berhasil pada skenario yang dapat diuji.
+- Production build berhasil.
+- CI berhasil.
+
+Kriteria yang tidak dapat diverifikasi harus dinyatakan secara eksplisit.
+
+Jangan mengklaim selesai jika hanya sebagian fitur yang telah lulus.
+
+---
+
+# 20. FORMAT LAPORAN HASIL PEKERJAAN
+
+Setelah implementasi, buat laporan teknis yang dapat diverifikasi.
+
+Gunakan format berikut.
+
+## A. RINGKASAN EKSEKUTIF
+
+- Kondisi awal.
+- Perbaikan utama.
+- Kondisi akhir.
+- Status kesiapan aplikasi.
+
+## B. DAFTAR PERBAIKAN
+
+Untuk setiap masalah:
+
+| Masalah | Akar Penyebab | Implementasi | Verifikasi | Status |
+|---|---|---|---|---|
+
+## C. PERUBAHAN SOURCE CODE
+
+Cantumkan:
+
+- File yang dimodifikasi.
+- File yang dibuat.
+- File yang dihapus jika ada.
+- Fungsi yang berubah.
+- Komponen yang ditambahkan.
+
+## D. PERUBAHAN DATABASE
+
+Cantumkan:
+
+- Migrasi baru.
+- Tabel yang berubah.
+- Kolom baru.
+- Relasi baru.
+- Constraint.
+- Index.
+- RLS.
+- RPC.
+- Trigger.
+- Dampak terhadap data lama.
+
+## E. HASIL TESTING
+
+Tampilkan hasil nyata:
+
+| Jenis Test | Hasil | Keterangan |
+|---|---|---|
+| npm ci | | |
+| Type check | | |
+| Lint | | |
+| Unit test | | |
+| Integration test | | |
+| RLS test | | |
+| Playwright E2E | | |
+| Production build | | |
+| CI | | |
+
+Jangan membuat angka kelulusan atau bukti palsu.
+
+## F. HAL YANG BELUM SELESAI
+
+Kelompokkan menjadi:
+
+- Sudah selesai.
+- Selesai tetapi belum diverifikasi remote.
+- Sebagian selesai.
+- Belum dikerjakan.
+- Terblokir.
+
+Berikan penyebab konkret.
+
+## G. INSTRUKSI DEPLOYMENT
+
+Jelaskan:
+
+- Environment variables yang dibutuhkan.
+- Migrasi yang perlu dijalankan.
+- Urutan migrasi.
+- Konfigurasi Supabase.
+- Konfigurasi Netlify.
+- Prosedur deployment.
+- Verifikasi setelah deployment.
+
+## H. GIT
+
+Cantumkan:
+
+- Branch yang digunakan.
+- Commit yang dibuat.
+- Perubahan penting.
+- Status working tree.
+- Status push.
+- Status deployment.
+
+Jangan mengklaim perubahan telah berada di GitHub jika belum benar-benar dipush.
+
+---
+
+# 21. LARANGAN KERAS
+
+Selama mengerjakan proyek ini, Anda DILARANG:
+
+1. Hanya memberikan rekomendasi tanpa implementasi.
+2. Mengklaim bug selesai tanpa pengujian.
+3. Menghapus fitur yang sebelumnya berfungsi.
+4. Mengganti desain aplikasi secara total tanpa kebutuhan.
+5. Menghapus atau mereset database produksi.
+6. Mengubah nilai historis tanpa validasi.
+7. Menurunkan keamanan RLS untuk mempermudah pengembangan.
+8. Menggunakan localStorage sebagai sumber data resmi.
+9. Menganggap pending sync sebagai penyimpanan resmi.
+10. Membuat master data hardcoded.
+11. Menebak data historis yang tidak tersedia.
+12. Membuat tombol atau fitur palsu.
+13. Menelan error tanpa penanganan.
+14. Mengabaikan test yang gagal.
+15. Menghapus test agar CI terlihat berhasil.
+16. Menggunakan kredensial produksi untuk E2E.
+17. Mengubah database remote tanpa otorisasi.
+18. Melakukan deployment produksi tanpa persetujuan.
+19. Melakukan refactoring besar yang tidak relevan.
+20. Menghentikan pekerjaan setelah memperbaiki satu kelompok masalah.
+
+---
+
+# 22. INSTRUKSI FINAL — LAKSANAKAN SAMPAI TUNTAS
+
+Mulailah dengan memeriksa repository terkini dan buat rencana eksekusi berdasarkan dependensi teknis yang nyata.
+
+Setelah itu, langsung implementasikan seluruh perbaikan sesuai urutan prioritas.
+
+Untuk setiap fase:
+
+1. Pahami implementasi yang ada.
+2. Temukan akar masalah.
+3. Buat perubahan yang diperlukan.
+4. Periksa dampak terhadap modul lain.
+5. Tambahkan regression tests.
+6. Jalankan pengujian.
+7. Perbaiki seluruh kegagalan yang ditemukan.
+8. Verifikasi hasilnya.
+9. Dokumentasikan perubahan.
+10. Lanjutkan ke fase berikutnya.
+
+Jangan berhenti hanya karena rencana sudah dibuat.
+
+Jangan menunggu instruksi tambahan untuk mengerjakan bagian yang sudah jelas berdasarkan audit dan kebutuhan sistem.
+
+Apabila terdapat ketidakpastian, investigasi source code, schema, relasi, test, serta histori Git terlebih dahulu.
+
+Apabila suatu tindakan memerlukan akses rahasia, perubahan produksi, atau izin eksternal yang belum tersedia, selesaikan pekerjaan lain yang tidak terhalang dan dokumentasikan bagian yang membutuhkan tindakan pemilik sistem.
+
+Jangan mengarang asumsi untuk menutup kekurangan informasi.
+
+## HASIL AKHIR YANG DIHARAPKAN
+
+Saya tidak membutuhkan sekadar source code yang berhasil dikompilasi.
+
+Saya membutuhkan MTQ Management System yang benar-benar dapat diandalkan untuk operasional perlombaan.
+
+Seluruh alur harus bekerja secara konsisten:
+
+LOGIN → MASTER DATA → PENDAFTARAN KAFILAH → MANAJEMEN PESERTA → BANK SOAL → PENGUNDIAN MAQRA → PENUGASAN HAKIM → PENILAIAN → FINALISASI → REKAP NILAI → RANKING → PENGESAHAN BABAK → HASIL AKHIR.
+
+Tidak boleh ada tahapan yang hanya terlihat bekerja di frontend tetapi sebenarnya tidak tersimpan, tidak tervalidasi, atau tidak aman di backend.
+
+**PRIORITAS TERTINGGI: KEBENARAN DATA, KEAMANAN, KONSISTENSI ALUR, DAN KEANDALAN OPERASIONAL.**
+
+Laksanakan seluruh pekerjaan dengan standar engineering profesional, transparan, terukur, dan dapat diverifikasi.

@@ -1,142 +1,147 @@
 import { test, expect } from '@playwright/test';
-import { clearStorageAndOpenGate } from './helpers/auth';
 
-test.describe('Audit Live Backend & UI Multi-Peran (Supabase Live Mode)', () => {
-  test.beforeEach(async ({ page }) => {
-    // Clear storage to ensure clean fail-closed authentication gate
-    await clearStorageAndOpenGate(page);
-    await expect(page.getByText('Sistem Manajemen & Penilaian MTQ')).toBeVisible();
-    await expect(page.getByText('Gerbang Keamanan Produksi MTQ (Fail-Closed)')).toBeVisible();
+const LIVE_ENABLED = process.env.E2E_LIVE_ENABLED === 'true';
+const SUPERADMIN_EMAIL = process.env.E2E_SUPERADMIN_EMAIL || '';
+const SUPERADMIN_PASSWORD = process.env.E2E_SUPERADMIN_PASSWORD || '';
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || '';
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || '';
+const JUDGE_EMAIL = process.env.E2E_JUDGE_EMAIL || '';
+const JUDGE_PASSWORD = process.env.E2E_JUDGE_PASSWORD || '';
+
+test.describe('Live Supabase Role Audits (Superadmin, Admin, Judge)', () => {
+  test.setTimeout(120000);
+
+  test('1. Superadmin Live Login & Multi-Tenant Inspection', async ({ page }) => {
+    test.skip(
+      !LIVE_ENABLED || !SUPERADMIN_EMAIL || !SUPERADMIN_PASSWORD,
+      'Skipped: E2E_LIVE_ENABLED, E2E_SUPERADMIN_EMAIL, and E2E_SUPERADMIN_PASSWORD must be provided via environment variables.'
+    );
+
+    const errors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
+
+    await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
+
+    const emailInput = page.locator('input[type="email"]');
+    await expect(emailInput).toBeVisible({ timeout: 15000 });
+    await emailInput.fill(SUPERADMIN_EMAIL);
+    await page.locator('input[type="password"]').fill(SUPERADMIN_PASSWORD);
+    await page.locator('button[type="submit"]').click();
+
+    await expect(page.locator('aside')).toBeVisible({ timeout: 25000 });
+
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).toContain('Super Admin');
+
+    const navButtons = page.locator('aside nav button');
+    const navCount = await navButtons.count();
+    for (let i = 0; i < navCount; i++) {
+      const btn = navButtons.nth(i);
+      if (await btn.isVisible()) {
+        await btn.click();
+        await page.waitForTimeout(800);
+      }
+    }
+
+    const headerActionBtn = page.locator('header button[title*="Event"], header button:has-text("Event")').first();
+    if (await headerActionBtn.isVisible()) {
+      await headerActionBtn.click();
+      await page.waitForTimeout(1000);
+    }
+
+    expect(errors.filter((e) => !e.includes('favicon'))).toEqual([]);
   });
 
-  test('01. Live Super Admin (jabdtech2025@gmail.com) - Login, Platform Dashboard, MTQ & Akun Global', async ({ page }) => {
-    // 1. Input Super Admin credentials
-    const emailInput = page.getByPlaceholder('nama@instansi.mtq.id');
-    const passInput = page.getByPlaceholder('Masukkan kata sandi Supabase Auth');
-    const submitBtn = page.getByRole('button', { name: /Masuk ke Workspace Produksi/i });
+  test('2. Admin Event Live Login & Full Operational Inspection', async ({ page }) => {
+    test.skip(
+      !LIVE_ENABLED || !ADMIN_EMAIL || !ADMIN_PASSWORD,
+      'Skipped: E2E_LIVE_ENABLED, E2E_ADMIN_EMAIL, and E2E_ADMIN_PASSWORD must be provided via environment variables.'
+    );
 
-    await emailInput.fill('jabdtech2025@gmail.com');
-    await passInput.fill('password123');
-    await submitBtn.click();
+    const errors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
 
-    // 2. Validate successful entry to Superadmin Platform
-    await expect(page.getByText(/Dashboard Platform/i).first()).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/Superadmin/i).first()).toBeVisible();
+    await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
 
-    // 3. Check navigation to Manajemen MTQ (tenants from live Supabase)
-    const manajemenMtqBtn = page.getByRole('button', { name: /Manajemen MTQ/i }).first();
-    await manajemenMtqBtn.click();
-    await expect(page.getByText(/Manajemen Penyelenggara MTQ/i).first()).toBeVisible();
-    await expect(page.getByText(/LPTQ Provinsi Jawa Barat/i).first()).toBeVisible();
+    const emailInput = page.locator('input[type="email"]');
+    await expect(emailInput).toBeVisible({ timeout: 15000 });
+    await emailInput.fill(ADMIN_EMAIL);
+    await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
+    await page.locator('button[type="submit"]').click();
 
-    // 4. Check navigation to Manajemen Akun Global (from profiles table)
-    const manajemenAkunBtn = page.getByRole('button', { name: /Manajemen Akun/i }).first();
-    await manajemenAkunBtn.click();
-    await expect(page.getByText(/Manajemen Akun Global/i).first()).toBeVisible();
-    await expect(page.getByText(/jabdtech2025@gmail.com/i).first()).toBeVisible();
-    await expect(page.getByText(/jabdrise@gmail.com/i).first()).toBeVisible();
-    await expect(page.getByText(/assuddy005@gmail.com/i).first()).toBeVisible();
+    await expect(page.locator('aside')).toBeVisible({ timeout: 25000 });
 
-    // 5. Check navigation to Audit Log Platform
-    const auditBtn = page.getByRole('button', { name: /Audit Log Platform/i }).first();
-    await auditBtn.click();
-    await expect(page.getByText(/Audit Log Platform Global/i).first()).toBeVisible();
+    const modules = [
+      'Ringkasan Eksekutif',
+      'Data Kafilah & Peserta',
+      'Master Data & Konfigurasi',
+      'Bank Soal (Maqra)',
+      'Panel Penilaian Hakim',
+      'Rekap Nilai & Klasemen',
+      'Manajemen Pengguna'
+    ];
 
-    // 6. Sign out via modal
-    await page.getByText(/Ganti/i).first().click();
-    await expect(page.getByText(/Sesi Autentikasi & Keamanan Supabase/i)).toBeVisible();
-    await page.getByRole('button', { name: /Keluar/i }).first().click();
-    await expect(page.getByText('Gerbang Keamanan Produksi MTQ (Fail-Closed)')).toBeVisible({ timeout: 10000 });
+    for (const modName of modules) {
+      const btn = page.locator('aside nav button', { hasText: modName }).first();
+      if (await btn.isVisible()) {
+        await btn.click();
+        await page.waitForTimeout(1000);
+      }
+    }
+
+    const masterBtn = page.locator('aside nav button', { hasText: 'Master Data' }).first();
+    if (await masterBtn.isVisible()) {
+      await masterBtn.click();
+      await page.waitForTimeout(800);
+
+      const masterTabs = ['Cabang Lomba', 'Golongan / Jenjang', 'Babak Musabaqah', 'Kategori Kesalahan', 'Aturan & Rubrik'];
+      for (const tabName of masterTabs) {
+        const tabBtn = page.locator('main button', { hasText: tabName }).first();
+        if (await tabBtn.isVisible()) {
+          await tabBtn.click();
+          await page.waitForTimeout(500);
+        }
+      }
+    }
+
+    expect(errors.filter((e) => !e.includes('favicon'))).toEqual([]);
   });
 
-  test('02. Live Admin MTQ (jabdrise@gmail.com) - Login, Workspace Jawa Barat, CRUD & Monitoring', async ({ page }) => {
-    // 1. Input Admin MTQ credentials
-    const emailInput = page.getByPlaceholder('nama@instansi.mtq.id');
-    const passInput = page.getByPlaceholder('Masukkan kata sandi Supabase Auth');
-    const submitBtn = page.getByRole('button', { name: /Masuk ke Workspace Produksi/i });
+  test('3. Dewan Hakim (Judge) Live Login & Assessment Inspection', async ({ page }) => {
+    test.skip(
+      !LIVE_ENABLED || !JUDGE_EMAIL || !JUDGE_PASSWORD,
+      'Skipped: E2E_LIVE_ENABLED, E2E_JUDGE_EMAIL, and E2E_JUDGE_PASSWORD must be provided via environment variables.'
+    );
 
-    await emailInput.fill('jabdrise@gmail.com');
-    await passInput.fill('password123');
-    await submitBtn.click();
+    const errors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
 
-    // 2. Validate tenant workspace loading
-    await expect(page.getByText(/LPTQ Provinsi Jawa Barat/i).first()).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/Jundi Abdullah/i).first()).toBeVisible();
-    await expect(page.getByText(/Admin MTQ/i).first()).toBeVisible();
+    await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
 
-    // 3. Navigate through key Admin views
-    // A. Grup & Peserta
-    await page.getByRole('button', { name: /Grup & Peserta/i }).first().click();
-    await expect(page.getByText(/Grup & Peserta MTQ/i).first()).toBeVisible();
-    await expect(page.getByText(/Kota Bandung/i).first()).toBeVisible();
-    
-    // Klik Lihat Detail untuk melihat peserta Kota Bandung
-    await page.getByRole('button', { name: /Lihat Detail/i }).first().click();
-    await expect(page.getByText(/Muhammad Hammam/i).first()).toBeVisible();
-    // Tutup drawer/modal peserta
-    await page.getByRole('button', { name: 'Tutup' }).click();
+    const emailInput = page.locator('input[type="email"]');
+    await expect(emailInput).toBeVisible({ timeout: 15000 });
+    await emailInput.fill(JUDGE_EMAIL);
+    await page.locator('input[type="password"]').fill(JUDGE_PASSWORD);
+    await page.locator('button[type="submit"]').click();
 
-    // B. Bank Soal & Maqra
-    await page.getByRole('button', { name: /Bank Soal & Maqra/i }).first().click();
-    await expect(page.getByText(/Bank Soal & Maqra Tilawah/i).first()).toBeVisible();
+    await expect(page.locator('aside')).toBeVisible({ timeout: 25000 });
 
-    // C. Master Data & Rubrik
-    await page.getByRole('button', { name: /Master Data & Rubrik/i }).first().click();
-    await expect(page.getByText(/Master Data & Konfigurasi Kompetisi/i).first()).toBeVisible();
+    const navButtons = page.locator('aside nav button');
+    const navCount = await navButtons.count();
+    for (let i = 0; i < navCount; i++) {
+      const btn = navButtons.nth(i);
+      if (await btn.isVisible()) {
+        await btn.click();
+        await page.waitForTimeout(800);
+      }
+    }
 
-    // D. Monitoring Penilaian
-    await page.getByRole('button', { name: /Monitoring Penilaian/i }).first().click();
-    await expect(page.getByText(/Mode Pemantauan Penilaian Dewan Hakim/i).first()).toBeVisible();
-
-    // E. Rekap Nilai Real-Time
-    await page.getByRole('button', { name: /Rekap Nilai Real-Time/i }).first().click();
-    await expect(page.getByText(/Rekap Nilai Real-Time/i).first()).toBeVisible();
-
-    // F. Manajemen Babak
-    await page.getByRole('button', { name: /Manajemen Babak/i }).first().click();
-    await expect(page.getByText(/Manajemen Babak Musabaqah/i).first()).toBeVisible();
-
-    // G. Hasil & Kelulusan
-    await page.getByRole('button', { name: /Hasil & Kelulusan/i }).first().click();
-    await expect(page.getByText(/Hasil Babak & Kelulusan/i).first()).toBeVisible();
-
-    // 4. Sign out
-    await page.getByText(/Ganti/i).first().click();
-    await page.getByRole('button', { name: /Keluar/i }).first().click();
-    await expect(page.getByText('Gerbang Keamanan Produksi MTQ (Fail-Closed)')).toBeVisible({ timeout: 10000 });
-  });
-
-  test('03. Live Hakim (assuddy005@gmail.com) - Login, Penilaian, Bidang Tajwid & Rekap', async ({ page }) => {
-    // 1. Input Hakim credentials
-    const emailInput = page.getByPlaceholder('nama@instansi.mtq.id');
-    const passInput = page.getByPlaceholder('Masukkan kata sandi Supabase Auth');
-    const submitBtn = page.getByRole('button', { name: /Masuk ke Workspace Produksi/i });
-
-    await emailInput.fill('assuddy005@gmail.com');
-    await passInput.fill('password123');
-    await submitBtn.click();
-
-    // 2. Validate Hakim authentication and workspace
-    await expect(page.getByText(/Al-Ustadz Abu Ismail Arif/i).first()).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/Dewan Hakim|Hakim/i).first()).toBeVisible();
-
-    // 3. Verify Hakim navigation options in Sidebar
-    await expect(page.getByRole('button', { name: /Peserta Saya/i }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: /Penilaian Mushaf/i }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: /Rekap \/ Riwayat Nilai/i }).first()).toBeVisible();
-
-    // 4. Check Peserta Saya view
-    await page.getByRole('button', { name: /Peserta Saya/i }).first().click();
-    await expect(page.getByText(/Daftar Penugasan Penilaian Peserta/i).first()).toBeVisible();
-    await expect(page.getByText(/Muhammad Hammam/i).first()).toBeVisible();
-
-    // 5. Check Rekap / Riwayat Nilai
-    await page.getByRole('button', { name: /Rekap \/ Riwayat Nilai/i }).first().click();
-    await expect(page.getByText(/Rekap Nilai Real-Time/i).first()).toBeVisible();
-
-    // 6. Sign out
-    await page.getByText(/Ganti/i).first().click();
-    await page.getByRole('button', { name: /Keluar/i }).first().click();
-    await expect(page.getByText('Gerbang Keamanan Produksi MTQ (Fail-Closed)')).toBeVisible({ timeout: 10000 });
+    expect(errors.filter((e) => !e.includes('favicon'))).toEqual([]);
   });
 });

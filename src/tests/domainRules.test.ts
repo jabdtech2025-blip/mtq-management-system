@@ -11,6 +11,11 @@ import {
   RubricVersion,
   CompetitionRuleConfig
 } from '../types/mtq';
+import {
+  fisherYatesShuffle,
+  validateParticipantImportRows,
+  validateQuestionImportRows
+} from '../utils/excelHelper';
 
 /**
  * SUITE PENGUJIAN OTOMATIS DOMAIN BISNIS DAN ATURAN MTQ
@@ -1156,6 +1161,148 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       strictStageIsolationEval.evaluatedParticipants.length === 1 &&
       strictStageIsolationEval.evaluatedParticipants[0].participant.id === 'p-til-1',
     `canFinalize: ${strictStageIsolationEval.canFinalize}, count: ${strictStageIsolationEval.evaluatedParticipants.length}`
+  );
+
+  // 35b. Finalisasi 0 Kesalahan (Zero-Error Sheet) dengan startingScore Rubrik Dinamis
+  const customStartingRubric: RubricVersion = {
+    ...OFFICIAL_SENI_BACA_RUBRIC,
+    id: 'rubric-custom-90',
+    startingScore: 90,
+    fields: [
+      { id: 'fld-tajwid', code: 'TJW', name: 'Tajwid', maxScore: 30, minScore: 0, order: 1, status: 'Aktif' },
+      { id: 'fld-fashahah', code: 'FSH', name: 'Fashahah', maxScore: 30, minScore: 0, order: 2, status: 'Aktif' },
+      { id: 'fld-lagu', code: 'LAG', name: 'Lagu', maxScore: 30, minScore: 0, order: 3, status: 'Aktif' }
+    ]
+  };
+  const zeroCustomCalc = calculateAssessmentScore({}, sampleCategories, customStartingRubric);
+  assert(
+    '35b. Finalisasi 0 Kesalahan Dinamis: Lembar 0 kesalahan menggunakan startingScore & batas bidang rubrik aktif (90.00)',
+    zeroCustomCalc.totalDeductions === 0 && zeroCustomCalc.finalScore === 90.0,
+    `totalDeductions: ${zeroCustomCalc.totalDeductions}, finalScore: ${zeroCustomCalc.finalScore}`
+  );
+
+  // 35c. Validasi Import Excel Peserta & Bank Soal Terhadap Master Data Tunggal
+  const masterKafilahs = [
+    { id: 'k-bdg', tenantId: 't-1', code: 'GRP-BDG', name: 'Grup Kota Bandung', region: 'Jawa Barat', participantCount: 1, contactPerson: 'PJ', contactPhone: '081', status: 'Aktif' as const }
+  ];
+  const masterCabang = [
+    { id: 'c-tlw', tenantId: 't-1', code: 'TLW-DWS-PA', name: 'Tilawah Dewasa Putra', description: 'Tilawah', status: 'Aktif' as const },
+    { id: 'c-non', tenantId: 't-1', code: 'TLW-NON', name: 'Cabang Lama Nonaktif', description: 'Tilawah', status: 'Nonaktif' as const }
+  ];
+  const masterJenjang = [
+    { id: 'j-dws', tenantId: 't-1', code: 'DWS', name: 'Dewasa', description: '18-40 Tahun', status: 'Aktif' as const }
+  ];
+  const masterStages = [
+    {
+      id: 's-pny',
+      tenantId: 't-1',
+      name: 'Penyisihan',
+      branchName: 'Tilawah Dewasa Putra',
+      order: 1,
+      qualificationQuota: 6,
+      qualificationMethod: 'top_n' as const,
+      status: 'Aktif' as const
+    }
+  ];
+
+  const participantImportCheck = validateParticipantImportRows(
+    [
+      {
+        'No Urut Administrasi': 'ADM-001',
+        'ID Peserta': 'TLW-101',
+        'Nama Peserta': 'Ahmad Fauzi',
+        'Nama Ayah': 'H. Sulaiman',
+        'Jenis Kelamin': 'Putra',
+        'Kota Asal': 'Kota Bandung',
+        'Daerah Asal': 'Jawa Barat',
+        'Asal Pesantren / Sekolah': 'PP Al-Falah',
+        'Grup / Kafilah': 'Grup Kota Bandung',
+        'Cabang Lomba': 'Tilawah Dewasa Putra',
+        'Jenjang Lomba': 'Dewasa',
+        'Babak Aktif': 'Penyisihan',
+        'Nomor Undian': '05',
+        Status: 'Menunggu'
+      },
+      {
+        'No Urut Administrasi': 'ADM-002',
+        'ID Peserta': 'TLW-102',
+        'Nama Peserta': 'Peserta Cabang Nonaktif',
+        'Jenis Kelamin': 'Putra',
+        'Grup / Kafilah': 'Grup Kota Bandung',
+        'Cabang Lomba': 'Cabang Lama Nonaktif', // Harus ditolak karena Nonaktif
+        'Jenjang Lomba': 'Dewasa',
+        'Babak Aktif': 'Penyisihan'
+      }
+    ],
+    {
+      kafilahs: masterKafilahs,
+      cabangList: masterCabang,
+      jenjangList: masterJenjang,
+      stages: masterStages,
+      existingParticipants: []
+    }
+  );
+
+  const questionImportCheck = validateQuestionImportRows(
+    [
+      {
+        'Kode Soal': 'MQ-NEW-01',
+        'Judul Maqra': 'Maqra Uji Import',
+        'Nama Surah': 'Al-Baqarah',
+        'Nomor Surah': 2,
+        'Ayat Awal': 1,
+        'Ayat Akhir': 10,
+        'Halaman Awal': 2,
+        'Halaman Akhir': 3,
+        'Cabang Lomba': 'Tilawah Dewasa Putra',
+        'Jenjang Lomba': 'Dewasa',
+        Babak: 'Penyisihan'
+      },
+      {
+        'Kode Soal': 'MQ-INVALID-PAGE',
+        'Judul Maqra': 'Maqra Halaman Salah',
+        'Nama Surah': 'Al-Baqarah',
+        'Nomor Surah': 2,
+        'Ayat Awal': 1,
+        'Ayat Akhir': 10,
+        'Halaman Awal': 700, // Invalid > 604
+        'Halaman Akhir': 701,
+        'Cabang Lomba': 'Tilawah Dewasa Putra',
+        'Jenjang Lomba': 'Dewasa',
+        Babak: 'Penyisihan'
+      }
+    ],
+    {
+      cabangList: masterCabang,
+      jenjangList: masterJenjang,
+      stages: masterStages,
+      existingQuestions: []
+    }
+  );
+
+  assert(
+    '35c. Validasi Import Excel Peserta & Bank Soal: Memetakan 15 atribut peserta & relasi soal secara presisi serta menolak Master Data Nonaktif / halaman mushaf tidak valid',
+    participantImportCheck.validRows.length === 1 &&
+      participantImportCheck.errors.length === 1 &&
+      participantImportCheck.validRows[0].fatherName === 'H. Sulaiman' &&
+      participantImportCheck.validRows[0].originInstitution === 'PP Al-Falah' &&
+      participantImportCheck.validRows[0].branchId === 'c-tlw' &&
+      participantImportCheck.validRows[0].levelId === 'j-dws' &&
+      questionImportCheck.validRows.length === 1 &&
+      questionImportCheck.errors.length === 1 &&
+      questionImportCheck.validRows[0].levelId === 'j-dws',
+    `partValid: ${participantImportCheck.validRows.length}, partErr: ${participantImportCheck.errors.length}, qValid: ${questionImportCheck.validRows.length}`
+  );
+
+  // 35d. Algoritma Fisher-Yates Shuffle Unbiased
+  const poolInput = ['MQ-01', 'MQ-02', 'MQ-03', 'MQ-04', 'MQ-05'];
+  const shuffledPool = fisherYatesShuffle(poolInput);
+  assert(
+    '35d. Algoritma Undian Fisher-Yates: Menghasilkan permutasi tanpa mutasi array asli dan tanpa kehilangan elemen',
+    shuffledPool.length === poolInput.length &&
+      poolInput.every((item) => shuffledPool.includes(item)) &&
+      poolInput[0] === 'MQ-01',
+    `shuffled: ${shuffledPool.join(',')}`
   );
 
   return { passed, failed, results };

@@ -409,10 +409,11 @@ export function aggregateParticipantScores(
     const maqraAvailableScores: number[] = [];
 
     requiredJudgeIds.forEach((judgeId) => {
-      const match = assessments.find((a) => {
+      // 1. Pencocokan utama secara ketat (participantId + judgeId + questionId + stageParticipationId/stageId)
+      let match = assessments.find((a) => {
         if (a.participantId !== participantId) return false;
         if (a.judgeId !== judgeId) return false;
-        if (a.questionId !== q.questionId) return false;
+        if (a.questionId !== q.questionId && !(q.id && a.assignedMaqraId === q.id)) return false;
         if (stageParticipationId && a.stageParticipationId) {
           if (a.stageParticipationId !== stageParticipationId) return false;
         }
@@ -423,6 +424,26 @@ export function aggregateParticipantScores(
         }
         return true;
       });
+
+      // 2. Fallback aman jika terdapat perbedaan ID babak/partisipasi lokal vs DB pada nama babak yang sama
+      if (!match) {
+        match = assessments.find((a) => {
+          if (a.participantId !== participantId) return false;
+          if (a.judgeId !== judgeId) return false;
+          if (a.stageName !== stageName) return false;
+          return a.questionId === q.questionId || Boolean(q.id && a.assignedMaqraId === q.id);
+        });
+      }
+
+      // 3. Fallback untuk peserta dengan 1 Maqra pada babak tersebut bila ID maqra tersinkronisasi berbeda
+      if (!match && stageQuestions.length === 1) {
+        match = assessments.find((a) => {
+          if (a.participantId !== participantId) return false;
+          if (a.judgeId !== judgeId) return false;
+          if (a.stageName !== stageName) return false;
+          return true;
+        });
+      }
 
       if (match) {
         allAvailableScores.push(match.finalScore);

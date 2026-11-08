@@ -24,7 +24,9 @@ import {
   RubricVersion,
   RubricField,
   RubricCriterion,
-  DeductionRule
+  DeductionRule,
+  LotteryDrawLogItem,
+  LotteryDrawResultItem
 } from '../types/mtq';
 import { generateUuid, isValidUuid, toDeterministicUuid, validateDatabaseUuids } from '../utils/uuid';
 
@@ -71,6 +73,7 @@ export interface HydratedWorkspacePayload {
   assessments: JudgeAssessment[];
   stageSnapshots: StageResultSnapshot[];
   auditLogs: AuditLogItem[];
+  lotteryDrawLogs?: LotteryDrawLogItem[];
 }
 
 export interface WorkspaceHydrationResult {
@@ -416,11 +419,15 @@ export const supabaseDataService = {
     };
   },
 
-  async signOut(): Promise<void> {
+  async signOut(): Promise<{ success: boolean; message?: string }> {
     const client = getActiveClient();
-    if (!this.isLive() || !client) return;
-    await client.auth.signOut();
+    if (!this.isLive() || !client) return { success: true };
+    const { error } = await client.auth.signOut();
     await this.verifyDatabaseConnection();
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    return { success: true };
   },
 
   /**
@@ -1011,7 +1018,11 @@ export const supabaseDataService = {
     const questions: Question[] = (questionsRes.data || []).map((q: Record<string, unknown>) => {
       const id = String(q.id);
       const bId = q.branch_id ? String(q.branch_id) : undefined;
+      const lId = q.level_id ? String(q.level_id) : undefined;
       const sId = q.stage_id ? String(q.stage_id) : undefined;
+      const resolvedBranchName = (bId && branchMap.get(bId)) || String(q.branch_name || 'Tilawah Dewasa Putra');
+      const resolvedLevelName = (lId && levelMap.get(lId)) || (jenjangList[0]?.name || 'Umum');
+      const resolvedStageName = (sId && stageMap.get(sId)?.name) || 'Penyisihan';
       const item: Question = {
         id,
         tenantId: String(q.tenant_id),
@@ -1024,8 +1035,14 @@ export const supabaseDataService = {
         pageNumber: Number(q.page_number || 1),
         pageStart: Number(q.page_start || q.page_number || 1),
         pageEnd: Number(q.page_end || q.page_number || 1),
-        branchAndLevel: (bId && branchMap.get(bId)) || 'Tilawah Dewasa Putra',
-        stageName: (sId && stageMap.get(sId)?.name) || 'Penyisihan',
+        branchId: bId,
+        branchName: resolvedBranchName,
+        levelId: lId,
+        levelName: resolvedLevelName,
+        stageId: sId,
+        branchAndLevel: lId ? `${resolvedBranchName} - ${resolvedLevelName}` : resolvedBranchName,
+        stage: resolvedStageName,
+        stageName: resolvedStageName,
         status: (q.status as 'Aktif' | 'Nonaktif') || 'Aktif',
         description: q.description ? String(q.description) : undefined
       };
@@ -1045,10 +1062,24 @@ export const supabaseDataService = {
       assignedMaqraBySp.set(spId, list);
     });
 
+    const participantBranchMap = new Map<string, string>();
+    (participantsRes.data || []).forEach((p: Record<string, unknown>) => {
+      if (p.id && p.branch_id) {
+        participantBranchMap.set(String(p.id), String(p.branch_id));
+      }
+    });
+
     const stageParticipations: StageParticipation[] = (spRes.data || []).map((sp: Record<string, unknown>) => {
       const spId = String(sp.id);
+      const partId = String(sp.participant_id);
       const stgId = String(sp.stage_id);
       const stgInfo = stageMap.get(stgId);
+      const partBranchId = participantBranchMap.get(partId);
+      const resolvedBranchId = partBranchId || stgInfo?.branchId;
+      const resolvedBranchName =
+        (partBranchId ? branchMap.get(partBranchId) : undefined) ||
+        (stgInfo?.branchName && stgInfo.branchName !== 'Semua Cabang' ? stgInfo.branchName : undefined) ||
+        'Tilawah Dewasa Putra';
       const maqras = assignedMaqraBySp.get(spId) || [];
       const assignedQuestions = maqras.map((m) => {
         const qObj = questionMap.get(m.questionId);
@@ -1072,11 +1103,11 @@ export const supabaseDataService = {
       return {
         id: spId,
         tenantId: String(sp.tenant_id),
-        participantId: String(sp.participant_id),
+        participantId: partId,
         stageId: stgId,
         stageName: stgInfo?.name || 'Penyisihan',
-        branchId: stgInfo?.branchId,
-        branchName: stgInfo?.branchName || 'Tilawah Dewasa Putra',
+        branchId: resolvedBranchId,
+        branchName: resolvedBranchName,
         lotteryNumber: String(sp.lottery_number || ''),
         questionId: firstQ ? firstQ.questionId : '',
         assignedMaqra:
@@ -1102,32 +1133,47 @@ export const supabaseDataService = {
       const bId = String(p.branch_id || '');
       const kId = String(p.kafilah_id || '');
       const lId = p.level_id ? String(p.level_id) : '';
+      const sId = p.stage_id ? String(p.stage_id) : '';
       const matchingSps = stageParticipations.filter((sp) => sp.participantId === id);
       const latestSp = matchingSps[matchingSps.length - 1];
+      const kafilahRegion = (kafilahs.find((k) => k.id === kId)?.region) || '';
+      const rawStatus = String(p.status || 'Menunggu');
+      const normalizedStatus: Participant['status'] =
+        rawStatus === 'Berlangsung'
+          ? 'Berlangsung'
+          : rawStatus === 'Lolos'
+          ? 'Lolos'
+          : rawStatus === 'Gugur'
+          ? 'Gugur'
+          : rawStatus === 'Final'
+          ? 'Final'
+          : 'Menunggu';
       return {
         id,
         tenantId: String(p.tenant_id),
+        adminSequenceNumber: p.admin_sequence_number ? String(p.admin_sequence_number) : undefined,
         participantId: String(p.participant_code || ''),
         lotteryNumber: String(p.lottery_number || ''),
         name: String(p.name || ''),
+        fatherName: p.father_name ? String(p.father_name) : undefined,
         gender: (p.gender as 'Putra' | 'Putri') || 'Putra',
+        originCity: p.origin_city ? String(p.origin_city) : kafilahRegion || undefined,
+        originRegion: p.origin_region ? String(p.origin_region) : kafilahRegion || undefined,
+        originInstitution: p.origin_institution ? String(p.origin_institution) : undefined,
         kafilahId: kId,
         kafilahName: kafilahMap.get(kId) || 'Kafilah',
         branchId: bId,
         branchName: branchMap.get(bId) || 'Tilawah Dewasa Putra',
-        levelName: levelMap.get(lId) || 'Ulya',
-        stageName: latestSp?.stageName || 'Penyisihan',
+        levelId: lId || undefined,
+        levelName: (lId && levelMap.get(lId)) || jenjangList[0]?.name || 'Ulya',
+        stageId: latestSp?.stageId || sId || undefined,
+        stageName: latestSp?.stageName || (sId && stageMap.get(sId)?.name) || 'Penyisihan',
         questionId: latestSp?.questionId || '',
         assignedMaqra: latestSp?.assignedMaqra || 'Belum Ditetapkan',
         pageNumber: latestSp?.pageNumber || 1,
         assignedQuestions: latestSp?.assignedQuestions || [],
         questionIds: (latestSp?.assignedQuestions || []).map((q) => q.questionId),
-        status:
-          p.status === 'Lolos' || p.status === 'Menunggu'
-            ? 'Menunggu'
-            : p.status === 'Berlangsung'
-            ? 'Berlangsung'
-            : 'Final'
+        status: normalizedStatus
       };
     });
 
@@ -1359,6 +1405,39 @@ export const supabaseDataService = {
       outcome: ((al.outcome as string) || 'Success') as 'Success' | 'Failed' | 'Warning'
     }));
 
+    let lotteryDrawLogs: LotteryDrawLogItem[] = [];
+    try {
+      const { data: drawLogRows, error: drawLogErr } = await client
+        .from('lottery_draw_logs')
+        .select('*')
+        .eq('tenant_id', tenantUuid)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (!drawLogErr && Array.isArray(drawLogRows)) {
+        lotteryDrawLogs = drawLogRows.map((row: Record<string, unknown>) => ({
+          id: String(row.id),
+          tenantId: String(row.tenant_id),
+          stageId: row.stage_id ? String(row.stage_id) : undefined,
+          stageName: String(row.stage_name || 'Penyisihan'),
+          branchId: row.branch_id ? String(row.branch_id) : undefined,
+          branchName: String(row.branch_name || ''),
+          levelId: row.level_id ? String(row.level_id) : undefined,
+          levelName: row.level_name ? String(row.level_name) : undefined,
+          actorId: row.actor_id ? String(row.actor_id) : undefined,
+          actorName: String(row.actor_name || 'Administrator'),
+          questionsPerParticipant: Number(row.questions_per_participant || 1),
+          participantIds: Array.isArray(row.participant_ids) ? (row.participant_ids as string[]) : [],
+          questionPoolIds: Array.isArray(row.question_pool_ids) ? (row.question_pool_ids as string[]) : [],
+          drawResults: Array.isArray(row.draw_results) ? (row.draw_results as LotteryDrawResultItem[]) : [],
+          drawVersion: Number(row.draw_version || 1),
+          notes: row.notes ? String(row.notes) : undefined,
+          createdAt: String(row.created_at || new Date().toISOString())
+        }));
+      }
+    } catch {
+      // Tabel lottery_draw_logs bersifat opsional pada database yang belum menjalankan migrasi terbaru
+    }
+
     return {
       success: true,
       tenantId: tenantUuid,
@@ -1379,7 +1458,8 @@ export const supabaseDataService = {
         judgeAssignments,
         assessments,
         stageSnapshots,
-        auditLogs
+        auditLogs,
+        lotteryDrawLogs
       }
     };
   },
@@ -2034,7 +2114,11 @@ export const supabaseDataService = {
       };
     }
 
-    const { error: partErr } = await client.from('participants').upsert({
+    const resolvedLevelId =
+      (levelId && isValidUuid(levelId) ? levelId : null) ||
+      (participant.levelId && isValidUuid(participant.levelId) ? participant.levelId : null);
+
+    const baseParticipantPayload = {
       id: participant.id,
       tenant_id: participant.tenantId,
       participant_code: participant.participantId,
@@ -2043,9 +2127,25 @@ export const supabaseDataService = {
       gender: participant.gender,
       kafilah_id: participant.kafilahId,
       branch_id: participant.branchId,
-      level_id: levelId && isValidUuid(levelId) ? levelId : null,
+      level_id: resolvedLevelId,
       status: participant.status
-    });
+    };
+
+    const extendedParticipantPayload = {
+      ...baseParticipantPayload,
+      admin_sequence_number: participant.adminSequenceNumber || null,
+      father_name: participant.fatherName || null,
+      origin_city: participant.originCity || null,
+      origin_region: participant.originRegion || null,
+      origin_institution: participant.originInstitution || null,
+      stage_id: stageParticipation.stageId && isValidUuid(stageParticipation.stageId) ? stageParticipation.stageId : null
+    };
+
+    let { error: partErr } = await client.from('participants').upsert(extendedParticipantPayload);
+    if (partErr && (partErr.message?.includes('column') || partErr.code === 'PGRST204')) {
+      const retryRes = await client.from('participants').upsert(baseParticipantPayload);
+      partErr = retryRes.error;
+    }
 
     if (partErr) {
       return { success: false, mode: 'supabase_live', message: partErr.message };
@@ -2246,7 +2346,12 @@ export const supabaseDataService = {
     return { success: true, mode: 'supabase_live', message: 'Kafilah tersimpan di Supabase.' };
   },
 
-  async upsertQuestion(question: Question, branchId?: string, stageId?: string): Promise<RpcServiceResult> {
+  async upsertQuestion(
+    question: Question,
+    branchId?: string,
+    stageId?: string,
+    levelId?: string
+  ): Promise<RpcServiceResult> {
     const uuidCheck = this.validateReferences({ id: question.id, tenant_id: question.tenantId });
     if (!uuidCheck.valid) {
       return {
@@ -2260,15 +2365,18 @@ export const supabaseDataService = {
     if (!this.isLive() || !client) {
       return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
     }
+    const effectiveBranchId = branchId || question.branchId;
+    const effectiveStageId = stageId || question.stageId;
+    const effectiveLevelId = levelId || question.levelId;
     const fkCheck = await this.verifyDatabaseReferencesExist({
       tenantId: question.tenantId,
-      branchId: branchId && isValidUuid(branchId) ? branchId : undefined,
-      stageId: stageId && isValidUuid(stageId) ? stageId : undefined
+      branchId: effectiveBranchId && isValidUuid(effectiveBranchId) ? effectiveBranchId : undefined,
+      stageId: effectiveStageId && isValidUuid(effectiveStageId) ? effectiveStageId : undefined
     });
     if (!fkCheck.valid) {
       return { success: false, mode: 'supabase_live', message: fkCheck.message! };
     }
-    const { error } = await client.from('questions').upsert({
+    const baseQuestionPayload = {
       id: question.id,
       tenant_id: question.tenantId,
       code: question.code,
@@ -2280,13 +2388,60 @@ export const supabaseDataService = {
       page_number: question.pageNumber,
       page_start: question.pageStart || question.pageNumber,
       page_end: question.pageEnd || question.pageNumber,
-      branch_id: branchId && isValidUuid(branchId) ? branchId : null,
-      stage_id: stageId && isValidUuid(stageId) ? stageId : null,
+      branch_id: effectiveBranchId && isValidUuid(effectiveBranchId) ? effectiveBranchId : null,
+      stage_id: effectiveStageId && isValidUuid(effectiveStageId) ? effectiveStageId : null,
       status: question.status,
       description: question.description || null
-    });
+    };
+    const extendedQuestionPayload = {
+      ...baseQuestionPayload,
+      level_id: effectiveLevelId && isValidUuid(effectiveLevelId) ? effectiveLevelId : null
+    };
+    let { error } = await client.from('questions').upsert(extendedQuestionPayload);
+    if (error && (error.message?.includes('column') || error.code === 'PGRST204')) {
+      const retryRes = await client.from('questions').upsert(baseQuestionPayload);
+      error = retryRes.error;
+    }
     if (error) return { success: false, mode: 'supabase_live', message: error.message };
     return { success: true, mode: 'supabase_live', message: 'Soal maqra tersimpan di Supabase.' };
+  },
+
+  async insertLotteryDrawLog(log: LotteryDrawLogItem): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ id: log.id, tenant_id: log.tenantId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!
+      };
+    }
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    const { error } = await client.from('lottery_draw_logs').upsert({
+      id: log.id,
+      tenant_id: log.tenantId,
+      stage_id: log.stageId && isValidUuid(log.stageId) ? log.stageId : null,
+      stage_name: log.stageName,
+      branch_id: log.branchId && isValidUuid(log.branchId) ? log.branchId : null,
+      branch_name: log.branchName,
+      level_id: log.levelId && isValidUuid(log.levelId) ? log.levelId : null,
+      level_name: log.levelName || null,
+      actor_id: log.actorId && isValidUuid(log.actorId) ? log.actorId : null,
+      actor_name: log.actorName,
+      questions_per_participant: log.questionsPerParticipant,
+      participant_ids: log.participantIds,
+      question_pool_ids: log.questionPoolIds,
+      draw_results: log.drawResults,
+      draw_version: log.drawVersion,
+      notes: log.notes || null,
+      created_at: log.createdAt
+    });
+    if (error) {
+      return { success: false, mode: 'supabase_live', message: error.message };
+    }
+    return { success: true, mode: 'supabase_live', message: 'Riwayat undian maqra tercatat di database.' };
   },
 
   async upsertJudgeAssignment(assignment: JudgeAssignment): Promise<RpcServiceResult> {
@@ -2517,21 +2672,43 @@ export const supabaseDataService = {
       return { success: false, mode: 'supabase_live', message: fkCheck.message! };
     }
 
-    const { error } = await client
+    const effectiveLevelId = levelId || participant.levelId;
+    const baseUpdatePayload = {
+      kafilah_id: participant.kafilahId,
+      branch_id: effectiveBranchId,
+      level_id: effectiveLevelId && isValidUuid(effectiveLevelId) ? effectiveLevelId : null,
+      participant_code: participant.participantId,
+      name: participant.name,
+      gender: participant.gender,
+      lottery_number: participant.lotteryNumber,
+      status: participant.status,
+      updated_at: new Date().toISOString()
+    };
+
+    const extendedUpdatePayload = {
+      ...baseUpdatePayload,
+      admin_sequence_number: participant.adminSequenceNumber || null,
+      father_name: participant.fatherName || null,
+      origin_city: participant.originCity || null,
+      origin_region: participant.originRegion || null,
+      origin_institution: participant.originInstitution || null,
+      stage_id: participant.stageId && isValidUuid(participant.stageId) ? participant.stageId : null
+    };
+
+    let { error } = await client
       .from('participants')
-      .update({
-        kafilah_id: participant.kafilahId,
-        branch_id: effectiveBranchId,
-        level_id: levelId && isValidUuid(levelId) ? levelId : null,
-        participant_code: participant.participantId,
-        name: participant.name,
-        gender: participant.gender,
-        lottery_number: participant.lotteryNumber,
-        status: participant.status,
-        updated_at: new Date().toISOString()
-      })
+      .update(extendedUpdatePayload)
       .eq('id', participant.id)
       .eq('tenant_id', participant.tenantId);
+
+    if (error && (error.message?.includes('column') || error.code === 'PGRST204')) {
+      const retryRes = await client
+        .from('participants')
+        .update(baseUpdatePayload)
+        .eq('id', participant.id)
+        .eq('tenant_id', participant.tenantId);
+      error = retryRes.error;
+    }
 
     if (error) return { success: false, mode: 'supabase_live', message: error.message };
 

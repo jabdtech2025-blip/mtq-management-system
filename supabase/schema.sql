@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS levels (
     UNIQUE (tenant_id, code)
 );
 
--- 5. KAFILAHS & PARTICIPANTS
+-- 5. KAFILAHS, STAGES & PARTICIPANTS
 CREATE TABLE IF NOT EXISTS kafilahs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -138,24 +138,6 @@ CREATE TABLE IF NOT EXISTS kafilahs (
     UNIQUE (tenant_id, code)
 );
 
-CREATE TABLE IF NOT EXISTS participants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    participant_code VARCHAR(50) NOT NULL, -- e.g. "TLW-004"
-    lottery_number VARCHAR(20) NOT NULL,   -- e.g. "04"
-    name VARCHAR(255) NOT NULL,
-    gender VARCHAR(10) NOT NULL CHECK (gender IN ('Putra', 'Putri')),
-    kafilah_id UUID NOT NULL REFERENCES kafilahs(id) ON DELETE RESTRICT,
-    branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-    level_id UUID REFERENCES levels(id) ON DELETE SET NULL,
-    status VARCHAR(30) NOT NULL DEFAULT 'Menunggu' CHECK (status IN ('Menunggu', 'Berlangsung', 'Lolos', 'Gugur', 'Final')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, participant_code),
-    UNIQUE (tenant_id, branch_id, lottery_number)
-);
-
--- 6. COMPETITION STAGES & PARTICIPATIONS
 CREATE TABLE IF NOT EXISTS stages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -172,6 +154,30 @@ CREATE TABLE IF NOT EXISTS stages (
     UNIQUE (tenant_id, branch_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS participants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    admin_sequence_number VARCHAR(50),
+    participant_code VARCHAR(50) NOT NULL, -- e.g. "TLW-004"
+    lottery_number VARCHAR(20) NOT NULL,   -- e.g. "04"
+    name VARCHAR(255) NOT NULL,
+    father_name VARCHAR(255),
+    gender VARCHAR(10) NOT NULL CHECK (gender IN ('Putra', 'Putri')),
+    origin_city VARCHAR(150),
+    origin_region VARCHAR(150),
+    origin_institution VARCHAR(255),
+    kafilah_id UUID NOT NULL REFERENCES kafilahs(id) ON DELETE RESTRICT,
+    branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+    level_id UUID REFERENCES levels(id) ON DELETE SET NULL,
+    stage_id UUID REFERENCES stages(id) ON DELETE SET NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'Menunggu' CHECK (status IN ('Menunggu', 'Berlangsung', 'Lolos', 'Gugur', 'Final')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, participant_code),
+    UNIQUE (tenant_id, branch_id, lottery_number)
+);
+
+-- 6. STAGE PARTICIPATIONS
 CREATE TABLE IF NOT EXISTS stage_participations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -205,6 +211,7 @@ CREATE TABLE IF NOT EXISTS questions (
     page_start INT NOT NULL,
     page_end INT NOT NULL,
     branch_id UUID REFERENCES branches(id) ON DELETE CASCADE,
+    level_id UUID REFERENCES levels(id) ON DELETE SET NULL,
     stage_id UUID REFERENCES stages(id) ON DELETE CASCADE,
     status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif', 'Nonaktif')),
     description TEXT,
@@ -221,6 +228,26 @@ CREATE TABLE IF NOT EXISTS assigned_maqras (
     assigned_by UUID REFERENCES profiles(id),
     method VARCHAR(30) NOT NULL DEFAULT 'undian' CHECK (method IN ('undian', 'manual', 'jadwal')),
     UNIQUE (stage_participation_id, question_id)
+);
+
+CREATE TABLE IF NOT EXISTS lottery_draw_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    stage_id UUID REFERENCES stages(id) ON DELETE SET NULL,
+    stage_name VARCHAR(100) NOT NULL,
+    branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
+    branch_name VARCHAR(150) NOT NULL,
+    level_id UUID REFERENCES levels(id) ON DELETE SET NULL,
+    level_name VARCHAR(150),
+    actor_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    actor_name VARCHAR(255) NOT NULL,
+    questions_per_participant INT NOT NULL DEFAULT 1 CHECK (questions_per_participant >= 1),
+    participant_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    question_pool_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    draw_results JSONB NOT NULL DEFAULT '[]'::jsonb,
+    draw_version INT NOT NULL DEFAULT 1,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- 8. RUBRIC ARCHITECTURE & COMPETITION RULES
@@ -616,6 +643,7 @@ ALTER TABLE judge_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE judge_assessments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stage_result_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lottery_draw_logs ENABLE ROW LEVEL SECURITY;
 
 -- Security Helper: Check if authenticated user is a verified platform superadmin
 CREATE OR REPLACE FUNCTION is_superadmin()
@@ -803,7 +831,7 @@ DECLARE
     t TEXT;
     strict_tenant_tables TEXT[] := ARRAY[
         'branches', 'levels', 'kafilahs', 'participants', 'questions',
-        'assigned_maqras', 'error_categories', 'competition_rule_configs',
+        'assigned_maqras', 'lottery_draw_logs', 'error_categories', 'competition_rule_configs',
         'stage_participations', 'judge_assignments'
     ];
 BEGIN

@@ -48,12 +48,16 @@ export const PenilaianDualPanelView: React.FC = () => {
     getParticipantStageQuestions,
     syncStatus,
     lastSyncTime,
-    toggleSidebar
+    toggleSidebar,
+    getActiveRubricForBranch
   } = useMtq();
 
   // Find current participant (handle empty state gracefully)
   const currentParticipant =
     participants.find((p) => p.id === selectedParticipantId) || participants[0] || null;
+  const activeRubric = currentParticipant
+    ? getActiveRubricForBranch(currentParticipant.branchName, currentParticipant.branchId)
+    : null;
 
   const activeStageName = currentParticipant?.stageName || 'Penyisihan';
 
@@ -356,43 +360,59 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const [isFlawlessConfirmed, setIsFlawlessConfirmed] = useState<boolean>(false);
-
-  // Finalize action
-  const handleConfirmFinalize = async () => {
-    if (!currentParticipant) return;
-    if (!currentAssessment) {
-      if (!isFlawlessConfirmed) {
-        setFinalizeError(
-          'Lembar penilaian belum memiliki input kesalahan. Centang konfirmasi penampilan sempurna (0 kesalahan) terlebih dahulu untuk menginisialisasi lembar nilai.'
-        );
-        return;
-      }
-      const initRes = initializeAssessment(
-        currentParticipant.id,
-        activeJudgeId,
-        activeStageName,
-        activeQuestionId
-      );
-      if (!initRes.success) {
-        setFinalizeError(initRes.message);
-        return;
-      }
-    }
-    const result = await finalizeAssessment(currentParticipant.id, activeJudgeId, activeStageName, activeQuestionId);
-    if (!result.success) {
-      setFinalizeError(result.message);
-    } else {
-      setFinalizeError(null);
-      setIsFlawlessConfirmed(false);
-      setIsConfirmModalOpen(false);
-    }
-  };
+  const [isFinalizing, setIsFinalizing] = useState<boolean>(false);
 
   // Error counting values from active assessment
   const errorCounts = currentAssessment?.errorCounts || {};
   const totalDeductions = currentAssessment?.totalDeductions || 0;
-  const currentScore = currentAssessment ? currentAssessment.finalScore : 100.0;
+  const startingScore = activeRubric?.startingScore ?? 100.0;
+  const currentScore = currentAssessment ? currentAssessment.finalScore : startingScore;
   const pageAnnotationCount = strokes.filter((s) => s.page === currentPage).length;
+  const isZeroErrorSheet = !currentAssessment || totalDeductions === 0;
+
+  // Finalize action
+  const handleConfirmFinalize = async () => {
+    if (!currentParticipant || isFinalizing) return;
+    if (isZeroErrorSheet && !isFlawlessConfirmed) {
+      setFinalizeError(
+        'Lembar penilaian memiliki 0 kesalahan. Centang konfirmasi penampilan sempurna (0 kesalahan) terlebih dahulu sebelum mengunci nilai.'
+      );
+      return;
+    }
+
+    setIsFinalizing(true);
+    setFinalizeError(null);
+    try {
+      if (!currentAssessment) {
+        const initRes = initializeAssessment(
+          currentParticipant.id,
+          activeJudgeId,
+          activeStageName,
+          activeQuestionId
+        );
+        if (!initRes.success) {
+          setFinalizeError(initRes.message);
+          return;
+        }
+      }
+      const result = await finalizeAssessment(
+        currentParticipant.id,
+        activeJudgeId,
+        activeStageName,
+        activeQuestionId,
+        { confirmFlawless: isFlawlessConfirmed }
+      );
+      if (!result.success) {
+        setFinalizeError(result.message);
+      } else {
+        setFinalizeError(null);
+        setIsFlawlessConfirmed(false);
+        setIsConfirmModalOpen(false);
+      }
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
 
   if (!currentParticipant) {
     return (
@@ -1062,15 +1082,32 @@ export const PenilaianDualPanelView: React.FC = () => {
               </div>
             </div>
 
-            {totalDeductions === 0 && strokes.length === 0 && (
-              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-4 text-xs text-amber-900 flex items-start gap-2.5">
-                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">Konfirmasi Nilai Sempurna (100.00)</p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed">
-                    Belum ada pengurangan kesalahan atau anotasi mushaf yang dicatat. Apakah Anda yakin peserta tampil sempurna tanpa kesalahan sebelum mengunci nilai?
-                  </p>
+            {isZeroErrorSheet && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 mb-4 text-xs text-amber-900 space-y-2.5">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Konfirmasi Nilai Sempurna ({startingScore.toFixed(2)})</p>
+                    <p className="mt-0.5 text-[11px] leading-relaxed">
+                      Lembar penilaian ini mencatat 0 pengurangan kesalahan. Silakan centang konfirmasi di bawah ini untuk memfinalisasi nilai sempurna.
+                    </p>
+                  </div>
                 </div>
+                <label className="flex items-start gap-2.5 pt-2 border-t border-amber-200/80 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isFlawlessConfirmed}
+                    onChange={(e) => {
+                      setIsFlawlessConfirmed(e.target.checked);
+                      if (e.target.checked) setFinalizeError(null);
+                    }}
+                    data-testid="confirm-flawless-checkbox"
+                    className="mt-0.5 w-4 h-4 rounded border-amber-400 text-emerald-700 focus:ring-emerald-600"
+                  />
+                  <span className="text-xs font-bold text-amber-950 leading-snug">
+                    Saya mengonfirmasi bahwa peserta tampil sempurna tanpa kesalahan.
+                  </span>
+                </label>
               </div>
             )}
 
@@ -1081,16 +1118,29 @@ export const PenilaianDualPanelView: React.FC = () => {
 
             <div className="flex items-center justify-end gap-2.5">
               <button
-                onClick={() => setIsConfirmModalOpen(false)}
-                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700 transition-colors"
+                onClick={() => {
+                  if (isFinalizing) return;
+                  setIsConfirmModalOpen(false);
+                }}
+                disabled={isFinalizing}
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 disabled:opacity-50 rounded-lg text-xs font-semibold text-slate-700 transition-colors"
               >
                 Batal
               </button>
               <button
                 onClick={handleConfirmFinalize}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold transition-all shadow-sm"
+                disabled={isFinalizing || (isZeroErrorSheet && !isFlawlessConfirmed)}
+                data-testid="confirm-finalize-submit-btn"
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:bg-slate-300 disabled:text-slate-500 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
               >
-                Ya, Kunci Penilaian
+                {isFinalizing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Mengunci...
+                  </>
+                ) : (
+                  'Ya, Kunci Penilaian'
+                )}
               </button>
             </div>
           </div>

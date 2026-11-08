@@ -1,33 +1,52 @@
-name: MTQ Management System CI Pipeline
+name: MTQ E-Scoring CI Pipeline
 
 on:
   push:
-    branches: [ main, fix/p0-production-hardening ]
+    branches: [ main, master, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master, develop ]
 
 jobs:
-  test-and-build:
+  verify-and-test:
+    name: Typecheck, Unit/Integration Tests, Build & E2E
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout Code Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js Runtime
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: 20
 
-      - name: Install Project Dependencies
-        run: npm ci
+      - name: Install Dependencies
+        run: npm install
 
-      - name: Run Domain & Business Rules Tests
-        run: npm test
-
-      - name: Run TypeScript Type Check & Linter
+      - name: TypeScript Static Typecheck (Lint)
         run: npm run lint
 
-      - name: Build Production Application
+      - name: Unit, Integration & Supabase RLS Security Tests (Vitest)
+        run: npm run test
+
+      - name: Production Bundle Build (Vite)
         run: npm run build
+
+      - name: Install Playwright Chromium Browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E Audit Suite (Demo Mode)
+        env:
+          E2E_LIVE_ENABLED: 'false'
+        run: npm run test:e2e
+
+      - name: Upload Playwright Failure Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

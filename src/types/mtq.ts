@@ -98,22 +98,29 @@ export interface StageParticipation {
 export interface Participant {
   id: string;
   tenantId: string;
+  adminSequenceNumber?: string; // Nomor urut administratif (mis. "001")
   lotteryNumber: string; // Nomor Undian, misal "04"
   participantId: string; // ID Peserta permanen, misal "TLW-004"
   name: string;
+  fatherName?: string; // Nama Ayah / Bin / Binti
   gender: 'Putra' | 'Putri';
+  originCity?: string; // Asal Kota / Kabupaten
+  originRegion?: string; // Asal Wilayah / Provinsi
+  originInstitution?: string; // Lembaga Asal (Pesantren / Sekolah / LPTQ)
   kafilahId: string;
   kafilahName: string;
   branchId?: string;
   branchName: string; // e.g. "Tilawah Dewasa Putra"
+  levelId?: string;
   levelName: string;  // e.g. "Ulya"
+  stageId?: string;
   stageName: string;  // Current stage for compatibility
   questionId: string; // Primary question for backward compatibility
   assignedMaqra: string;
   pageNumber: number;
   assignedQuestions?: AssignedMaqraItem[]; // Multiple questions support
   questionIds?: string[]; // Array of assigned question IDs
-  status: 'Menunggu' | 'Berlangsung' | 'Final';
+  status: 'Menunggu' | 'Berlangsung' | 'Lolos' | 'Gugur' | 'Final';
   stageHistory?: {
     stageId?: string;
     stageName: string;
@@ -139,12 +146,51 @@ export interface Question {
   pageStart?: number; // e.g. 305
   pageEnd?: number;   // e.g. 307
   pageNumbers?: number[]; // [305, 306, 307]
+  branchId?: string;
+  branchName?: string;
+  levelId?: string;
+  levelName?: string;
+  stageId?: string;
   branchAndLevel: string; // "Tilawah Dewasa Putra Ulya"
+  stage?: string;         // Alias for stageName
   stageName: string;      // "Penyisihan"
   status: 'Aktif' | 'Nonaktif';
   description?: string;
   assignedToParticipantId?: string;
   assignedToParticipantIds?: string[];
+}
+
+export interface CabangItem extends GenericMasterItem {}
+export interface JenjangItem extends GenericMasterItem {}
+export type StageItem = CompetitionStage;
+
+export interface LotteryDrawResultItem {
+  participantId: string;
+  participantCode: string;
+  participantName: string;
+  lotteryNumber: string;
+  assignedQuestionIds: string[];
+  assignedQuestionCodes: string[];
+}
+
+export interface LotteryDrawLogItem {
+  id: string;
+  tenantId: string;
+  stageId?: string;
+  stageName: string;
+  branchId?: string;
+  branchName: string;
+  levelId?: string;
+  levelName?: string;
+  actorId?: string;
+  actorName: string;
+  questionsPerParticipant: number;
+  participantIds: string[];
+  questionPoolIds: string[];
+  drawResults: LotteryDrawResultItem[];
+  drawVersion: number;
+  notes?: string;
+  createdAt: string;
 }
 
 export interface GenericMasterItem {
