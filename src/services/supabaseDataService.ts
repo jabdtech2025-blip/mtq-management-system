@@ -1069,7 +1069,14 @@ export const supabaseDataService = {
       }
     });
 
-    const stageParticipations: StageParticipation[] = (spRes.data || []).map((sp: Record<string, unknown>) => {
+    const assessedSpIds = new Set<string>();
+    (assessmentsRes.data || []).forEach((a: Record<string, unknown>) => {
+      if (a.stage_participation_id) {
+        assessedSpIds.add(String(a.stage_participation_id));
+      }
+    });
+
+    const rawStageParticipations: StageParticipation[] = (spRes.data || []).map((sp: Record<string, unknown>) => {
       const spId = String(sp.id);
       const partId = String(sp.participant_id);
       const stgId = String(sp.stage_id);
@@ -1128,13 +1135,58 @@ export const supabaseDataService = {
       };
     });
 
+    // Consolidate assignedQuestions across duplicate stage_participations rows on the same (participantId, stageName)
+    const mergedQuestionsByPartStage = new Map<string, StageParticipation['assignedQuestions']>();
+    rawStageParticipations.forEach((sp) => {
+      const key = `${sp.participantId}::${sp.stageName}`;
+      const existing = mergedQuestionsByPartStage.get(key) || [];
+      const combined = [...existing];
+      (sp.assignedQuestions || []).forEach((aq) => {
+        if (!combined.some((item) => item.questionId === aq.questionId)) {
+          combined.push(aq);
+        }
+      });
+      mergedQuestionsByPartStage.set(key, combined);
+    });
+
+    const stageParticipations: StageParticipation[] = rawStageParticipations.map((sp) => {
+      const key = `${sp.participantId}::${sp.stageName}`;
+      const consolidatedQuestions = mergedQuestionsByPartStage.get(key) || sp.assignedQuestions || [];
+      const firstQ = consolidatedQuestions[0];
+      return {
+        ...sp,
+        questionId: firstQ ? firstQ.questionId : sp.questionId,
+        assignedMaqra:
+          consolidatedQuestions.length === 0
+            ? sp.assignedMaqra
+            : consolidatedQuestions.length === 1
+            ? firstQ.title
+            : `${consolidatedQuestions.length} Maqra Ditetapkan`,
+        pageNumber: firstQ ? firstQ.pageNumber : sp.pageNumber,
+        assignedQuestions: consolidatedQuestions
+      };
+    });
+
+    const stageOrderById = new Map<string, number>();
+    stages.forEach((s) => stageOrderById.set(s.id, s.order || 1));
+
     const participants: Participant[] = (participantsRes.data || []).map((p: Record<string, unknown>) => {
       const id = String(p.id);
       const bId = String(p.branch_id || '');
       const kId = String(p.kafilah_id || '');
       const lId = p.level_id ? String(p.level_id) : '';
       const sId = p.stage_id ? String(p.stage_id) : '';
-      const matchingSps = stageParticipations.filter((sp) => sp.participantId === id);
+      const matchingSps = stageParticipations
+        .filter((sp) => sp.participantId === id)
+        .sort((a, b) => {
+          const orderA = stageOrderById.get(a.stageId) || 1;
+          const orderB = stageOrderById.get(b.stageId) || 1;
+          if (orderA !== orderB) return orderA - orderB;
+          const aHasAsm = assessedSpIds.has(a.id) ? 1 : 0;
+          const bHasAsm = assessedSpIds.has(b.id) ? 1 : 0;
+          if (aHasAsm !== bHasAsm) return aHasAsm - bHasAsm;
+          return (a.assignedQuestions?.length || 0) - (b.assignedQuestions?.length || 0);
+        });
       const latestSp = matchingSps[matchingSps.length - 1];
       const kafilahRegion = (kafilahs.find((k) => k.id === kId)?.region) || '';
       const rawStatus = String(p.status || 'Menunggu');
@@ -1312,7 +1364,7 @@ export const supabaseDataService = {
     const judgeAssignments: JudgeAssignment[] = (judgeAsgRes.data || []).map((ja: Record<string, unknown>) => {
       const stgId = String(ja.stage_id);
       const stgInfo = stageMap.get(stgId);
-      const bId = ja.branch_id ? String(ja.branch_id) : stgInfo?.branchId;
+      const bId = ja.branch_id ? String(ja.branch_id) : undefined;
       const prof = ja.profiles as { name?: string } | null;
       const judgeId = String(ja.judge_profile_id);
       const jName = prof?.name || 'Dewan Hakim';
@@ -1326,7 +1378,11 @@ export const supabaseDataService = {
         stageId: stgId,
         stageName: stgInfo?.name || 'Penyisihan',
         branchId: bId,
-        branchName: (bId && branchMap.get(bId)) || stgInfo?.branchName || 'Tilawah Dewasa Putra',
+        branchName:
+          (bId && branchMap.get(bId)) ||
+          (stgInfo?.branchId && stgInfo.branchName && stgInfo.branchName !== 'Semua Cabang'
+            ? stgInfo.branchName
+            : 'Semua Cabang'),
         judgeField: jField,
         rubricFieldId: ja.rubric_field_id ? String(ja.rubric_field_id) : undefined
       };

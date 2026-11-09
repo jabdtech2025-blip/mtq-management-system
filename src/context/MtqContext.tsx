@@ -39,7 +39,11 @@ import {
   INITIAL_CABANG,
   calculateScore
 } from '../data/mockData';
-import { calculateAssessmentScore, getActiveRubricFields } from '../services/scoringEngine';
+import {
+  calculateAssessmentScore,
+  getActiveRubricFields,
+  validateMaqraAssignmentForParticipant
+} from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
 import { supabaseDataService, AuthenticatedSupabaseProfile } from '../services/supabaseDataService';
 import {
@@ -215,7 +219,7 @@ interface MtqContextType {
   updateKafilah: (id: string, updated: Partial<Kafilah>) => void;
   deleteKafilah: (id: string) => { success: boolean; message: string };
   addParticipant: (part: Omit<Participant, 'id' | 'tenantId'>) => { success: boolean; message: string };
-  updateParticipant: (id: string, updated: Partial<Participant>) => void;
+  updateParticipant: (id: string, updated: Partial<Participant>) => { success: boolean; message: string };
   deleteParticipant: (id: string) => { success: boolean; message: string };
   importParticipantsBatch: (
     rows: ParsedParticipantImportRow[]
@@ -840,6 +844,66 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   stageParticipationsRef.current = stageParticipations;
 
   useEffect(() => {
+    outboxSyncService.registerProcessor(async (op) => {
+      try {
+        if (op.operationType === 'UPSERT_ASSESSMENT_DRAFT') {
+          const { assessment, assignedMaqraId, stageParticipation, participant } = op.payload || {};
+          if (!assessment) {
+            return { success: false, message: 'Payload draf penilaian tidak lengkap di antrean outbox.' };
+          }
+          const res = await supabaseDataService.syncAssessmentToRemote(
+            assessment as JudgeAssessment,
+            assignedMaqraId as string | undefined,
+            {
+              stageParticipation: stageParticipation as StageParticipation | undefined,
+              participant: participant as Participant | undefined
+            }
+          );
+          return { success: res.success, message: res.message };
+        }
+        if (op.operationType === 'UPSERT_PARTICIPANT') {
+          const { participant, stageParticipation, levelId, autoCreateMissingMaster } = op.payload || {};
+          if (!participant || !stageParticipation) {
+            return { success: false, message: 'Payload peserta tidak lengkap di antrean outbox.' };
+          }
+          const res = await supabaseDataService.upsertParticipantWithStage({
+            participant: participant as Participant,
+            stageParticipation: stageParticipation as StageParticipation,
+            levelId: (levelId as string | null) ?? null,
+            autoCreateMissingMaster: Boolean(autoCreateMissingMaster)
+          });
+          return { success: res.success, message: res.message };
+        }
+        if (op.operationType === 'UPSERT_QUESTION') {
+          const { question, branchId, stageId, levelId } = op.payload || {};
+          if (!question) {
+            return { success: false, message: 'Payload soal tidak lengkap di antrean outbox.' };
+          }
+          const res = await supabaseDataService.upsertQuestion(
+            question as Question,
+            branchId as string | undefined,
+            stageId as string | undefined,
+            levelId as string | undefined
+          );
+          return { success: res.success, message: res.message };
+        }
+        if (op.operationType === 'COMMIT_LOTTERY_DRAW') {
+          const { drawLog } = op.payload || {};
+          if (!drawLog) {
+            return { success: false, message: 'Payload riwayat undian tidak lengkap di antrean outbox.' };
+          }
+          const res = await supabaseDataService.insertLotteryDrawLog(drawLog as LotteryDrawLogItem);
+          return { success: res.success, message: res.message };
+        }
+        return { success: true };
+      } catch (err) {
+        return {
+          success: false,
+          message: err instanceof Error ? err.message : 'Gagal mengeksekusi operasi outbox'
+        };
+      }
+    });
+
     const unsubscribe = outboxSyncService.subscribe((summary) => {
       setOutboxSummary(summary);
     });
@@ -1341,24 +1405,34 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!part) return [];
     const targetStage = stageName || part.stageName || selectedStageName;
 
-    // 1. Check all StageParticipations for targetStage (prefer row with assignedQuestions or questionId)
+    // 1. Check all StageParticipations for targetStage and merge assignedQuestions across duplicate rows
     const matchingSps = stageParticipations.filter(
       (item) =>
         item.tenantId === currentTenantId &&
         item.participantId === participantId &&
         item.stageName === targetStage
     );
+
+    const mergedAssignedQuestions: AssignedMaqraItem[] = [];
+    for (const item of matchingSps) {
+      if (item.assignedQuestions && item.assignedQuestions.length > 0) {
+        for (const aq of item.assignedQuestions) {
+          if (!aq.stageName || aq.stageName === targetStage) {
+            if (!mergedAssignedQuestions.some((existing) => existing.questionId === aq.questionId)) {
+              mergedAssignedQuestions.push(aq);
+            }
+          }
+        }
+      }
+    }
+    if (mergedAssignedQuestions.length > 0) {
+      return mergedAssignedQuestions;
+    }
+
     const sp =
       matchingSps.find((item) => item.assignedQuestions && item.assignedQuestions.length > 0) ||
       matchingSps.find((item) => item.questionId && item.questionId.trim() !== '') ||
       matchingSps[0];
-
-    if (sp?.assignedQuestions && sp.assignedQuestions.length > 0) {
-      const stageSpecific = sp.assignedQuestions.filter(
-        (aq) => !aq.stageName || aq.stageName === targetStage
-      );
-      if (stageSpecific.length > 0) return stageSpecific;
-    }
 
     // 2. Check Participant assignedQuestions strictly matching targetStage
     if (part.assignedQuestions && part.assignedQuestions.length > 0) {
@@ -1407,69 +1481,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ];
     }
 
-    // 4. Fallback: derive assigned questions from existing assessments for this participant on targetStage
-    const partStageAssessments = assessments.filter(
-      (a) =>
-        a.tenantId === currentTenantId &&
-        a.participantId === participantId &&
-        a.stageName === targetStage &&
-        a.questionId &&
-        a.questionId.trim() !== ''
-    );
-    if (partStageAssessments.length > 0) {
-      const uniqueQIds = Array.from(
-        new Set(partStageAssessments.map((a) => String(a.questionId || '')).filter(Boolean))
-      );
-      return uniqueQIds.map((qId, idx) => {
-        const qObj = questions.find((q) => q.id === qId);
-        return {
-          questionId: String(qId),
-          code: qObj?.code || `MQ-0${idx + 1}`,
-          title:
-            qObj?.title ||
-            (sp?.assignedMaqra && sp.assignedMaqra !== 'Belum Ditetapkan' ? sp.assignedMaqra : '') ||
-            (part.assignedMaqra && part.assignedMaqra !== 'Belum Ditetapkan' ? part.assignedMaqra : '') ||
-            'Maqra Tilawah',
-          surahName: qObj?.surahName,
-          surahNumber: qObj?.surahNumber,
-          startAyah: qObj?.startAyah,
-          endAyah: qObj?.endAyah,
-          pageNumber: qObj?.pageNumber || sp?.pageNumber || part.pageNumber || 1,
-          pageStart: qObj?.pageStart || qObj?.pageNumber || sp?.pageNumber || part.pageNumber || 1,
-          pageEnd: qObj?.pageEnd || qObj?.pageNumber || sp?.pageNumber || part.pageNumber || 1,
-          stageName: targetStage
-        };
-      });
-    }
-
+    // P0-04: Dilarang menurunkan penetapan maqra dari lembar penilaian yatim bila StageParticipation & Participant belum memiliki maqra resmi.
     return [];
-  };
-
-  /**
-   * Helper to retrieve assessment matching participant, judge, stage, and questionId strictly.
-   * Identity: tenantId + participantId + judgeId + stageName + questionId
-   */
-  const getJudgeAssessment = (
-    participantId: string,
-    judgeId: string,
-    stageName?: string,
-    questionId?: string
-  ): JudgeAssessment | undefined => {
-    const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
-    const targetStage = stageName || part?.stageName || selectedStageName;
-
-    return assessments.find((a) => {
-      if (a.tenantId !== currentTenantId) return false;
-      if (a.participantId !== participantId) return false;
-      if (a.judgeId !== judgeId) return false;
-      // Strict stage match
-      if (a.stageName !== targetStage) return false;
-      // Strict questionId match
-      if (questionId) {
-        return a.questionId === questionId;
-      }
-      return true;
-    });
   };
 
   /**
@@ -1488,10 +1501,62 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sp.stageName === targetStage
     );
     return (
+      matchingSps.find((item) =>
+        assessments.some((a) => a.tenantId === currentTenantId && a.stageParticipationId === item.id)
+      ) ||
       matchingSps.find((item) => item.assignedQuestions && item.assignedQuestions.length > 0) ||
       matchingSps.find((item) => item.questionId && item.questionId.trim() !== '') ||
       matchingSps[0]
     );
+  };
+
+  /**
+   * Helper to retrieve assessment matching participant, judge, stageParticipationId/stage, and questionId strictly (P0-04).
+   * Identity: tenantId + participantId + judgeId + stageParticipationId + questionId
+   */
+  const getJudgeAssessment = (
+    participantId: string,
+    judgeId: string,
+    stageName?: string,
+    questionId?: string
+  ): JudgeAssessment | undefined => {
+    const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
+    const targetStage = stageName || part?.stageName || selectedStageName;
+    const sp = getStageParticipation(participantId, targetStage);
+    const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
+    const effectiveQuestionId = questionId || stageQuestions[0]?.questionId;
+    const matchedStageQ = effectiveQuestionId
+      ? stageQuestions.find((sq) => sq.questionId === effectiveQuestionId)
+      : undefined;
+
+    const matchesQuestion = (a: JudgeAssessment): boolean => {
+      if (!effectiveQuestionId) return false;
+      if (a.questionId === effectiveQuestionId) return true;
+      if (matchedStageQ?.id && a.assignedMaqraId === matchedStageQ.id) return true;
+      if (stageQuestions.length === 1 && Boolean(a.assignedMaqraId)) return true;
+      return false;
+    };
+
+    const strictMatch = assessments.find((a) => {
+      if (a.tenantId !== currentTenantId) return false;
+      if (a.participantId !== participantId) return false;
+      if (a.judgeId !== judgeId) return false;
+      if (sp?.id && a.stageParticipationId && a.stageParticipationId !== sp.id) {
+        return false;
+      }
+      if (a.stageName !== targetStage) return false;
+      return matchesQuestion(a);
+    });
+    if (strictMatch) return strictMatch;
+
+    // Fallback when duplicate stageParticipation rows exist for the same participant & stageName
+    return assessments.find((a) => {
+      if (a.tenantId !== currentTenantId) return false;
+      if (a.participantId !== participantId) return false;
+      if (a.judgeId !== judgeId) return false;
+      if (a.stageName !== targetStage) return false;
+      return matchesQuestion(a);
+    });
   };
 
   /**
@@ -1526,7 +1591,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     // Find required judge assignments in current tenant for this stage and branch
-    // STRICT: Never fallback to all judges in tenant if no official judgeAssignments exist!
     let requiredAssignments = judgeAssignments.filter((ja) => {
       if (ja.tenantId !== currentTenantId) return false;
       const matchesStage = sp?.stageId && ja.stageId
@@ -1544,7 +1608,31 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    const requiredJudgeIds = Array.from(new Set(requiredAssignments.map((ja) => ja.judgeId)));
+    if (requiredAssignments.length === 0) {
+      // Fallback to stage-level assignments if assignments were created under a default branch label
+      requiredAssignments = judgeAssignments.filter((ja) => {
+        if (ja.tenantId !== currentTenantId) return false;
+        return ja.stageName === targetStage;
+      });
+    }
+
+    let requiredJudgeIds = Array.from(new Set(requiredAssignments.map((ja) => ja.judgeId)));
+    if (requiredJudgeIds.length === 0) {
+      // If assessments already exist for this participant on targetStage, include those judges
+      requiredJudgeIds = Array.from(
+        new Set(
+          assessments
+            .filter(
+              (a) =>
+                a.tenantId === currentTenantId &&
+                a.participantId === participantId &&
+                a.stageName === targetStage
+            )
+            .map((a) => a.judgeId)
+        )
+      );
+    }
+
     if (requiredJudgeIds.length === 0) {
       return 'Belum Dimulai';
     }
@@ -1555,24 +1643,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     for (const q of stageQuestions) {
       for (const jId of requiredJudgeIds) {
-        const asm =
-          assessments.find(
-            (a) =>
-              a.tenantId === currentTenantId &&
-              a.participantId === participantId &&
-              a.judgeId === jId &&
-              a.stageName === targetStage &&
-              (a.questionId === q.questionId || Boolean(q.id && a.assignedMaqraId === q.id))
-          ) ||
-          (stageQuestions.length === 1
-            ? assessments.find(
-                (a) =>
-                  a.tenantId === currentTenantId &&
-                  a.participantId === participantId &&
-                  a.judgeId === jId &&
-                  a.stageName === targetStage
-              )
-            : undefined);
+        const asm = getJudgeAssessment(participantId, jId, targetStage, q.questionId);
         if (asm?.status === 'finalized') {
           finalizedUnits++;
         } else if (asm?.status === 'in_progress') {
@@ -1607,6 +1678,71 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       rubricVersions
     });
     return res.rubric;
+  };
+
+  /**
+   * P1-07: Hitung ulang lembar penilaian pada cabang terkait ketika Admin mengaktifkan versi rubrik baru
+   * atau mengubah konfigurasi aturan cabang (hanya pada babak yang belum difinalisasi).
+   */
+  const recalculateAssessmentsForRubricOrRuleChange = (params: {
+    targetRubric: RubricVersion;
+    branchName?: string;
+    branchId?: string;
+  }) => {
+    const { targetRubric, branchName, branchId } = params;
+    const finalizedStageIds = new Set(
+      stages.filter((s) => s.tenantId === currentTenantId && s.isFinalized).map((s) => s.id)
+    );
+    const finalizedStageNames = new Set(
+      stages
+        .filter((s) => s.tenantId === currentTenantId && s.isFinalized && !s.branchId && !s.branchName)
+        .map((s) => s.name)
+    );
+
+    setAssessments((prev) => {
+      const updatedList = prev.map((a) => {
+        if (a.tenantId !== currentTenantId) return a;
+        if (a.stageId && finalizedStageIds.has(a.stageId)) return a;
+        if (!a.stageId && finalizedStageNames.has(a.stageName)) return a;
+
+        const part = participants.find((p) => p.id === a.participantId && p.tenantId === currentTenantId);
+        if (!part) return a;
+
+        const matchesBranch = branchId
+          ? part.branchId === branchId
+          : branchName
+          ? part.branchName.toLowerCase() === branchName.toLowerCase() ||
+            part.branchName.toLowerCase().includes(branchName.toLowerCase())
+          : targetRubric.branchCode
+          ? part.branchName.toLowerCase().includes(targetRubric.branchCode.toLowerCase()) ||
+            (targetRubric.branchCode === 'SENI-BACA' && part.branchName.toLowerCase().includes('tilawah')) ||
+            (targetRubric.branchCode === 'TAHFIZH' && part.branchName.toLowerCase().includes('tahfizh'))
+          : false;
+
+        if (!matchesBranch) return a;
+
+        const calc = calculateAssessmentScore(
+          a.errorCounts || {},
+          errorCategories,
+          targetRubric,
+          targetRubric.startingScore
+        );
+
+        return {
+          ...a,
+          deductions: calc.deductions,
+          fieldScores: calc.fieldScores,
+          fieldDeductions: calc.fieldDeductions,
+          totalDeductions: calc.totalDeductions,
+          finalScore: calc.finalScore,
+          rubricVersion: targetRubric.code,
+          rubricVersionId: targetRubric.id,
+          lastUpdated: getWibTime()
+        };
+      });
+      assessmentsRef.current = updatedList;
+      return updatedList;
+    });
   };
 
   const addRubricVersion = (rubricData: Omit<RubricVersion, 'id' | 'tenantId' | 'createdAt'>) => {
@@ -1646,13 +1782,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Historical Immutability Protection:
-    // If this rubric version is already used in any finalized assessment or stage snapshot,
+    // If this rubric version is already used in any finalized stage snapshot,
     // block in-place structural mutations (fields, startingScore, branchCode).
-    const isUsedInFinalizedAssessments = assessments.some(
-      (a) =>
-        a.status === 'finalized' &&
-        (a.rubricVersionId === id || a.rubricVersion === target.code)
-    );
     const isUsedInSnapshots = stageSnapshots.some((s) => s.rubricVersionId === id);
 
     const isMutatingStructure =
@@ -1660,10 +1791,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updated.startingScore !== undefined ||
       updated.branchCode !== undefined;
 
-    if ((isUsedInFinalizedAssessments || isUsedInSnapshots) && isMutatingStructure) {
+    if (isUsedInSnapshots && isMutatingStructure) {
       return {
         success: false,
-        message: `Perubahan struktur rubrik "${target.name}" (${target.version}) ditolak karena versi ini telah digunakan pada lembar penilaian final atau snapshot babak. Buat versi rubrik baru agar rekaman historis tetap utuh.`
+        message: `Perubahan struktur rubrik "${target.name}" (${target.version}) ditolak karena versi ini telah digunakan pada snapshot babak yang sudah disahkan. Buat versi rubrik baru agar rekaman historis tetap utuh.`
       };
     }
 
@@ -1671,6 +1802,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setRubricVersions((prev) =>
       prev.map((r) => (r.id === id ? mergedRubric : r))
     );
+
+    if (isMutatingStructure && mergedRubric.status === 'Aktif') {
+      recalculateAssessmentsForRubricOrRuleChange({ targetRubric: mergedRubric });
+    }
 
     if (isLiveDbActive) {
       setSyncStatus('Memperbarui rubrik di database...');
@@ -1716,18 +1851,27 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
+    const activatedRubric: RubricVersion = { ...target, status: 'Aktif' };
     const prevRubrics = rubricVersions;
+
+    // P1-07: Isolasi pengarsipan versi lama secara ketat pada tenant yang sama (currentTenantId / target.tenantId)
     setRubricVersions((prev) =>
       prev.map((r) => {
         if (r.id === id) {
-          return { ...r, status: 'Aktif' as const };
+          return activatedRubric;
         }
-        if (r.branchCode === target.branchCode && r.status === 'Aktif') {
+        const sameTenantScope =
+          r.tenantId === target.tenantId ||
+          (r.tenantId === currentTenantId && (target.tenantId === currentTenantId || target.tenantId === 'system'));
+        if (sameTenantScope && r.branchCode === target.branchCode && r.status === 'Aktif') {
           return { ...r, status: 'Arsip' as const };
         }
         return r;
       })
     );
+
+    // Perbarui pula competitionRules di tenant aktif yang memiliki branchCode sepadan dan hitung ulang penilaian aktif (P1-07)
+    recalculateAssessmentsForRubricOrRuleChange({ targetRubric: activatedRubric });
 
     if (isLiveDbActive) {
       const targetTenantUuid = toDeterministicUuid(
@@ -1747,7 +1891,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
     }
 
-    return { success: true, message: `Versi rubrik "${target.name}" (${target.version}) berhasil diaktifkan.` };
+    return {
+      success: true,
+      message: `Versi rubrik "${target.name}" (${target.version}) berhasil diaktifkan dan lembar penilaian cabang terkait telah disinkronkan.`
+    };
   };
 
   const archiveRubricVersion = (id: string) => {
@@ -1826,6 +1973,25 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  /**
+   * P1-04: Sinkronisasi terpusat kuota kelulusan babak antara CompetitionStage dan CompetitionRuleConfig
+   */
+  const syncStageQuotasFromRuleConfig = (branchName: string, branchId: string | undefined, quotaPerStage?: Record<string, number>) => {
+    if (!quotaPerStage) return;
+    setStages((prev) =>
+      prev.map((s) => {
+        if (s.tenantId !== currentTenantId || s.isFinalized) return s;
+        const matchesBranch =
+          (branchId && s.branchId === branchId) ||
+          (s.branchName && s.branchName.toLowerCase() === branchName.toLowerCase());
+        if (matchesBranch && typeof quotaPerStage[s.name] === 'number' && quotaPerStage[s.name] > 0) {
+          return { ...s, qualificationQuota: quotaPerStage[s.name] };
+        }
+        return s;
+      })
+    );
+  };
+
   const addCompetitionRule = (ruleData: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => {
     const matchedBranch = cabangList.find(
       (c) =>
@@ -1834,13 +2000,41 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (c.name === ruleData.branchName || ruleData.branchName.includes(c.name) || c.name.includes(ruleData.branchName))
     );
     const resolvedBranchId = ruleData.branchId || matchedBranch?.id;
+
+    // P1-04: Ambil kuota resmi dari Manajemen Babak (CompetitionStage) bila tersedia
+    const branchStages = stages.filter(
+      (s) =>
+        s.tenantId === currentTenantId &&
+        ((resolvedBranchId && s.branchId === resolvedBranchId) ||
+          (s.branchName && s.branchName.toLowerCase() === ruleData.branchName.toLowerCase()))
+    );
+    const syncedQuotaPerStage: Record<string, number> = { ...(ruleData.quotaPerStage || {}) };
+    branchStages.forEach((bs) => {
+      if (bs.qualificationQuota > 0) {
+        syncedQuotaPerStage[bs.name] = bs.qualificationQuota;
+      }
+    });
+
     const newRule: CompetitionRuleConfig = {
       ...ruleData,
       id: generateUuid(),
       tenantId: currentTenantId,
+      quotaPerStage: syncedQuotaPerStage,
       ...(resolvedBranchId ? { branchId: resolvedBranchId } : {})
     };
     setCompetitionRules((prev) => [...prev, newRule]);
+
+    if (newRule.rubricVersionId) {
+      const targetRubric = rubricVersions.find((r) => r.id === newRule.rubricVersionId);
+      if (targetRubric) {
+        recalculateAssessmentsForRubricOrRuleChange({
+          targetRubric,
+          branchName: newRule.branchName,
+          branchId: resolvedBranchId
+        });
+      }
+    }
+
     if (isLiveDbActive && newRule.rubricVersionId) {
       void supabaseDataService
         .upsertCompetitionRuleConfig({
@@ -1863,26 +2057,54 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateCompetitionRule = (id: string, updated: Partial<CompetitionRuleConfig>) => {
     const existing = competitionRules.find((r) => r.id === id);
+    const mergedRule: CompetitionRuleConfig | undefined = existing ? { ...existing, ...updated } : undefined;
     setCompetitionRules((prev) =>
       prev.map((r) => (r.id === id ? { ...r, ...updated } : r))
     );
-    if (isLiveDbActive && existing) {
-      const merged: CompetitionRuleConfig = { ...existing, ...updated };
+
+    if (mergedRule) {
       const matchedBranch = cabangList.find(
         (c) =>
           (c.tenantId === currentTenantId || !c.tenantId) &&
-          merged.branchName &&
-          (c.name === merged.branchName || merged.branchName.includes(c.name) || c.name.includes(merged.branchName))
+          mergedRule.branchName &&
+          (c.name === mergedRule.branchName || mergedRule.branchName.includes(c.name) || c.name.includes(mergedRule.branchName))
       );
-      const effectiveBranchId = merged.branchId || matchedBranch?.id;
-      if (merged.rubricVersionId) {
+      const effectiveBranchId = mergedRule.branchId || matchedBranch?.id;
+
+      // P1-04: Sinkronkan kuota ke CompetitionStage milik cabang ini bila diedit
+      if (updated.quotaPerStage) {
+        syncStageQuotasFromRuleConfig(mergedRule.branchName, effectiveBranchId, updated.quotaPerStage);
+      }
+
+      // P1-07: Hitung ulang penilaian aktif apabila rubrik cabang berubah
+      if (updated.rubricVersionId) {
+        const targetRubric = rubricVersions.find((r) => r.id === updated.rubricVersionId);
+        if (targetRubric) {
+          recalculateAssessmentsForRubricOrRuleChange({
+            targetRubric,
+            branchName: mergedRule.branchName,
+            branchId: effectiveBranchId
+          });
+        }
+      }
+    }
+
+    if (isLiveDbActive && existing && mergedRule) {
+      const matchedBranch = cabangList.find(
+        (c) =>
+          (c.tenantId === currentTenantId || !c.tenantId) &&
+          mergedRule.branchName &&
+          (c.name === mergedRule.branchName || mergedRule.branchName.includes(c.name) || c.name.includes(mergedRule.branchName))
+      );
+      const effectiveBranchId = mergedRule.branchId || matchedBranch?.id;
+      if (mergedRule.rubricVersionId) {
         void supabaseDataService
           .upsertCompetitionRuleConfig({
-            ...merged,
-            id: toDeterministicUuid(merged.id),
+            ...mergedRule,
+            id: toDeterministicUuid(mergedRule.id),
             tenantId: toDeterministicUuid(currentTenantId),
             branchId: effectiveBranchId ? toDeterministicUuid(effectiveBranchId) : undefined,
-            rubricVersionId: toDeterministicUuid(merged.rubricVersionId)
+            rubricVersionId: toDeterministicUuid(mergedRule.rubricVersionId)
           })
           .then((res) => {
             if (!res.success) {
@@ -2133,18 +2355,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
       setSyncStatus('Menyimpan ke database...');
       const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
+      const remoteAsmPayload = {
+        ...initializedAsm,
+        id: toDeterministicUuid(initializedAsm.id),
+        tenantId: toDeterministicUuid(currentTenantId),
+        stageParticipationId: toDeterministicUuid(sp.id),
+        judgeId: toDeterministicUuid(judgeId),
+        rubricVersionId: toDeterministicUuid(activeRubric.id),
+        questionId: toDeterministicUuid(targetQuestionId),
+        assignedMaqraId: matchedMaqraItem?.id
+      };
       void supabaseDataService
         .syncAssessmentToRemote(
-          {
-            ...initializedAsm,
-            id: toDeterministicUuid(initializedAsm.id),
-            tenantId: toDeterministicUuid(currentTenantId),
-            stageParticipationId: toDeterministicUuid(sp.id),
-            judgeId: toDeterministicUuid(judgeId),
-            rubricVersionId: toDeterministicUuid(activeRubric.id),
-            questionId: toDeterministicUuid(targetQuestionId),
-            assignedMaqraId: matchedMaqraItem?.id
-          },
+          remoteAsmPayload,
           matchedMaqraItem?.id,
           { stageParticipation: sp, participant: part }
         )
@@ -2169,7 +2392,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               tenantId: currentTenantId,
               operationType: 'UPSERT_ASSESSMENT_DRAFT',
               entityLabel: `Draf Nilai ${part.name}`,
-              payload: { assessmentId: initializedAsm.id, participantId: part.id },
+              payload: {
+                assessment: remoteAsmPayload,
+                assignedMaqraId: matchedMaqraItem?.id,
+                stageParticipation: sp,
+                participant: part
+              },
               errorMessage: res.message
             });
             assessmentsRef.current = prevAssessmentsSnapshot;
@@ -2186,7 +2414,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             tenantId: currentTenantId,
             operationType: 'UPSERT_ASSESSMENT_DRAFT',
             entityLabel: `Draf Nilai ${part.name}`,
-            payload: { assessmentId: initializedAsm.id, participantId: part.id },
+            payload: {
+              assessment: remoteAsmPayload,
+              assignedMaqraId: matchedMaqraItem?.id,
+              stageParticipation: sp,
+              participant: part
+            },
             errorMessage: msg
           });
           assessmentsRef.current = prevAssessmentsSnapshot;
@@ -2405,18 +2638,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
       setSyncStatus('Menyimpan ke database...');
       const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
+      const remoteAsmPayload = {
+        ...updatedAssessment,
+        id: toDeterministicUuid(updatedAssessment.id),
+        tenantId: toDeterministicUuid(currentTenantId),
+        stageParticipationId: toDeterministicUuid(sp.id),
+        judgeId: toDeterministicUuid(judgeId),
+        rubricVersionId: toDeterministicUuid(activeRubric.id),
+        questionId: toDeterministicUuid(targetQuestionId),
+        assignedMaqraId: matchedMaqraItem?.id
+      };
       void supabaseDataService
         .syncAssessmentToRemote(
-          {
-            ...updatedAssessment,
-            id: toDeterministicUuid(updatedAssessment.id),
-            tenantId: toDeterministicUuid(currentTenantId),
-            stageParticipationId: toDeterministicUuid(sp.id),
-            judgeId: toDeterministicUuid(judgeId),
-            rubricVersionId: toDeterministicUuid(activeRubric.id),
-            questionId: toDeterministicUuid(targetQuestionId),
-            assignedMaqraId: matchedMaqraItem?.id
-          },
+          remoteAsmPayload,
           matchedMaqraItem?.id,
           { stageParticipation: sp, participant: part }
         )
@@ -2424,6 +2658,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (res.success) {
             setSyncStatus('Tersimpan di Database');
             setLastSyncTime(getWibTime());
+            void outboxSyncService.markSynced(`assessment-draft-${updatedAssessment.id}`);
             if (res.data?.assignedMaqraId) {
               setAssessments((prev) =>
                 prev.map((a) =>
@@ -2433,6 +2668,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           } else {
             setSyncStatus(`Gagal Menyimpan ke Database: ${res.message}`);
+            void outboxSyncService.enqueueOperation({
+              idempotencyKey: `assessment-draft-${updatedAssessment.id}`,
+              tenantId: currentTenantId,
+              operationType: 'UPSERT_ASSESSMENT_DRAFT',
+              entityLabel: `Koreksi Nilai ${part.name}`,
+              payload: {
+                assessment: remoteAsmPayload,
+                assignedMaqraId: matchedMaqraItem?.id,
+                stageParticipation: sp,
+                participant: part
+              },
+              errorMessage: res.message
+            });
             setAssessments(prevAssessmentsSnapshot);
             setStageParticipations(prevSpSnapshot);
             setParticipants(prevParticipantsSnapshot);
@@ -2441,6 +2689,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .catch((err) => {
           const msg = err instanceof Error ? err.message : 'Kesalahan jaringan';
           setSyncStatus(`Gagal Menyimpan ke Database: ${msg}`);
+          void outboxSyncService.enqueueOperation({
+            idempotencyKey: `assessment-draft-${updatedAssessment.id}`,
+            tenantId: currentTenantId,
+            operationType: 'UPSERT_ASSESSMENT_DRAFT',
+            entityLabel: `Koreksi Nilai ${part.name}`,
+            payload: {
+              assessment: remoteAsmPayload,
+              assignedMaqraId: matchedMaqraItem?.id,
+              stageParticipation: sp,
+              participant: part
+            },
+            errorMessage: msg
+          });
           setAssessments(prevAssessmentsSnapshot);
           setStageParticipations(prevSpSnapshot);
           setParticipants(prevParticipantsSnapshot);
@@ -3350,40 +3611,123 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const updateParticipant = (id: string, updated: Partial<Participant>) => {
+  const updateParticipant = (
+    id: string,
+    updated: Partial<Participant>
+  ): { success: boolean; message: string } => {
     const existing = participants.find((p) => p.id === id && p.tenantId === currentTenantId);
-    if (!existing) return;
-    const merged: Participant = { ...existing, ...updated };
+    if (!existing) {
+      return { success: false, message: 'Peserta tidak ditemukan.' };
+    }
+
+    const nextParticipantId = (updated.participantId ?? existing.participantId).trim();
+    const nextBranchName = (updated.branchName ?? existing.branchName).trim();
+    const nextLotteryNumber = (updated.lotteryNumber ?? existing.lotteryNumber).trim();
+    const nextStageName = (updated.stageName ?? existing.stageName).trim();
+
+    // P1-01: Prevent duplicate participant code (participantId) across tenant
+    const duplicateCode = participants.find(
+      (p) =>
+        p.tenantId === currentTenantId &&
+        p.id !== id &&
+        p.participantId.trim().toLowerCase() === nextParticipantId.toLowerCase()
+    );
+    if (duplicateCode) {
+      return {
+        success: false,
+        message: `Nomor peserta "${nextParticipantId}" sudah terdaftar atas nama ${duplicateCode.name} (${duplicateCode.branchName}).`
+      };
+    }
+
+    // P1-01: Prevent duplicate lottery number within the same branch
+    const duplicateLottery = participants.find(
+      (p) =>
+        p.tenantId === currentTenantId &&
+        p.id !== id &&
+        p.branchName === nextBranchName &&
+        p.lotteryNumber.trim().toLowerCase() === nextLotteryNumber.toLowerCase()
+    );
+    if (duplicateLottery) {
+      return {
+        success: false,
+        message: `Nomor undian "${nextLotteryNumber}" sudah digunakan oleh ${duplicateLottery.name} pada cabang ${nextBranchName}.`
+      };
+    }
+
+    const matchedBranch = cabangList.find(
+      (c) =>
+        (updated.branchId && c.id === updated.branchId) ||
+        c.name === nextBranchName ||
+        nextBranchName.includes(c.name)
+    );
+    const resolvedBranchId =
+      updated.branchId ||
+      (updated.branchName && updated.branchName !== existing.branchName
+        ? matchedBranch?.id || toDeterministicUuid(`branch-${currentTenantId}-${nextBranchName}`)
+        : existing.branchId || matchedBranch?.id || toDeterministicUuid(`branch-${currentTenantId}-${nextBranchName}`));
+
+    const matchedStage =
+      stages.find(
+        (s) =>
+          s.tenantId === currentTenantId &&
+          (updated.stageId ? s.id === updated.stageId : s.name === nextStageName) &&
+          (s.branchId === resolvedBranchId || s.branchName === nextBranchName)
+      ) ||
+      stages.find(
+        (s) =>
+          s.tenantId === currentTenantId &&
+          (updated.stageId ? s.id === updated.stageId : s.name === nextStageName) &&
+          (!s.branchName || s.branchName === 'Semua Cabang')
+      ) ||
+      stages.find((s) => s.tenantId === currentTenantId && s.name === nextStageName);
+
+    const resolvedStageId =
+      updated.stageId ||
+      (updated.stageName && updated.stageName !== existing.stageName
+        ? matchedStage?.id || toDeterministicUuid(`stage-${currentTenantId}-${resolvedBranchId}-${nextStageName}`)
+        : existing.stageId || matchedStage?.id || toDeterministicUuid(`stage-${currentTenantId}-${resolvedBranchId}-${nextStageName}`));
+
+    const merged: Participant = {
+      ...existing,
+      ...updated,
+      participantId: nextParticipantId,
+      branchId: resolvedBranchId,
+      branchName: nextBranchName,
+      stageId: resolvedStageId,
+      stageName: nextStageName,
+      lotteryNumber: nextLotteryNumber
+    };
 
     setParticipants((prev) =>
       prev.map((p) => (p.id === id && p.tenantId === currentTenantId ? merged : p))
     );
 
-    // Sync to current stage participation if relevant fields changed
-    if (updated.lotteryNumber || updated.branchName || updated.assignedMaqra || updated.pageNumber) {
-      setStageParticipations((prev) =>
-        prev.map((sp) => {
-          if (sp.participantId === id && sp.tenantId === currentTenantId) {
-            return {
-              ...sp,
-              lotteryNumber: updated.lotteryNumber || sp.lotteryNumber,
-              branchName: updated.branchName || sp.branchName,
-              assignedMaqra: updated.assignedMaqra || sp.assignedMaqra,
-              pageNumber: updated.pageNumber || sp.pageNumber
-            };
-          }
-          return sp;
-        })
-      );
-    }
+    // P1-01: Sync all relational attributes (stageId, stageName, branchId, branchName, lotteryNumber, assignedMaqra, pageNumber) to stage participation
+    setStageParticipations((prev) =>
+      prev.map((sp) => {
+        if (
+          sp.participantId === id &&
+          sp.tenantId === currentTenantId &&
+          (sp.stageId === existing.stageId || sp.stageName === existing.stageName)
+        ) {
+          return {
+            ...sp,
+            stageId: resolvedStageId,
+            stageName: nextStageName,
+            branchId: resolvedBranchId,
+            branchName: nextBranchName,
+            lotteryNumber: merged.lotteryNumber,
+            assignedMaqra: updated.assignedMaqra !== undefined ? updated.assignedMaqra : sp.assignedMaqra,
+            pageNumber: updated.pageNumber !== undefined ? updated.pageNumber : sp.pageNumber
+          };
+        }
+        return sp;
+      })
+    );
 
     if (isLiveDbActive) {
       setSyncStatus('Memperbarui peserta di database...');
-      const matchedBranch = cabangList.find(
-        (c) => c.name === merged.branchName || merged.branchName.includes(c.name)
-      );
       const matchedLevel = jenjangList.find((j) => j.name === merged.levelName);
-      const effectiveBranchId = merged.branchId || matchedBranch?.id || toDeterministicUuid(merged.branchName);
       void supabaseDataService
         .updateParticipantRecord(
           {
@@ -3391,9 +3735,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             id: toDeterministicUuid(merged.id),
             tenantId: toDeterministicUuid(currentTenantId),
             kafilahId: toDeterministicUuid(merged.kafilahId),
-            branchId: toDeterministicUuid(effectiveBranchId)
+            branchId: toDeterministicUuid(resolvedBranchId)
           },
-          toDeterministicUuid(effectiveBranchId),
+          toDeterministicUuid(resolvedBranchId),
           matchedLevel?.id ? toDeterministicUuid(matchedLevel.id) : undefined
         )
         .then((res) => {
@@ -3408,6 +3752,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
     }
+
+    return {
+      success: true,
+      message: `Data peserta "${merged.name}" (${merged.participantId}) berhasil diperbarui.`
+    };
   };
 
   const deleteParticipant = (id: string): { success: boolean; message: string } => {
@@ -3493,9 +3842,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (data.branchAndLevel && data.branchAndLevel.toLowerCase().includes(j.name.toLowerCase()))
     );
     const targetStageName = data.stageName || data.stage || 'Penyisihan';
-    const matchedStage = stages.find(
-      (s) => s.tenantId === currentTenantId && s.name === targetStageName
-    );
+    const matchedStage =
+      stages.find(
+        (s) =>
+          s.tenantId === currentTenantId &&
+          s.name === targetStageName &&
+          (s.branchId === (data.branchId || matchedBranch?.id) || s.branchName === (data.branchName || matchedBranch?.name))
+      ) ||
+      stages.find((s) => s.tenantId === currentTenantId && s.name === targetStageName);
     const resolvedBranchName = data.branchName || matchedBranch?.name || data.branchAndLevel || 'Tilawah Dewasa Putra';
     const resolvedLevelName = data.levelName || matchedLevel?.name || '';
     const computedBranchAndLevel =
@@ -3557,9 +3911,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (rawMerged.levelName && j.name === rawMerged.levelName)
     );
     const targetStageName = rawMerged.stageName || rawMerged.stage || 'Penyisihan';
-    const matchedStage = stages.find(
-      (s) => s.tenantId === currentTenantId && s.name === targetStageName
-    );
+    const matchedStage =
+      stages.find(
+        (s) =>
+          s.tenantId === currentTenantId &&
+          s.name === targetStageName &&
+          (s.branchId === (rawMerged.branchId || matchedBranch?.id) || s.branchName === (rawMerged.branchName || matchedBranch?.name))
+      ) ||
+      stages.find((s) => s.tenantId === currentTenantId && s.name === targetStageName);
     const merged: Question = {
       ...rawMerged,
       branchId: rawMerged.branchId || matchedBranch?.id,
@@ -3605,15 +3964,31 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let succeeded = 0;
     let failed = 0;
     const errors: string[] = [];
+    const seenCodesInBatch = new Set<string>();
+    const seenLotteryByBranchInBatch = new Set<string>();
 
     for (const row of rows) {
+      const normalizedCode = row.participantId.trim().toUpperCase();
+      const normalizedLotteryKey = `${row.branchName.trim().toLowerCase()}::${row.lotteryNumber.trim().toLowerCase()}`;
+
+      if (seenCodesInBatch.has(normalizedCode)) {
+        failed += 1;
+        errors.push(`${row.participantId} (${row.name}): Nomor peserta duplikat di dalam file import yang sama.`);
+        continue;
+      }
+      if (seenLotteryByBranchInBatch.has(normalizedLotteryKey)) {
+        failed += 1;
+        errors.push(`${row.participantId} (${row.name}): Nomor undian ${row.lotteryNumber} duplikat pada cabang ${row.branchName} di dalam file import.`);
+        continue;
+      }
+
       const existingByCode = participants.find(
         (p) =>
           p.tenantId === currentTenantId &&
-          p.participantId.trim().toUpperCase() === row.participantId.trim().toUpperCase()
+          p.participantId.trim().toUpperCase() === normalizedCode
       );
       if (existingByCode) {
-        updateParticipant(existingByCode.id, {
+        const updRes = updateParticipant(existingByCode.id, {
           adminSequenceNumber: row.adminSequenceNumber,
           participantId: row.participantId,
           lotteryNumber: row.lotteryNumber,
@@ -3633,6 +4008,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           stageName: row.stageName,
           status: row.status
         });
+        if (!updRes.success) {
+          failed += 1;
+          errors.push(`${row.participantId} (${row.name}): ${updRes.message}`);
+          continue;
+        }
+        seenCodesInBatch.add(normalizedCode);
+        seenLotteryByBranchInBatch.add(normalizedLotteryKey);
         succeeded += 1;
       } else {
         const res = addParticipant({
@@ -3659,6 +4041,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           status: row.status
         });
         if (res.success) {
+          seenCodesInBatch.add(normalizedCode);
+          seenLotteryByBranchInBatch.add(normalizedLotteryKey);
           succeeded += 1;
         } else {
           failed += 1;
@@ -3676,13 +4060,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let succeeded = 0;
     let failed = 0;
     const errors: string[] = [];
+    const seenQuestionCodes = new Set<string>();
 
     for (const row of rows) {
+      const normalizedCode = row.code.trim().toUpperCase();
+      if (seenQuestionCodes.has(normalizedCode)) {
+        failed += 1;
+        errors.push(`${row.code}: Kode soal duplikat di dalam file import yang sama.`);
+        continue;
+      }
       try {
         const existingByCode = questions.find(
           (q) =>
             q.tenantId === currentTenantId &&
-            q.code.trim().toUpperCase() === row.code.trim().toUpperCase()
+            q.code.trim().toUpperCase() === normalizedCode
         );
         if (existingByCode) {
           updateQuestion(existingByCode.id, {
@@ -3729,6 +4120,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             description: row.description
           });
         }
+        seenQuestionCodes.add(normalizedCode);
         succeeded += 1;
       } catch (err) {
         failed += 1;
@@ -3835,9 +4227,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!q) {
       return { success: false, message: 'Soal tidak ditemukan pada tenant ini.' };
     }
-    if (q.status !== 'Aktif') {
-      return { success: false, message: `Soal ${q.code} sedang berstatus Nonaktif.` };
-    }
 
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!part) {
@@ -3845,21 +4234,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const targetStage = stageName || q.stageName || part.stageName || selectedStageName;
-
-    // Validate stage compatibility: question's designated stage must match target stage
-    if (q.stageName && targetStage && q.stageName !== targetStage) {
-      return {
-        success: false,
-        message: `Ketidaksesuaian babak: Soal ${q.code} dialokasikan untuk Babak ${q.stageName}, sedangkan target adalah Babak ${targetStage}.`
-      };
-    }
-
-    // Check if participant already has this question in this stage
     const currentStageQs = getParticipantStageQuestions(participantId, targetStage);
-    if (currentStageQs.some((item) => item.questionId === q.id)) {
+    const validation = validateMaqraAssignmentForParticipant(
+      part,
+      q,
+      targetStage,
+      currentStageQs.map((item) => item.questionId)
+    );
+    if (!validation.valid) {
       return {
         success: false,
-        message: `Peserta ${part.name} sudah memiliki soal ${q.code} pada Babak ${targetStage}.`
+        message: validation.reason || 'Soal tidak memenuhi kriteria cabang, jenjang, atau babak peserta.'
       };
     }
 
@@ -4145,7 +4530,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'Tidak ada hasil undian untuk ditetapkan.' };
     }
 
-    // 1. Validation across entire batch
+    // 1. P0-03: Strict 3D relational validation across entire batch (Active status, Stage, Branch, Level, Non-duplicate)
     for (const r of results) {
       const part = participants.find((p) => p.id === r.participantId && p.tenantId === currentTenantId);
       if (!part) {
@@ -4154,14 +4539,28 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           message: `Transaksi dibatalkan: Peserta "${r.participantName}" tidak ditemukan di tenant aktif.`
         };
       }
+      const assignedInThisResult: string[] = [];
       for (const qId of r.questionIds) {
         const q = questions.find((item) => item.id === qId && item.tenantId === currentTenantId);
-        if (!q || q.status !== 'Aktif') {
+        if (!q) {
           return {
             success: false,
-            message: `Transaksi dibatalkan: Soal dengan ID "${qId}" tidak tersedia atau nonaktif.`
+            message: `Transaksi dibatalkan: Soal dengan ID "${qId}" tidak ditemukan di tenant aktif.`
           };
         }
+        const validation = validateMaqraAssignmentForParticipant(
+          part,
+          q,
+          stageName,
+          assignedInThisResult
+        );
+        if (!validation.valid) {
+          return {
+            success: false,
+            message: `Transaksi dibatalkan untuk ${part.name}: ${validation.reason}`
+          };
+        }
+        assignedInThisResult.push(q.id);
       }
     }
 
@@ -4396,10 +4795,36 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setLotteryDrawLogs((prev) => [drawLogEntry, ...prev]);
 
     if (isLiveDbActive) {
-      void supabaseDataService.insertLotteryDrawLog({
+      const drawLogPayload = {
         ...drawLogEntry,
         tenantId: toDeterministicUuid(currentTenantId)
-      });
+      };
+      void supabaseDataService
+        .insertLotteryDrawLog(drawLogPayload)
+        .then((res) => {
+          if (!res.success) {
+            void outboxSyncService.enqueueOperation({
+              idempotencyKey: `lottery-draw-${drawLogEntry.id}`,
+              tenantId: currentTenantId,
+              operationType: 'COMMIT_LOTTERY_DRAW',
+              entityLabel: `Undian Maqra ${stageName} (${resolvedBranchName})`,
+              payload: { drawLog: drawLogPayload },
+              errorMessage: res.message
+            });
+          } else {
+            void outboxSyncService.markSynced(`lottery-draw-${drawLogEntry.id}`);
+          }
+        })
+        .catch((err) => {
+          void outboxSyncService.enqueueOperation({
+            idempotencyKey: `lottery-draw-${drawLogEntry.id}`,
+            tenantId: currentTenantId,
+            operationType: 'COMMIT_LOTTERY_DRAW',
+            entityLabel: `Undian Maqra ${stageName} (${resolvedBranchName})`,
+            payload: { drawLog: drawLogPayload },
+            errorMessage: err instanceof Error ? err.message : 'Kesalahan jaringan'
+          });
+        });
     }
 
     // 6. Single Consolidated Activity Log & Audit Log
@@ -4483,30 +4908,18 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const explicitPoolSet =
       questionPoolIds && questionPoolIds.length > 0 ? new Set(questionPoolIds) : null;
 
-    // Validate per-participant eligibility and ensure sufficient active questions in selected pool
+    // P0-03: Validate per-participant eligibility using 3D relational check (Branch + Level + Stage)
     for (const part of targetParticipants) {
       const partEligibleQuestions = questions.filter((q) => {
-        if (q.tenantId !== currentTenantId || q.status !== 'Aktif') return false;
+        if (q.tenantId !== currentTenantId) return false;
         if (explicitPoolSet && !explicitPoolSet.has(q.id)) return false;
-        const matchesStage = !q.stageName || q.stageName === stageName || stageName === 'Semua Babak';
-        const matchesBranch =
-          !branchName || branchName === 'Semua Cabang'
-            ? !q.branchAndLevel ||
-              q.branchName === part.branchName ||
-              q.branchAndLevel.includes(part.branchName) ||
-              part.branchName.includes(q.branchAndLevel)
-            : (q.branchName && q.branchName === branchName) || q.branchAndLevel.includes(branchName);
-        const matchesLevel =
-          !levelName || levelName === 'Semua Jenjang'
-            ? true
-            : (q.levelName && q.levelName === levelName) || q.branchAndLevel.includes(levelName);
-        return matchesStage && matchesBranch && matchesLevel;
+        return validateMaqraAssignmentForParticipant(part, q, stageName, []).valid;
       });
 
       if (partEligibleQuestions.length < questionsPerParticipant) {
         return {
           success: false,
-          message: `Pool soal aktif yang dipilih tidak mencukupi untuk peserta ${part.name} (${part.branchName}). Dibutuhkan minimal ${questionsPerParticipant} soal unik, namun hanya tersedia ${partEligibleQuestions.length} soal di dalam pool.`
+          message: `Pool soal aktif yang dipilih tidak mencukupi untuk peserta ${part.name} (${part.branchName}${part.levelName ? ` - ${part.levelName}` : ''}). Dibutuhkan minimal ${questionsPerParticipant} soal unik yang sesuai cabang, jenjang, dan babak, namun hanya tersedia ${partEligibleQuestions.length} soal di dalam pool.`
         };
       }
     }
@@ -4522,21 +4935,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     for (const part of targetParticipants) {
       const partEligibleQuestions = questions.filter((q) => {
-        if (q.tenantId !== currentTenantId || q.status !== 'Aktif') return false;
+        if (q.tenantId !== currentTenantId) return false;
         if (explicitPoolSet && !explicitPoolSet.has(q.id)) return false;
-        const matchesStage = !q.stageName || q.stageName === stageName || stageName === 'Semua Babak';
-        const matchesBranch =
-          !branchName || branchName === 'Semua Cabang'
-            ? !q.branchAndLevel ||
-              q.branchName === part.branchName ||
-              q.branchAndLevel.includes(part.branchName) ||
-              part.branchName.includes(q.branchAndLevel)
-            : (q.branchName && q.branchName === branchName) || q.branchAndLevel.includes(branchName);
-        const matchesLevel =
-          !levelName || levelName === 'Semua Jenjang'
-            ? true
-            : (q.levelName && q.levelName === levelName) || q.branchAndLevel.includes(levelName);
-        return matchesStage && matchesBranch && matchesLevel;
+        return validateMaqraAssignmentForParticipant(part, q, stageName, []).valid;
       });
 
       const existingPartQIds = new Set(
@@ -5288,6 +5689,27 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       branchId: stageData.branchId || matchedBranch?.id
     };
     setStages((prev) => [...prev, newStage]);
+    // P1-04: Keep CompetitionRuleConfig.quotaPerStage synchronized with CompetitionStage.qualificationQuota
+    if (typeof newStage.qualificationQuota === 'number') {
+      setCompetitionRules((prev) =>
+        prev.map((r) => {
+          if (r.tenantId !== currentTenantId) return r;
+          const matchesBranch =
+            !newStage.branchName ||
+            newStage.branchName === 'Semua Cabang' ||
+            (newStage.branchId && r.branchId && newStage.branchId === r.branchId) ||
+            r.branchName === newStage.branchName;
+          if (!matchesBranch) return r;
+          return {
+            ...r,
+            quotaPerStage: {
+              ...r.quotaPerStage,
+              [newStage.name]: newStage.qualificationQuota
+            }
+          };
+        })
+      );
+    }
     if (isLiveDbActive) {
       setSyncStatus('Menyimpan babak baru ke database...');
       void supabaseDataService
@@ -5328,6 +5750,27 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         s.id === id && s.tenantId === currentTenantId ? merged : s
       )
     );
+    // P1-04: Keep CompetitionRuleConfig.quotaPerStage synchronized with CompetitionStage.qualificationQuota
+    if (typeof merged.qualificationQuota === 'number') {
+      setCompetitionRules((prev) =>
+        prev.map((r) => {
+          if (r.tenantId !== currentTenantId) return r;
+          const matchesBranch =
+            !merged.branchName ||
+            merged.branchName === 'Semua Cabang' ||
+            (merged.branchId && r.branchId && merged.branchId === r.branchId) ||
+            r.branchName === merged.branchName;
+          if (!matchesBranch) return r;
+          return {
+            ...r,
+            quotaPerStage: {
+              ...r.quotaPerStage,
+              [merged.name]: merged.qualificationQuota
+            }
+          };
+        })
+      );
+    }
     if (isLiveDbActive) {
       setSyncStatus('Memperbarui konfigurasi babak di database...');
       void supabaseDataService
@@ -5577,7 +6020,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
     let stageParts = filterStageParts(true);
-    if (stageParts.length === 0 && !stageIdParam) {
+    if (stageParts.length === 0) {
       stageParts = filterStageParts(false);
     }
 
@@ -5599,20 +6042,49 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // 5. Construct manualOverridesMap accurately across all participants in this stage
+    const effectiveEvalStageId =
+      stageIdParam && stageParts.some((sp) => sp.stageId === currentStg.id)
+        ? currentStg.id
+        : undefined;
+
+    // 5. P1-05: First evaluate automatic rankings (without overrides) so we only mark actual deviations or explicit manualOverrides as overridden
+    const baseEvalResult = RankingService.evaluateStageParticipants({
+      tenantId: currentTenantId,
+      stageId: effectiveEvalStageId,
+      stageName: currentStageName,
+      branchId: effectiveBranchId,
+      branchName: effectiveBranchName,
+      participations: stageParts,
+      participants,
+      assessments,
+      judgeAssignments,
+      stageQuestionsGetter: getParticipantStageQuestions,
+      quota: currentStg.qualificationQuota || 3,
+      manualOverrides: {},
+      overrideReasons: {},
+      customRuleConfigs: competitionRules,
+      customRubricVersions: rubricVersions
+    });
+
+    const autoQualifiedIdsSet = new Set(
+      baseEvalResult.evaluatedParticipants.filter((p) => p.isQualified).map((p) => p.participant.id)
+    );
     const manualOverridesMap: Record<string, boolean> = manualOverridesParam
       ? { ...manualOverridesParam }
-      : qualifiedParticipantIds.length > 0
-      ? stageParts.reduce<Record<string, boolean>>((acc, sp) => {
-          acc[sp.participantId] = qualifiedParticipantIds.includes(sp.participantId);
+      : stageParts.reduce<Record<string, boolean>>((acc, sp) => {
+          const isSelectedAsQualified = qualifiedParticipantIds.includes(sp.participantId);
+          const wasAutoQualified = autoQualifiedIdsSet.has(sp.participantId);
+          const hasExplicitReason = Boolean(overrideReasons?.[sp.participantId]?.trim());
+          if (isSelectedAsQualified !== wasAutoQualified || hasExplicitReason) {
+            acc[sp.participantId] = isSelectedAsQualified;
+          }
           return acc;
-        }, {})
-      : {};
+        }, {});
 
     // 6. Evaluate stage participants via centralized RankingService (checks judgeAssignments, assessments, tie-break config, quota, overrides)
     const evalResult = RankingService.evaluateStageParticipants({
       tenantId: currentTenantId,
-      stageId: stageIdParam ? currentStg.id : undefined,
+      stageId: effectiveEvalStageId,
       stageName: currentStageName,
       branchId: effectiveBranchId,
       branchName: effectiveBranchName,

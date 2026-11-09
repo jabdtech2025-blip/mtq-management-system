@@ -1,4 +1,8 @@
-import { calculateAssessmentScore, aggregateParticipantScores } from '../services/scoringEngine';
+import {
+  calculateAssessmentScore,
+  aggregateParticipantScores,
+  validateMaqraAssignmentForParticipant
+} from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
 import { OFFICIAL_SENI_BACA_RUBRIC, getBranchRuleConfig } from '../services/competitionRules';
 import {
@@ -1303,6 +1307,170 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       poolInput.every((item) => shuffledPool.includes(item)) &&
       poolInput[0] === 'MQ-01',
     `shuffled: ${shuffledPool.join(',')}`
+  );
+
+  // 35e. P0-01 Isolasi Evaluasi Multi-Cabang Saat "Semua Cabang" Dipilih (Hakim, Rubrik, Tie-Break, dan Kuota Terpisah)
+  const multiBranchAllEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-1',
+    stageName: 'Penyisihan',
+    // branchName sengaja dikosongkan (simulasi pilihan "Semua Cabang")
+    participations: [
+      { id: 'sp-til-all', tenantId: 't-1', participantId: 'p-til-1', stageId: 'stg-til', stageName: 'Penyisihan', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra', lotteryNumber: '01', questionId: 'q-1', assignedMaqra: 'Maqra 1', pageNumber: 300, status: 'Lengkap' },
+      { id: 'sp-tah-all', tenantId: 't-1', participantId: 'p-tah-1', stageId: 'stg-tah', stageName: 'Penyisihan', branchId: 'br-tahfizh', branchName: 'Tahfizh 10 Juz Putri', lotteryNumber: '01', questionId: 'q-2', assignedMaqra: 'Maqra 2', pageNumber: 305, status: 'Lengkap' }
+    ],
+    participants: [
+      { id: 'p-til-1', tenantId: 't-1', name: 'Qari Tilawah', participantId: 'TLW-01', lotteryNumber: '01', gender: 'Putra', kafilahId: 'kf-1', kafilahName: 'Kafilah Kota', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra', levelName: 'Dewasa', questionId: 'q-1', assignedMaqra: 'Maqra 1', pageNumber: 300, status: 'Berlangsung', stageName: 'Penyisihan' },
+      { id: 'p-tah-1', tenantId: 't-1', name: 'Hafizhah Tahfizh', participantId: 'THF-01', lotteryNumber: '01', gender: 'Putri', kafilahId: 'kf-1', kafilahName: 'Kafilah Kota', branchId: 'br-tahfizh', branchName: 'Tahfizh 10 Juz Putri', levelName: 'Dewasa', questionId: 'q-2', assignedMaqra: 'Maqra 2', pageNumber: 305, status: 'Berlangsung', stageName: 'Penyisihan' }
+    ],
+    assessments: [
+      { id: 'a-til-1', tenantId: 't-1', judgeId: 'j-til-1', judgeName: 'Hakim Tilawah 1', judgeField: 'Tajwid', participantId: 'p-til-1', stageParticipationId: 'sp-til-all', stageId: 'stg-til', stageName: 'Penyisihan', questionId: 'q-1', fieldScores: { Tajwid: 29 }, finalScore: 95, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 5, annotations: [], lastUpdated: '10:00' },
+      { id: 'a-til-2', tenantId: 't-1', judgeId: 'j-til-2', judgeName: 'Hakim Tilawah 2', judgeField: 'Lagu', participantId: 'p-til-1', stageParticipationId: 'sp-til-all', stageId: 'stg-til', stageName: 'Penyisihan', questionId: 'q-1', fieldScores: { Lagu: 24 }, finalScore: 96, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 4, annotations: [], lastUpdated: '10:00' },
+      { id: 'a-tah-1', tenantId: 't-1', judgeId: 'j-tah-1', judgeName: 'Hakim Tahfizh 1', judgeField: 'Tahfizh', participantId: 'p-tah-1', stageParticipationId: 'sp-tah-all', stageId: 'stg-tah', stageName: 'Penyisihan', questionId: 'q-2', fieldScores: { Tahfizh: 49 }, finalScore: 98, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 2, annotations: [], lastUpdated: '10:00' }
+    ],
+    judgeAssignments: [
+      { id: 'ja-til-1', tenantId: 't-1', judgeId: 'j-til-1', judgeName: 'Hakim Tilawah 1', judgeField: 'Tajwid', stageId: 'stg-til', stageName: 'Penyisihan', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra' },
+      { id: 'ja-til-2', tenantId: 't-1', judgeId: 'j-til-2', judgeName: 'Hakim Tilawah 2', judgeField: 'Lagu', stageId: 'stg-til', stageName: 'Penyisihan', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra' },
+      { id: 'ja-tah-1', tenantId: 't-1', judgeId: 'j-tah-1', judgeName: 'Hakim Tahfizh 1', judgeField: 'Tahfizh', stageId: 'stg-tah', stageName: 'Penyisihan', branchId: 'br-tahfizh', branchName: 'Tahfizh 10 Juz Putri' }
+    ],
+    stageQuestionsGetter: (pid) =>
+      pid === 'p-til-1'
+        ? [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }]
+        : [{ questionId: 'q-2', title: 'M2', pageNumber: 305 }],
+    quota: 1
+  });
+  const evalTilawahItem = multiBranchAllEval.evaluatedParticipants.find((p) => p.participant.id === 'p-til-1');
+  const evalTahfizhItem = multiBranchAllEval.evaluatedParticipants.find((p) => p.participant.id === 'p-tah-1');
+  assert(
+    '35e. P0-01 Isolasi Semua Cabang: Hakim Tilawah (2 juri) tidak mencemari kelengkapan peserta Tahfizh (1 juri), masing-masing cabang memiliki Rank #1 sendiri, dan pengesahan lintas cabang diblokir',
+    evalTilawahItem?.totalAssignedJudges === 2 &&
+      evalTilawahItem?.isFullyFinalized === true &&
+      evalTilawahItem?.rank === 1 &&
+      evalTahfizhItem?.totalAssignedJudges === 1 &&
+      evalTahfizhItem?.isFullyFinalized === true &&
+      evalTahfizhItem?.rank === 1 &&
+      multiBranchAllEval.canFinalize === false,
+    `tilJudges: ${evalTilawahItem?.totalAssignedJudges}, tahJudges: ${evalTahfizhItem?.totalAssignedJudges}, tahFinal: ${evalTahfizhItem?.isFullyFinalized}, canFinalizeAll: ${multiBranchAllEval.canFinalize}`
+  );
+
+  // 35f. P0-03 Validasi 3D Penetapan Maqra (Cabang + Jenjang + Babak + Non-Duplikat)
+  const samplePartUlya: Participant = {
+    id: 'p-ulya-1',
+    tenantId: 't-1',
+    participantId: 'TLW-ULYA-01',
+    lotteryNumber: '01',
+    name: 'Peserta Ulya',
+    gender: 'Putra',
+    kafilahId: 'k-1',
+    kafilahName: 'Bandung',
+    branchId: 'br-tilawah',
+    branchName: 'Tilawah Dewasa Putra',
+    levelId: 'lvl-ulya',
+    levelName: 'Ulya',
+    stageId: 'stg-pny',
+    stageName: 'Penyisihan',
+    questionId: '',
+    assignedMaqra: 'Belum Ditetapkan',
+    pageNumber: 1,
+    status: 'Menunggu'
+  };
+  const questionWrongLevel = {
+    id: 'q-wustha',
+    tenantId: 't-1',
+    code: 'MQ-WST-01',
+    title: 'Soal Wustha',
+    surahName: 'Al-Mulk',
+    surahNumber: 67,
+    startAyah: 1,
+    endAyah: 10,
+    pageNumber: 562,
+    branchId: 'br-tilawah',
+    branchName: 'Tilawah Dewasa Putra',
+    levelId: 'lvl-wustha',
+    levelName: 'Wustha',
+    branchAndLevel: 'Tilawah Dewasa Putra - Wustha',
+    stageId: 'stg-pny',
+    stage: 'Penyisihan',
+    stageName: 'Penyisihan',
+    status: 'Aktif' as const
+  };
+  const questionMatching3D = {
+    ...questionWrongLevel,
+    id: 'q-ulya',
+    code: 'MQ-ULY-01',
+    levelId: 'lvl-ulya',
+    levelName: 'Ulya',
+    branchAndLevel: 'Tilawah Dewasa Putra - Ulya'
+  };
+  const checkWrongLevel = validateMaqraAssignmentForParticipant(samplePartUlya, questionWrongLevel, 'Penyisihan', []);
+  const checkMatching3D = validateMaqraAssignmentForParticipant(samplePartUlya, questionMatching3D, 'Penyisihan', []);
+  const checkDuplicate3D = validateMaqraAssignmentForParticipant(samplePartUlya, questionMatching3D, 'Penyisihan', ['q-ulya']);
+  assert(
+    '35f. P0-03 Validasi 3D Maqra: Menolak soal berbeda jenjang (Wustha vs Ulya) atau duplikat, dan menerima soal yang cocok Cabang + Jenjang + Babak',
+    checkWrongLevel.valid === false &&
+      Boolean(checkWrongLevel.reason?.includes('jenjang')) &&
+      checkMatching3D.valid === true &&
+      checkDuplicate3D.valid === false,
+    `wrongLevelValid: ${checkWrongLevel.valid} (${checkWrongLevel.reason}), matchingValid: ${checkMatching3D.valid}, dupValid: ${checkDuplicate3D.valid}`
+  );
+
+  // 35g. P0-04 Eliminasi Fallback Longgar Identitas Penilaian (Tanpa Pencocokan Lintas Soal / Lintas Babak)
+  const mismatchedQuestionAssessment: JudgeAssessment[] = [
+    {
+      id: 'a-wrong-q',
+      tenantId: 't-1',
+      stageParticipationId: 'sp-1',
+      stageId: 'stg-1',
+      stageName: 'Penyisihan',
+      participantId: 'p-1',
+      judgeId: 'j-1',
+      judgeName: 'Hakim 1',
+      judgeField: 'Tajwid',
+      questionId: 'q-other-999', // Berbeda dari soal peserta ('q-1')
+      status: 'finalized',
+      errorCounts: {},
+      deductions: {},
+      totalDeductions: 2,
+      finalScore: 98,
+      fieldScores: { Tajwid: 28 },
+      annotations: [],
+      lastUpdated: '10:00 WIB'
+    }
+  ];
+  const strictSingleMaqraAgg = aggregateParticipantScores(
+    'p-1',
+    'Penyisihan',
+    [{ questionId: 'q-1', title: 'Maqra 1', pageNumber: 305 }],
+    ['j-1'],
+    mismatchedQuestionAssessment,
+    'stg-1',
+    'sp-1'
+  );
+  assert(
+    '35g. P0-04 Identitas Penilaian Ketat: Penilaian dengan questionId berbeda tidak dicocokkan secara paksa meskipun peserta hanya memiliki 1 maqra',
+    strictSingleMaqraAgg.isFullyFinalized === false && strictSingleMaqraAgg.finalizedCount === 0,
+    `isFullyFinalized: ${strictSingleMaqraAgg.isFullyFinalized}, finalizedCount: ${strictSingleMaqraAgg.finalizedCount}`
+  );
+
+  // 35h. P1-04 Penegakan Batas Kuota Saat Override Manual (qualifiedCount > quota)
+  const quotaOverflowEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageId: 'stg-1',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: tieBreakAssessments,
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1, // Kuota hanya 1 peserta, tetapi kedua peserta diloloskan (p-tb-b lolos otomatis, p-tb-a diloloskan lewat override)
+    manualOverrides: { 'p-tb-a': true },
+    overrideReasons: { 'p-tb-a': 'Keputusan khusus meloloskan peserta tambahan' }
+  });
+  assert(
+    '35h. P1-04 Penegakan Kuota Override: Meloloskan peserta melebihi kuota babak (2 lolos dari kuota 1) memblokir pengesahan babak',
+    quotaOverflowEval.canFinalize === false &&
+      Boolean(quotaOverflowEval.blockingReason?.includes('melebihi kuota')),
+    `canFinalize: ${quotaOverflowEval.canFinalize}, reason: ${quotaOverflowEval.blockingReason}`
   );
 
   return { passed, failed, results };

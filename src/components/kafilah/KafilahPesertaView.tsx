@@ -249,7 +249,7 @@ export const KafilahPesertaView: React.FC = () => {
     const matchedStage = stages.find((s) => s.name === partStageName);
 
     if (editingParticipant) {
-      updateParticipant(editingParticipant.id, {
+      const updRes = updateParticipant(editingParticipant.id, {
         adminSequenceNumber: partAdminSeq.trim(),
         participantId: partIdCode.trim(),
         name: partName.trim(),
@@ -269,10 +269,14 @@ export const KafilahPesertaView: React.FC = () => {
         status: partStatus,
         lotteryNumber: partLottery.trim()
       });
+      if (!updRes.success) {
+        setPartFormError(updRes.message);
+        return;
+      }
       setEditingParticipant(null);
       setFeedbackMessage({
         type: 'success',
-        text: `Data peserta "${partName.trim()}" berhasil diperbarui.`
+        text: updRes.message
       });
       return;
     }
@@ -398,11 +402,12 @@ export const KafilahPesertaView: React.FC = () => {
     setIsImporting(true);
     try {
       const res = await importParticipantsBatch(importValidation.validRows);
+      const errDetail = res.errors.length > 0 ? ` (${res.errors.slice(0, 2).join('; ')})` : '';
       setFeedbackMessage({
-        type: res.succeeded > 0 ? 'success' : 'error',
-        text: `Berhasil mengimpor ${res.succeeded} dari ${res.total} peserta.`
+        type: res.succeeded > 0 && res.failed === 0 ? 'success' : 'error',
+        text: `Berhasil mengimpor ${res.succeeded} dari ${res.total} peserta.${res.failed > 0 ? ` Gagal: ${res.failed}${errDetail}` : ''}`
       });
-      if (res.succeeded > 0) {
+      if (res.succeeded > 0 && res.failed === 0) {
         setIsImportModalOpen(false);
         setImportValidation(null);
         setImportFileName('');

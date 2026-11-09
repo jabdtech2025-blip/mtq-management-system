@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { CanvasStroke, NormalizedPoint, AssignedMaqraItem } from '../../types/mtq';
+import { calculateAssessmentScore } from '../../services/scoringEngine';
 
 export const PenilaianDualPanelView: React.FC = () => {
   const {
@@ -362,11 +363,19 @@ export const PenilaianDualPanelView: React.FC = () => {
   const [isFlawlessConfirmed, setIsFlawlessConfirmed] = useState<boolean>(false);
   const [isFinalizing, setIsFinalizing] = useState<boolean>(false);
 
-  // Error counting values from active assessment
+  // Error counting values from active assessment (P1-03: filter only active categories & use calculateAssessmentScore)
+  const activeErrorCategories = useMemo(
+    () => errorCategories.filter((cat) => cat.status !== 'Nonaktif'),
+    [errorCategories]
+  );
   const errorCounts = currentAssessment?.errorCounts || {};
-  const totalDeductions = currentAssessment?.totalDeductions || 0;
   const startingScore = activeRubric?.startingScore ?? 100.0;
-  const currentScore = currentAssessment ? currentAssessment.finalScore : startingScore;
+  const liveScoreCalc = useMemo(() => {
+    if (!activeRubric) return null;
+    return calculateAssessmentScore(errorCounts, errorCategories, activeRubric, startingScore);
+  }, [errorCounts, errorCategories, activeRubric, startingScore]);
+  const totalDeductions = currentAssessment?.totalDeductions ?? liveScoreCalc?.totalDeductions ?? 0;
+  const currentScore = currentAssessment ? currentAssessment.finalScore : (liveScoreCalc?.finalScore ?? startingScore);
   const pageAnnotationCount = strokes.filter((s) => s.page === currentPage).length;
   const isZeroErrorSheet = !currentAssessment || totalDeductions === 0;
 
@@ -911,9 +920,13 @@ export const PenilaianDualPanelView: React.FC = () => {
               </div>
 
               <div className="space-y-2.5">
-                {errorCategories.map((cat) => {
+                {activeErrorCategories.map((cat) => {
                   const count = errorCounts[cat.id] || 0;
-                  const pts = (count * cat.defaultDeduction).toFixed(2);
+                  const exactDeduction =
+                    currentAssessment?.deductions?.[cat.id] ??
+                    liveScoreCalc?.deductions?.[cat.id] ??
+                    count * cat.defaultDeduction;
+                  const pts = exactDeduction.toFixed(2);
 
                   return (
                     <div

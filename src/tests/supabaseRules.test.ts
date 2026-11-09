@@ -1973,6 +1973,86 @@ export async function runSupabaseTests(): Promise<{
         pendingAfterFlush.pendingCount === 0,
       `extPart: ${extPartRes.success}, father: ${hydratedExtPart?.fatherName}, qLevel: ${hydratedExtQ?.levelId}, drawLog: ${drawLogRes.success}, outboxPendingBefore: ${pendingBeforeFlush.pendingCount}, after: ${pendingAfterFlush.pendingCount}`
     );
+
+    // =========================================================================
+    // 58. P1-06 OTORITAS SERVER TIE-BREAK BIDANG & VALIDASI OVERRIDE DUA ARAH PADA advance_stage_qualifiers
+    // =========================================================================
+    const tbStageId = generateUuid();
+    const tbNextStageId = generateUuid();
+    const tbPartHighTajwidId = generateUuid();
+    const tbPartLowTajwidId = generateUuid();
+    const tbSpHighId = generateUuid();
+    const tbSpLowId = generateUuid();
+    const tbMaqraHighId = generateUuid();
+    const tbMaqraLowId = generateUuid();
+    const tbAsmHighId = generateUuid();
+    const tbAsmLowId = generateUuid();
+
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, status, is_finalized)
+      VALUES
+        ('${tbStageId}', '${tenantJabarId}', '${branchTilawahPutraId}', 'Penyisihan TieBreak SQL', 10, 1, 'Aktif', false),
+        ('${tbNextStageId}', '${tenantJabarId}', '${branchTilawahPutraId}', 'Final TieBreak SQL', 11, 1, 'Menunggu', false);
+
+      INSERT INTO judge_assignments (id, tenant_id, stage_id, branch_id, judge_profile_id, judge_field, status)
+      VALUES ('${generateUuid()}', '${tenantJabarId}', '${tbStageId}', '${branchTilawahPutraId}', '${judge1UserId}', 'Bidang Tajwid', 'Aktif');
+
+      INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, level_id, participant_code, name, gender, lottery_number, status)
+      VALUES
+        ('${tbPartLowTajwidId}', '${tenantJabarId}', '${kafilahBandungId}', '${branchTilawahPutraId}', '${levelDewasaId}', 'TB-SQL-01', 'Peserta Tajwid Rendah (Undian Awal)', 'Putra', '91', 'Berlangsung'),
+        ('${tbPartHighTajwidId}', '${tenantJabarId}', '${kafilahBandungId}', '${branchTilawahPutraId}', '${levelDewasaId}', 'TB-SQL-02', 'Peserta Tajwid Tinggi (Unggul Tie-Break)', 'Putra', '92', 'Berlangsung');
+
+      INSERT INTO stage_participations (id, tenant_id, participant_id, stage_id, lottery_number, status)
+      VALUES
+        ('${tbSpLowId}', '${tenantJabarId}', '${tbPartLowTajwidId}', '${tbStageId}', '91', 'Lengkap'),
+        ('${tbSpHighId}', '${tenantJabarId}', '${tbPartHighTajwidId}', '${tbStageId}', '92', 'Lengkap');
+
+      INSERT INTO assigned_maqras (id, tenant_id, stage_participation_id, question_id, assigned_by, method)
+      VALUES
+        ('${tbMaqraLowId}', '${tenantJabarId}', '${tbSpLowId}', '${questionPenyisihanId}', '${adminUserId}', 'undian'),
+        ('${tbMaqraHighId}', '${tenantJabarId}', '${tbSpHighId}', '${questionPenyisihanId}', '${adminUserId}', 'undian');
+
+      -- Kedua peserta memiliki final_score identik (92.00), tetapi tbPartHighTajwidId unggul pada bidang Tajwid (29.0 vs 26.0)
+      INSERT INTO judge_assessments (
+        id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id,
+        status, is_locked, field_scores, total_deductions, final_score
+      ) VALUES
+        ('${tbAsmLowId}', '${tenantJabarId}', '${tbSpLowId}', '${tbMaqraLowId}', '${judge1UserId}', '${rubricSeniBacaId}',
+         'in_progress', false, '{"Tajwid": 26.0, "Lagu": 26.0, "Fashahah": 25.0, "Suara": 15.0}'::jsonb, 8.0, 92.00),
+        ('${tbAsmHighId}', '${tenantJabarId}', '${tbSpHighId}', '${tbMaqraHighId}', '${judge1UserId}', '${rubricSeniBacaId}',
+         'in_progress', false, '{"Tajwid": 29.0, "Lagu": 23.0, "Fashahah": 25.0, "Suara": 15.0}'::jsonb, 8.0, 92.00);
+    `);
+
+    currentAuthUser = { id: judge1UserId, email: 'hakim1@jabar.mtq.id' };
+    await supabaseDataService.finalizeJudgeAssessmentRpc(tbAsmLowId);
+    await supabaseDataService.finalizeJudgeAssessmentRpc(tbAsmHighId);
+    currentAuthUser = { id: adminUserId, email: 'admin@jabar.mtq.id' };
+
+    // 58a. Mencoba meloloskan tbPartLowTajwidId (peringkat #2 menurut tie-break Tajwid) TANPA alasan override -> WAJIB DITOLAK oleh SQL RPC!
+    const invalidTieBreakAdvance = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: tbStageId,
+      nextStageId: tbNextStageId,
+      qualifiedParticipantIds: [tbPartLowTajwidId],
+      overrideReasons: {},
+      rankingsSnapshot: []
+    });
+
+    // 58b. Meloloskan tbPartHighTajwidId (peringkat #1 resmi menurut tie-break Tajwid di SQL) TANPA perlu alasan override -> WAJIB BERHASIL!
+    const validTieBreakAdvance = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: tbStageId,
+      nextStageId: tbNextStageId,
+      qualifiedParticipantIds: [tbPartHighTajwidId],
+      overrideReasons: {},
+      rankingsSnapshot: []
+    });
+
+    assert(
+      '58. P1-06 Otoritas Tie-Break Server & Validasi Override Dua Arah di PostgreSQL (`advance_stage_qualifiers`): Menghitung tie-break bidang (`field_scores`) langsung di SQL dan menolak pelolosan/pengguguran yang menyimpang dari tie-break resmi tanpa alasan override valid',
+      invalidTieBreakAdvance.success === false &&
+        invalidTieBreakAdvance.message.includes('override') &&
+        validTieBreakAdvance.success === true,
+      `invalidTbRejected: ${!invalidTieBreakAdvance.success} (${invalidTieBreakAdvance.message}), validTbAccepted: ${validTieBreakAdvance.success} (${validTieBreakAdvance.message})`
+    );
   } finally {
     supabaseDataService.setTestDatabaseClient(null);
     await pg.close();

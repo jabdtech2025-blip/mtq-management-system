@@ -19,6 +19,7 @@ import {
 import { useMtq } from '../../context/MtqContext';
 import { Question } from '../../types/mtq';
 import { AppModal } from '../common/AppModal';
+import { validateMaqraAssignmentForParticipant } from '../../services/scoringEngine';
 import {
   fisherYatesShuffle,
   downloadQuestionExcelTemplate,
@@ -350,21 +351,15 @@ export const BankSoalView: React.FC = () => {
       (q) => selectedQuestionPoolIds.includes(q.id) && q.status === 'Aktif'
     );
 
-    // Validate each participant's branch & level pool within the selected question pool
+    // P0-03: Validate each participant's 3D compatibility (branch + level + stage + active status) within the selected question pool
     for (const part of selectedParts) {
-      const partQuestions = explicitQuestionPool.filter((q) => {
-        const matchesStage = !q.stageName || q.stageName === lotteryStage || lotteryStage === 'Semua Babak';
-        const qBranch = q.branchName || q.branchAndLevel || '';
-        const matchesBranch =
-          lotteryBranch === 'Semua Cabang'
-            ? !qBranch || qBranch.includes(part.branchName) || part.branchName.includes(qBranch)
-            : qBranch.includes(lotteryBranch);
-        return matchesStage && matchesBranch;
-      });
+      const partQuestions = explicitQuestionPool.filter(
+        (q) => validateMaqraAssignmentForParticipant(part, q, lotteryStage, []).valid
+      );
 
       if (partQuestions.length < lotteryQuestionsPerParticipant) {
         setLotteryFeedback(
-          `Tidak dapat melanjutkan: Peserta ${part.name} (${part.branchName}) membutuhkan ${lotteryQuestionsPerParticipant} soal unik, namun hanya tersedia ${partQuestions.length} soal aktif yang tercentang di Pool Soal Babak ${lotteryStage}.`
+          `Tidak dapat melanjutkan: Peserta ${part.name} (${part.branchName}${part.levelName ? ` - ${part.levelName}` : ''}) membutuhkan ${lotteryQuestionsPerParticipant} soal unik yang sesuai cabang, jenjang, dan babak, namun hanya tersedia ${partQuestions.length} soal aktif yang cocok di Pool Soal Babak ${lotteryStage}.`
         );
         return;
       }
@@ -384,15 +379,9 @@ export const BankSoalView: React.FC = () => {
       const batchUsed = new Set<string>();
 
       selectedParts.forEach((part) => {
-        const partQuestions = explicitQuestionPool.filter((q) => {
-          const matchesStage = !q.stageName || q.stageName === lotteryStage || lotteryStage === 'Semua Babak';
-          const qBranch = q.branchName || q.branchAndLevel || '';
-          const matchesBranch =
-            lotteryBranch === 'Semua Cabang'
-              ? !qBranch || qBranch.includes(part.branchName) || part.branchName.includes(qBranch)
-              : qBranch.includes(lotteryBranch);
-          return matchesStage && matchesBranch;
-        });
+        const partQuestions = explicitQuestionPool.filter(
+          (q) => validateMaqraAssignmentForParticipant(part, q, lotteryStage, []).valid
+        );
 
         // Filter out questions this participant already has in this stage
         const existingQIds = new Set(
@@ -611,11 +600,12 @@ export const BankSoalView: React.FC = () => {
     setIsImporting(true);
     try {
       const res = await importQuestionsBatch(importValidation.validRows);
+      const errDetail = res.errors.length > 0 ? ` (${res.errors.slice(0, 2).join('; ')})` : '';
       setFeedbackMessage({
-        type: res.succeeded > 0 ? 'success' : 'error',
-        text: `Berhasil mengimpor ${res.succeeded} dari ${res.total} soal / maqra.`
+        type: res.succeeded > 0 && res.failed === 0 ? 'success' : 'error',
+        text: `Berhasil mengimpor ${res.succeeded} dari ${res.total} soal / maqra.${res.failed > 0 ? ` Gagal: ${res.failed}${errDetail}` : ''}`
       });
-      if (res.succeeded > 0) {
+      if (res.succeeded > 0 && res.failed === 0) {
         setIsImportModalOpen(false);
         setImportValidation(null);
         setImportFileName('');
@@ -625,17 +615,14 @@ export const BankSoalView: React.FC = () => {
     }
   };
 
-  // Open Single Question Manual Assignment
+  // Open Single Question Manual Assignment (P0-03: 3D relational filter for candidate participants)
   const handleOpenManualAssign = (q: Question) => {
     setManualAssignQuestion(q);
     const matchingParts = participants.filter((p) => {
-      const matchStage = !q.stageName || p.stageName === q.stageName;
-      const alreadyHas =
-        (p.questionId === q.id && (!p.stageName || p.stageName === q.stageName)) ||
-        (p.assignedQuestions || []).some(
-          (aq) => aq.questionId === q.id && (!aq.stageName || aq.stageName === q.stageName)
-        );
-      return matchStage && !alreadyHas;
+      const existingStageQIds = (p.assignedQuestions || [])
+        .filter((aq) => !aq.stageName || aq.stageName === q.stageName)
+        .map((aq) => aq.questionId);
+      return validateMaqraAssignmentForParticipant(p, q, q.stageName, existingStageQIds).valid;
     });
 
     const defaultP =

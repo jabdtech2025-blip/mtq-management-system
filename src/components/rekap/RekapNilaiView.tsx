@@ -429,12 +429,13 @@ export const RekapNilaiView: React.FC = () => {
               ) : (
                 filteredParticipants.map((p, pIdx) => {
                   const stageQuestions = getParticipantStageQuestions(p.id, p.stageName);
-                  const overallProgress = getParticipantProgress(p.id, p.stageName);
+                  const rawProgress = getParticipantProgress(p.id, p.stageName);
 
                   // Calculate overall average across all questions for this participant
                   let totalScoreSum = 0;
                   let totalScoreCount = 0;
-                  let allFinalized = true;
+                  let finalizedScoreCount = 0;
+                  let allFinalized = stageQuestions.length > 0 && activeJudges.length > 0;
 
                   stageQuestions.forEach((q) => {
                     activeJudges.forEach((j) => {
@@ -442,6 +443,7 @@ export const RekapNilaiView: React.FC = () => {
                       if (asm && asm.status === 'finalized') {
                         totalScoreSum += asm.finalScore;
                         totalScoreCount++;
+                        finalizedScoreCount++;
                       } else {
                         allFinalized = false;
                         if (asm) {
@@ -451,6 +453,19 @@ export const RekapNilaiView: React.FC = () => {
                       }
                     });
                   });
+
+                  const overallProgress =
+                    stageQuestions.length === 0
+                      ? 'Maqra Belum Ditetapkan'
+                      : allFinalized
+                      ? 'Lengkap'
+                      : rawProgress !== 'Belum Dimulai'
+                      ? rawProgress
+                      : finalizedScoreCount > 0
+                      ? 'Menunggu Hakim Lain'
+                      : totalScoreCount > 0
+                      ? 'Berlangsung'
+                      : rawProgress;
 
                   const overallAvg =
                     totalScoreCount > 0 ? totalScoreSum / totalScoreCount : null;

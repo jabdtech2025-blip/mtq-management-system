@@ -46,9 +46,13 @@ export const HasilKelulusanView: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Deduplikasi opsi babak berdasarkan nama babak (utamakan babak yang aktif / memiliki peserta)
+  // Deduplikasi nama babak untuk pilihan dropdown babak, namun resolusi objek babak tetap spesifik per cabang (P0-02)
+  const tenantStages = useMemo(
+    () => stages.filter((s) => s.tenantId === currentTenant.id),
+    [stages, currentTenant.id]
+  );
+
   const uniqueStages = useMemo(() => {
-    const tenantStages = stages.filter((s) => s.tenantId === currentTenant.id);
     const map = new Map<string, (typeof tenantStages)[number]>();
     tenantStages.forEach((stg) => {
       const existing = map.get(stg.name);
@@ -67,33 +71,13 @@ export const HasilKelulusanView: React.FC = () => {
       }
     });
     return Array.from(map.values()).sort((a, b) => a.order - b.order);
-  }, [stages, stageParticipations, currentTenant.id]);
+  }, [tenantStages, stageParticipations, currentTenant.id]);
 
   // Active stage selector
   const [selectedStageName, setSelectedStageName] = useState<string>('Penyisihan');
 
-  // Next stage target
-  const currentStage =
-    uniqueStages.find((s) => s.name === selectedStageName) ||
-    stages.find((s) => s.tenantId === currentTenant.id && s.name === selectedStageName) ||
-    uniqueStages[0] ||
-    stages[0];
-  const nextStage =
-    uniqueStages
-      .filter((s) => s.order > (currentStage?.order || 0) && s.name !== currentStage?.name)
-      .sort((a, b) => a.order - b.order)[0] || null;
-
-  // Manual overrides state: { [participantId]: boolean } and reasons { [participantId]: string }
-  const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
-  const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
-  const [overrideModalParticipant, setOverrideModalParticipant] = useState<Participant | null>(null);
-  const [tempReasonText, setTempReasonText] = useState('');
-  const [tempOverrideValue, setTempOverrideValue] = useState(true);
-
-  // Confirmation modal & feedback
-  const [isConfirmAdvancementOpen, setIsConfirmAdvancementOpen] = useState(false);
-  const [advancementSuccessMessage, setAdvancementSuccessMessage] = useState('');
-  const [advancementErrorMessage, setAdvancementErrorMessage] = useState('');
+  // Selected branch filter for multi-branch isolation
+  const [selectedBranch, setSelectedBranch] = useState<string>('Semua Cabang');
 
   // Active stage participations for current tenant & stage
   const currentStageParticipations = useMemo(() => {
@@ -102,11 +86,6 @@ export const HasilKelulusanView: React.FC = () => {
     );
   }, [stageParticipations, currentTenant.id, selectedStageName]);
 
-  // Quota configuration
-  const quota = currentStage?.qualificationQuota || 3;
-
-  // Selected branch filter for multi-branch isolation
-  const [selectedBranch, setSelectedBranch] = useState<string>('Semua Cabang');
   const branchOptions = useMemo(() => {
     const branchSet = new Set<string>();
     currentStageParticipations.forEach((sp) => {
@@ -130,8 +109,164 @@ export const HasilKelulusanView: React.FC = () => {
         branchSet.add(p.branchName);
       }
     });
+    tenantStages.forEach((s) => {
+      if (s.name === selectedStageName && s.branchName && s.branchName !== 'Semua Cabang') {
+        branchSet.add(s.branchName);
+      }
+    });
     return ['Semua Cabang', ...Array.from(branchSet)];
-  }, [currentStageParticipations, participants, currentTenant.id, selectedStageName]);
+  }, [currentStageParticipations, participants, tenantStages, currentTenant.id, selectedStageName]);
+
+  // Effective branch when only 1 active branch exists or specific branch is selected
+  const effectiveBranchName = useMemo(() => {
+    if (selectedBranch !== 'Semua Cabang') return selectedBranch;
+    if (branchOptions.length === 2) return branchOptions[1];
+    return undefined;
+  }, [selectedBranch, branchOptions]);
+
+  // P0-02: Resolve currentStage and nextStage strictly scoped to the active branch
+  // Prioritize stages that actually have participations or assessments over unused duplicate stage rows
+  const currentStage = useMemo(() => {
+    const candidates = tenantStages.filter((s) => s.name === selectedStageName);
+    const activeStageIds = new Set<string>();
+    currentStageParticipations.forEach((sp) => {
+      if (!effectiveBranchName) {
+        if (sp.stageId) activeStageIds.add(sp.stageId);
+        return;
+      }
+      const partObj = participants.find(
+        (p) => p.id === sp.participantId && p.tenantId === currentTenant.id
+      );
+      const pBr =
+        (sp.branchName && sp.branchName !== 'Semua Cabang' ? sp.branchName : partObj?.branchName) ||
+        sp.branchName;
+      if (!pBr || pBr === effectiveBranchName) {
+        if (sp.stageId) activeStageIds.add(sp.stageId);
+      }
+    });
+    assessments.forEach((a) => {
+      if (a.tenantId === currentTenant.id && a.stageName === selectedStageName && a.stageId) {
+        activeStageIds.add(a.stageId);
+      }
+    });
+
+    if (effectiveBranchName) {
+      const activeBranchSpecific = candidates.find(
+        (s) => s.branchName === effectiveBranchName && activeStageIds.has(s.id)
+      );
+      if (activeBranchSpecific) return activeBranchSpecific;
+
+      const activeShared = candidates.find(
+        (s) =>
+          (!s.branchName || s.branchName === 'Semua Cabang') &&
+          activeStageIds.has(s.id)
+      );
+      if (activeShared) return activeShared;
+
+      const anyActive = candidates.find((s) => activeStageIds.has(s.id));
+      if (anyActive) return anyActive;
+
+      const branchSpecific = candidates.find(
+        (s) => s.branchName === effectiveBranchName
+      );
+      if (branchSpecific) return branchSpecific;
+    }
+
+    return (
+      candidates.find((s) => activeStageIds.has(s.id)) ||
+      uniqueStages.find((s) => s.name === selectedStageName) ||
+      candidates[0] ||
+      uniqueStages[0] ||
+      stages[0]
+    );
+  }, [
+    tenantStages,
+    uniqueStages,
+    stages,
+    selectedStageName,
+    effectiveBranchName,
+    currentStageParticipations,
+    participants,
+    assessments,
+    currentTenant.id
+  ]);
+
+  const nextStage = useMemo(() => {
+    if (!currentStage) return null;
+    const candidateStages = tenantStages.filter((s) => {
+      if (s.order <= currentStage.order || s.name === currentStage.name) return false;
+      if (effectiveBranchName) {
+        return (
+          s.branchName === effectiveBranchName ||
+          (currentStage.branchId && s.branchId === currentStage.branchId) ||
+          !s.branchName ||
+          s.branchName === 'Semua Cabang'
+        );
+      }
+      if (currentStage.branchId && s.branchId) {
+        return s.branchId === currentStage.branchId;
+      }
+      if (currentStage.branchName && currentStage.branchName !== 'Semua Cabang' && s.branchName && s.branchName !== 'Semua Cabang') {
+        return s.branchName === currentStage.branchName;
+      }
+      return true;
+    });
+    // Utamakan babak yang spesifik pada cabang yang sama terlebih dahulu
+    return (
+      candidateStages.sort((a, b) => {
+        if (a.order !== b.order) return a.order - b.order;
+        const aExact = effectiveBranchName && a.branchName === effectiveBranchName ? 0 : 1;
+        const bExact = effectiveBranchName && b.branchName === effectiveBranchName ? 0 : 1;
+        return aExact - bExact;
+      })[0] || null
+    );
+  }, [tenantStages, currentStage, effectiveBranchName]);
+
+  // Manual overrides state: { [participantId]: boolean } and reasons { [participantId]: string }
+  const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
+  const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
+  const [overrideModalParticipant, setOverrideModalParticipant] = useState<Participant | null>(null);
+  const [tempReasonText, setTempReasonText] = useState('');
+  const [tempOverrideValue, setTempOverrideValue] = useState(true);
+
+  // Confirmation modal & feedback
+  const [isConfirmAdvancementOpen, setIsConfirmAdvancementOpen] = useState(false);
+  const [advancementSuccessMessage, setAdvancementSuccessMessage] = useState('');
+  const [advancementErrorMessage, setAdvancementErrorMessage] = useState('');
+
+  // Quota configuration (P1-04: Centralized from branch-specific CompetitionStage)
+  const quota = currentStage?.qualificationQuota || 3;
+
+  // P0-01: Per-branch grouped evaluation when "Semua Cabang" is selected across multiple branches
+  const branchGroups = useMemo(() => {
+    return RankingService.evaluateStageByBranches({
+      tenantId: currentTenant.id,
+      stageName: selectedStageName,
+      stages,
+      participations: stageParticipations,
+      participants,
+      assessments,
+      judgeAssignments,
+      stageQuestionsGetter: getParticipantStageQuestions,
+      manualOverrides,
+      overrideReasons,
+      customRuleConfigs: competitionRules,
+      customRubricVersions: rubricVersions
+    });
+  }, [
+    currentTenant.id,
+    selectedStageName,
+    stageParticipations,
+    participants,
+    assessments,
+    judgeAssignments,
+    stages,
+    getParticipantStageQuestions,
+    manualOverrides,
+    overrideReasons,
+    competitionRules,
+    rubricVersions
+  ]);
 
   // Use centralized RankingService for scoring, multi-maqra aggregation, and official tie-break resolution
   const {
@@ -146,8 +281,10 @@ export const HasilKelulusanView: React.FC = () => {
   } = useMemo(() => {
     return RankingService.evaluateStageParticipants({
       tenantId: currentTenant.id,
+      stageId: effectiveBranchName ? currentStage?.id : undefined,
       stageName: selectedStageName,
-      branchName: selectedBranch !== 'Semua Cabang' ? selectedBranch : undefined,
+      branchId: effectiveBranchName ? currentStage?.branchId : undefined,
+      branchName: effectiveBranchName,
       participations: stageParticipations,
       participants,
       assessments,
@@ -161,8 +298,10 @@ export const HasilKelulusanView: React.FC = () => {
     });
   }, [
     currentTenant.id,
+    currentStage?.id,
+    currentStage?.branchId,
     selectedStageName,
-    selectedBranch,
+    effectiveBranchName,
     stageParticipations,
     participants,
     assessments,
@@ -249,11 +388,21 @@ export const HasilKelulusanView: React.FC = () => {
     });
   };
 
-  // Confirm Advancement to Next Stage OR Finalize Championship
+  // P0-02 & P1-05: Confirm Advancement to Next Stage OR Finalize Championship with explicit stageId, nextStageId, branchId, branchName, and manualOverrides
   const handleConfirmAdvancement = async () => {
     const qualifiedIds = qualifiedParticipants.map((item) => item.participant.id);
     const targetNextStage = nextStage ? nextStage.name : '';
-    const result = await advanceQualifiers(selectedStageName, targetNextStage, qualifiedIds, overrideReasons);
+    const result = await advanceQualifiers({
+      currentStageId: currentStage?.id,
+      currentStageName: selectedStageName,
+      nextStageId: nextStage?.id,
+      nextStageName: targetNextStage,
+      branchId: currentStage?.branchId,
+      branchName: effectiveBranchName || currentStage?.branchName,
+      qualifiedParticipantIds: qualifiedIds,
+      manualOverrides,
+      overrideReasons
+    });
 
     setIsConfirmAdvancementOpen(false);
     if (result.success) {
@@ -493,6 +642,51 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
+      {/* P0-01: Per-Branch Isolated Group Cards when "Semua Cabang" has >1 branch */}
+      {selectedBranch === 'Semua Cabang' && branchGroups.length > 1 && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                Isolasi Ranking Per Cabang Lomba ({branchGroups.length} Cabang Aktif)
+              </h3>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                Setiap cabang dievaluasi terpisah dengan dewan hakim, rubrik, aturan tie-break, dan kuota kelulusan masing-masing. Pilih cabang spesifik untuk melakukan pengesahan babak.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {branchGroups.map((grp) => (
+              <div
+                key={`${grp.branchId || grp.branchName}`}
+                className="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between gap-3 shadow-2xs"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-extrabold text-xs text-slate-900 truncate">{grp.branchName}</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
+                      Kuota Top {grp.quota}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {grp.evaluation.evaluatedParticipants.filter((p) => p.isFullyFinalized).length} /{' '}
+                    {grp.evaluation.evaluatedParticipants.length} Peserta Lengkap ·{' '}
+                    {grp.evaluation.evaluatedParticipants.filter((p) => p.isQualified).length} Calon Lolos
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBranch(grp.branchName)}
+                  className="w-full py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-[11px] transition-colors cursor-pointer text-center"
+                >
+                  Pilih & Kelola Cabang Ini →
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Qualification Results Table */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50">
@@ -501,7 +695,7 @@ export const HasilKelulusanView: React.FC = () => {
               Peringkat & Kualifikasi Peserta Babak {selectedStageName}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Urutan berdasarkan rata-rata nilai dewan juri cabang {currentStage?.branchName}
+              Urutan berdasarkan rata-rata nilai dewan juri cabang {effectiveBranchName || (branchGroups.length > 1 ? 'Masing-Masing Cabang (Terisolasi)' : currentStage?.branchName)}
             </p>
           </div>
 

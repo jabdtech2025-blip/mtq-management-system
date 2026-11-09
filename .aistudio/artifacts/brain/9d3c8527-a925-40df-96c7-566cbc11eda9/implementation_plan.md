@@ -1,94 +1,115 @@
-# Penyempurnaan UI/UX MTQ Management System — Laporan Implementasi
+# Pembenahan Integritas Multi-Cabang & Otoritas Hasil MTQ Management System
 
-Seluruh audit dan penyempurnaan arsitektur antarmuka pengguna (UI/UX) pada sistem MTQ Management System telah diselesaikan dengan mematuhi prinsip desain SaaS enterprise: bersih, konsisten, berorientasi produktivitas dewan hakim, bebas dari redundansi dekoratif/AI slop, serta mempertahankan seluruh logika penilaian dan formula musabaqah.
+Rencana ini menuntaskan seluruh temuan kritis (P0), prioritas tinggi (P1), reliabilitas penyimpanan database/Outbox, serta cakupan pengujian otomatis dari laporan Audit Lanjutan agar sistem siap dan sah digunakan untuk pengesahan hasil musabaqah multi-cabang.
 
----
+## User Review & Critical Decisions
 
-## 1. Bank Soal & Maqra Tilawah
-- **Multi-soal per Peserta**:
-  - Pengelolaan penetapan soal manual kini mendukung penugasan lebih dari satu maqra per peserta tanpa menimpa atau menghapus soal yang sudah diperoleh sebelumnya.
-  - Setiap maqra yang ditugaskan ke peserta dapat dihapus satu per satu secara independen via tombol hapus individual.
-- **Alur Undian Penentuan Soal (*Lottery Draw Workflow*)**:
-  - Disediakan tombol aksi khusus **"Undian Penentuan Soal"** yang membuka modal bertahap:
-    1. Filter ruang lingkup (Babak Musabaqah & Cabang/Golongan).
-    2. Pemilihan peserta aktif yang berpartisipasi dalam undian (lengkap dengan opsi *Pilih Semua* / *Batalkan Semua*).
-    3. Konfigurasi jumlah soal per peserta (1, 2, atau 3 soal).
-    4. Indikator pool soal tersedia yang cocok dengan kriteria.
-    5. Tombol eksekusi pengundian acak interaktif dengan feedback status.
-    6. Pratinjau hasil undian nama peserta dan maqra sebelum konfirmasi penyimpanan ke state.
-- **Pratinjau Multi-Halaman (*Multi-Page Preview*)**:
-  - Modal pratinjau mushaf kini mendukung rentang halaman (`pageStart` hingga `pageEnd`).
-  - Dilengkapi navigasi halaman (sebelumnya/selanjutnya), tombol pintas per nomor halaman, serta pemilih mode tampilan: **Halaman Tunggal** (*single page flip*) atau **Semua Halaman** (*vertical scroll gallery*).
-  - Kontrol zoom presisi (60% hingga 160%).
-- **Formulir Tambah & Edit Soal**:
-  - Dilengkapi input nomor halaman awal (`formPageStart`) dan halaman akhir (`formPageEnd`) berbatas 1–604.
+> [!IMPORTANT]
+> Ketiga keputusan arsitektur berikut telah dikonfirmasi bersama pengguna dan menjadi landasan utama eksekusi:
+
+- **Confirmed Decision 1 — Mode "Semua Cabang" pada Hasil Babak & Kelulusan (P0-01 & P0-02)**: Saat memilih *Semua Cabang*, sistem mengelompokkan dan mengevaluasi tabel peringkat secara terpisah per cabang lomba (`branchId`), masing-masing dengan dewan hakim, rubrik, aturan tie-break, dan kuota cabangnya sendiri. Tindakan pengesahan hasil babak dan pelolosan peserta wajib dieksekusi per cabang dan per ID babak (`stageId` + `branchId` → `nextStageId`).
+- **Confirmed Decision 2 — Satu Sumber Kebenaran Kuota Kelulusan (P1-04)**: Kuota kelulusan resmi ditetapkan secara terpusat pada **Manajemen Babak** per cabang (`qualificationQuota`). Konfigurasi Aturan Cabang menyinkronkan dan membaca nilai kuota langsung dari konfigurasi babak terkait, serta mesin evaluasi memblokir pengesahan apabila jumlah peserta yang diloloskan melalui *manual override* melebihi kuota babak.
+- **Confirmed Decision 3 — Perubahan Rubrik & Aturan Saat Penilaian Berjalan (P1-07)**: Administrator diizinkan mengubah rubrik aktif atau aturan cabang dengan dialog peringatan konfirmasi eksplisit. Ketika dikonfirmasi, sistem secara otomatis menghitung ulang (*recalculate*) seluruh lembar penilaian yang terdampak agar versi rubrik dan skor bidang tetap konsisten 100% antara lembar penilaian, rekap, dan snapshot pengesahan babak.
 
 ---
 
-## 2. Master Data (Jenjang Usia & Cabang Musabaqah)
-- **Persistensi State Nyata**:
-  - Menggantikan state prototipe lokal dengan state terpusat `jenjangList` dan `cabangList` di `MtqContext` yang tersimpan aman di `localStorage`.
-- **Aksi Hapus & Perlindungan Relasi (*Delete Guard*)**:
-  - Setiap baris jenjang dan cabang kini memiliki tombol hapus (*trash icon*) serta tombol pengubah status (*Aktif / Nonaktif*).
-  - Jika item sedang digunakan oleh peserta aktif, babak musabaqah, atau paket soal, penghapusan permanen dicegah dengan memunculkan **Modal Peringatan Keamanan Relasi Data**.
-  - Modal ini merinci jumlah data musabaqah aktif yang terhubung dan menyediakan opsi aman **"Nonaktifkan Saja"** agar referensi penilaian yang telah berjalan tidak rusak.
-- **Pembersihan Badge Versi Rubrik**:
-  - Menghapus badge statis `Rubrik: v2.4 (Standar LPTQ)` pada judul halaman dan menghapus banner teks eksplanatori yang berulang.
+## 1. Overview & Core Concept
+
+- **What It Does**: Memperkuat integritas relasional di seluruh siklus operasional musabaqah—mulai dari pendaftaran dan import peserta, undian dan penetapan maqra, penilaian dewan hakim, pemeringkatan dan *tie-break* multi-cabang, hingga transaksi pengesahan babak dan kejuaraan di server PostgreSQL.
+- **Target Audience / Persona**: Superadmin, Administrator Panitia MTQ, dan Majelis Dewan Hakim yang mengelola musabaqah dengan banyak cabang, golongan/jenjang, dan babak secara paralel.
+- **Key Value**: Menjamin bahwa setiap peserta hanya dinilai dengan maqra yang sah untuk cabang, jenjang, dan babaknya; perhitungan pengurangan nilai di layar hakim identik dengan mesin penilaian resmi; peringkat antar cabang tidak pernah tercampur; serta keputusan tie-break dan kualifikasi dihitung secara otoritatif baik di aplikasi maupun di server database.
 
 ---
 
-## 3. Workspace Penilaian Hakim & Mode Pemantauan Admin
-- **Header Bersih & Rapi**:
-  - Menghapus duplikasi nama hakim dari header dan menghapus tombol *Kunci Nilai* di header.
-  - Header kini fokus pada tombol navigasi kembali, pemilih peserta kompak (#undian, ID, nama), informasi babak & maqra, indikator sinkronisasi waktu, serta tab toggle tablet (*Mushaf* vs *Nilai*).
-- **Aksi Kunci Nilai Terfokus**:
-  - Tombol aksi utama **"Simpan Penilaian"** diletakkan secara teratur pada bagian bawah (*footer*) panel penilaian kanan, yang membuka dialog konfirmasi sebelum penguncian status final.
-- **Keselarasan Visual & Pembagian Hak Akses (*Role-Based Inspection*)**:
-  - Tampilan visual workspace dewan hakim dan pemantauan admin berbagi kanvas dan panel yang seragam.
-  - **Mode Hakim**: Hak akses penuh untuk menambah/mengurangi kesalahan (+ / -), menggunakan pen/stabilo/penghapus/undo coretan mushaf, dan mengunci penilaian.
-  - **Mode Admin (Pemantauan)**: Diaktifkan ketika dibuka oleh admin via `monitoringJudgeId`. Bersifat **Hanya Baca (*Strict Read-Only*)**:
-    - Kanvas coretan menonaktifkan interaksi mouse/touch (`pointer-events-none`).
-    - Toolbar kanvas menggantikan alat gambar dengan badge penanda: `Mode Pemantauan Admin (Hanya Baca) — [Nama Hakim]`.
-    - Tombol koreksi (+ / -) dinonaktifkan.
-    - Footer menampilkan kartu status pemantauan tanpa tombol kunci penilaian.
+## 2. User Experience & Visual Design
+
+- **Key User Flows**:
+  1. **Hasil Babak & Kelulusan Multi-Cabang**: Ketika filter cabang berada pada *Semua Cabang*, antarmuka menampilkan kartu dan tabel pemeringkatan yang dikelompokkan per cabang lomba secara mandiri. Untuk melakukan finalisasi/pengesahan babak, tombol aksi mengarahkan atau mengeksekusi pengesahan secara spesifik per grup `(stageId, branchId)` menuju `nextStageId` pada cabang yang sama.
+  2. **Undian & Penetapan Maqra Ketat**: Baik saat undian otomatis, penetapan manual, maupun *commit* hasil undian, sistem memvalidasi kecocokan tiga dimensi (`branchId`, `levelId`, dan `stageId`/`stageName`) serta menolak soal dari jenjang atau cabang berbeda dengan pesan kesalahan yang jelas.
+  3. **Penilaian Dewan Hakim Presisi**: Panel penilaian hakim hanya menampilkan kategori kesalahan yang berstatus **Aktif** untuk cabang/rubrik terkait, dan menampilkan angka pengurangan poin langsung dari hasil kalkulasi mesin penilaian resmi (termasuk aturan *DeductionRule* dan batas *maxDeduction*).
+  4. **Import Excel & Undian Transaksional**: Proses import peserta/bank soal dan penyimpanan hasil undian menunggu (*await*) penyelesaian operasi database sebelum menampilkan ringkasan akhir: jumlah baris valid, berhasil disimpan ke database, dan daftar rinci baris yang gagal disimpan.
+- **Visual Identity & Theme**:
+  - *Aesthetic Direction*: Utilitarian Enterprise SaaS Dashboard yang bersih, berwibawa, dan fokus pada keterbacaan data tabel berdensitas tinggi.
+  - *Color Palette & Mood*: Kanvas netral terang (`#F8FAFC` / `#FFFFFF`), permukaan struktural dengan garis batas halus `1px` (`#E2E8F0`), serta aksen hijau zamrud (`#047857`) untuk aksi pengesahan utama, kuning amber (`#D97706`) untuk status penilaian berjalan/peringatan, dan merah (`#DC2626`) untuk pelanggaran validasi atau *boundary tie*.
+  - *Typography & Hierarchy*: Pasangan font geometris dan humanis yang tegas (`Plus Jakarta Sans` untuk judul/navigasi dan `DM Sans` untuk teks tabel), dipadukan dengan `JetBrains Mono` (`tabular-nums`) untuk seluruh skor desimal, nomor undian, kuota, dan peringkat agar sejajar vertikal.
+  - *Component Styling & Layout*: Satu tingkat elevasi kartu (*single-elevation depth*), tanpa *nested cards* berlebih, serta pemisahan metadata menggunakan pemisah tipografis bersih (`·`).
+- **Interactive Feedback & Motion**: Indikator proses simpan database nyata saat *commit* undian dan import batch, modal konfirmasi *recalculate* saat Admin memperbarui rubrik/aturan yang sedang digunakan, serta umpan balik instan $\le 200\text{ms}$ pada kontrol filter babak dan cabang.
 
 ---
 
-## 4. Daftar Penugasan & Pemantauan Hakim
-- **Penyelarasan Toolbar & State Inspeksi**:
-  - Input pencarian dan filter status/cabang diratakan dalam satu baris horizontal yang rapi.
-  - Ketika admin memilih dewan hakim yang akan dipantau atau mengklik penilaian peserta, sistem menyinkronkan `monitoringJudgeId` sehingga lembar kerja dual-panel membuka lembar hakim yang bersangkutan secara presisi.
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1 — Isolasi Evaluasi Ranking Berbasis Grup Cabang (`branchId`)**:
+  - *Chosen Approach*: Memisahkan evaluasi `RankingService` per `(stageId, branchId)`. Saat pengguna melihat *Semua Cabang*, sistem menjalankan evaluasi independen untuk setiap cabang yang memiliki peserta pada babak tersebut dan merender bagian hasil per cabang.
+  - *Why*: Mencegah digunakannya daftar hakim, rubrik, atau aturan *tie-break* cabang pertama terhadap peserta dari cabang lain.
+  - *Alternatives Considered*: Menghapus opsi *Semua Cabang* sepenuhnya; tidak dipilih agar panitia tetap memiliki pandangan ringkas seluruh cabang dalam satu layar.
+- **Decision 2 — Pencocokan Penilaian Relasional Tanpa Fallback Lintas Maqra**:
+  - *Chosen Approach*: Menghapus fallback pencocokan penilaian yang mengabaikan `questionId` / `assignedMaqraId` atau `stageParticipationId`. Lembar penilaian hanya dihitung sah apabila terikat pada peserta, hakim, partisipasi babak, dan maqra yang ditugaskan pada babak tersebut.
+  - *Why*: Mencegah nilai dari maqra lama atau babak sebelumnya terbaca sebagai nilai final pada maqra baru.
+  - *Alternatives Considered*: Mempertahankan fallback longgar untuk kompatibilitas data lama; ditolak karena berisiko tinggi memalsukan status kelengkapan penilaian.
+- **Decision 3 — Tie-Break & Validasi Override Otoritatif di Server PostgreSQL**:
+  - *Chosen Approach*: Memperbarui fungsi RPC `advance_stage_qualifiers` di PostgreSQL agar menghitung sendiri rata-rata nilai per bidang (`field_scores`) dari tabel `judge_assessments`, mengurutkan peringkat sesuai `tie_break_order` cabang di server tanpa bergantung pada `client_tie_break_rank`, serta mewajibkan alasan minimal 5 karakter baik untuk peserta yang diloloskan di luar kuota maupun peserta dalam kuota yang digugurkan secara manual.
+  - *Why*: Menjamin hasil kejuaraan yang disahkan di database 100% otoritatif dan tidak dapat dimanipulasi dari sisi browser.
+- **Decision 4 — Penyimpanan Transaksional (`await`) & Processor Outbox Terintegrasi**:
+  - *Chosen Approach*: Mengubah `importParticipantsBatch`, `importQuestionsBatch`, `updateParticipant`, dan `commitLotteryDrawResults` agar menunggu konfirmasi penyimpanan Supabase secara nyata, serta mendaftarkan `OutboxProcessor` aktif di `MtqContext` dengan payload penilaian lengkap.
+  - *Why*: Menghilangkan *false success* pada operasi kritikal dan memastikan antrean *offline outbox* benar-benar dapat dipulihkan saat koneksi kembali aktif.
 
 ---
 
-## 5. Rekap Nilai & Modal Rincian Penilaian Juri
-- **Tabel Rekap Nilai**:
-  - Kolom nomor undian dan identitas peserta tetap terkunci (*sticky*) dengan bayangan pemisah tipis saat tabel digulir horizontal.
-  - Menghapus banner eksplanatori repetitif di bagian bawah tabel.
-- **Modal Rincian Penilaian Juri Terstruktur**:
-  - Menampilkan ringkasan metrik di bagian atas: *Dewan Hakim Bertugas*, *Status Penyelesaian*, dan *Rata-Rata Nilai Saat Ini*.
-  - Tabel rincian per hakim yang terstruktur dengan kolom: *Dewan Hakim & Bidang*, *Rincian Kesalahan*, *Pengurangan*, *Nilai Akhir*, dan *Status*.
-  - Menghapus seluruh string hardcode versi rubrik (seperti `v2.4-lptq-2024`).
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
----
+### Architecture & Component Diagram
 
-## 6. Audit & Perbaikan Terbaru (Sprint Aktual)
-1. **Sidebar Navigasi (`Sidebar.tsx`)**:
-   - Memperbaiki layout flexbox dengan menambahkan `min-h-0` pada kontainer daftar menu yang *scrollable* (`flex-1 min-h-0 overflow-y-auto`).
-   - Kartu profil pengguna di kiri bawah kini terkunci permanen (*sticky/pinned*) di bagian bawah (`mt-auto shrink-0 sticky bottom-0 z-20`) dan tidak ikut bergeser ketika menu di-scroll.
-2. **Dashboard Admin MTQ (`DashboardView.tsx`)**:
-   - Kartu **Sesi Penilaian Aktif**: Memperbaiki logika deteksi peserta yang sedang dinilai secara berurutan (*ongoing progress* -> *in_progress assessment* -> *selectedParticipantId* -> *latest evaluated* -> *first participant*), sehingga kartu selalu menampilkan peserta aktif secara valid.
-   - Kartu **Aktivitas Penilaian & Penyimpanan Terbaru**: Menyajikan aktivitas penilaian dewan hakim riil terbaru yang diurutkan dari yang paling baru (*descending*), mencakup identitas hakim, bidang, dan skor peserta.
-3. **Master Data & Konfigurasi Kompetisi (`MasterDataView.tsx` & `MtqContext.tsx`)**:
-   - Menambahkan **Modal Konfirmasi Hapus Bidang Rubrik** (`fieldToDelete`) sebelum bidang penilaian dihapus.
-   - Memperbaiki mekanisme persistensi penghapusan rubrik dan bidang: pelepasan relasi foreign key (*error_categories*, *rubric_criteria*, *deduction_rules*, *judge_assignments*, dan *competition_rule_configs*) sebelum eksekusi penghapusan di Supabase serta pencatatan ID terhapus di storage lokal (`mtq_deleted_rubrics`), sehingga penghapusan tetap tersimpan permanen saat halaman di-refresh.
-   - Menghapus tombol *Hapus Babak* dari tabel babak di Master Data demi kepatuhan SOP kompetisi.
-4. **Manajemen Pengguna & Dewan Hakim (`UserManagementView.tsx`)**:
-   - Menghapus teks teknis terkait RPC `tenant member profile`, Edge Function `admin provision user`, dan pengecualian *service role*.
-   - Menyederhanakan penjelasan kata sandi menjadi teks ramah pengguna: *"Jika diisi, akun akan langsung dapat digunakan untuk masuk ke aplikasi."*
-5. **Rekap Nilai Real-Time (`RekapNilaiView.tsx`)**:
-   - Mengintegrasikan sinkronisasi live otomatis berkala (polling interval 2,5 detik via `refreshSupabaseConnection()`) sehingga perubahan nilai/koreksi kesalahan oleh dewan hakim langsung tercermin secara instan tanpa perlu me-refresh halaman browser manual.
-   - Mengurangi lebar kolom *Maqra / Soal* (`w-20 max-w-[80px]`) agar proporsional dan tidak memakan ruang tabel.
-   - Merapikan label sel akumulasi peserta pada footer menjadi format ringkas: `"Total Maqra 2"`.
-6. **Hasil Babak & Kelulusan Kualifikasi (`HasilKelulusanView.tsx`)**:
-   - Banner peringatan *"Penilaian Belum Lengkap (Peringkat Sementara)"* kini disembunyikan secara otomatis ketika seluruh peserta telah dinilai lengkap (`incompleteParticipants.length === 0`).
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        PRESENTATION & WORKFLOW LAYER                        │
+├───────────────────────┬──────────────────────────┬──────────────────────────┤
+│  MasterData & Import  │   BankSoal & Penilaian   │  Rekap & HasilKelulusan  │
+│  - Kuota Babak Tunggal│   - Validasi 3D Maqra    │  - Grup Evaluasi/Cabang  │
+│  - Modal Recalculate  │   - Filter Kategori Aktif│  - Pemilih stageId Unik  │
+│  - Laporan Batch DB   │   - Kalkulasi Poin Resmi │  - Map Override Murni    │
+└───────────┬───────────┴────────────┬─────────────┴─────────────┬────────────┘
+            │                        │                           │
+            ▼                        ▼                           ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     DOMAIN & STATE ORCHESTRATION LAYER                      │
+├────────────────────────────────────┬────────────────────────────────────────┤
+│       Scoring & Ranking Engine     │        Context & Outbox Manager        │
+│  - Relasi Ketat Assessment-Maqra   │  - Sinkronisasi Penuh Participant->SP  │
+│  - Evaluasi Terisolasi per Cabang  │  - Await DB pada Import & Undian       │
+│  - Validasi Batas Kuota & Override │  - OutboxProcessor Terdaftar & Aktif   │
+└────────────────────────────────────┴───────────────────┬────────────────────┘
+                                                         │
+                                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   AUTHORITATIVE POSTGRESQL / SUPABASE LAYER                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  - RPC advance_stage_qualifiers: Hitung Skor Total + Rata-Rata Bidang +     │
+│    Urutan Tie-Break Cabang + Validasi Override Dua Arah (Lolos & Gugur)     │
+│  - RLS & Trigger Imutabilitas Babak, Penugasan Hakim, dan Audit Log         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Model & State
+
+- **Identitas Babak & Cabang (`stageId` + `branchId`)**: Setiap objek babak dan partisipasi babak diidentifikasi secara unik menggunakan pasangan `stageId` dan `branchId`. Pemilihan babak berikutnya (`nextStage`) difilter secara ketat untuk cabang yang sama (`s.branchId === currentStage.branchId`) dengan urutan `order` lebih tinggi.
+- **Validasi Penetapan Maqra Terpusat (`validateMaqraAssignmentForParticipant`)**: Fungsi validator tunggal memeriksa kesesuaian:
+  1. Status soal wajib `Aktif`.
+  2. Kecocokan cabang (`question.branchId === participant.branchId` atau nama cabang setara).
+  3. Kecocokan jenjang/golongan (`question.levelId === participant.levelId` atau nama jenjang setara).
+  4. Kecocokan babak (`question.stageId === targetStageId` atau nama babak setara).
+  5. Pencegahan duplikasi soal pada peserta yang sama.
+- **Sinkronisasi Penuh `Participant` ↔ `StageParticipation`**: Saat `updateParticipant` atau import memperbarui cabang, jenjang, nomor undian, atau babak peserta, seluruh atribut relasional (`stageId`, `stageName`, `branchId`, `branchName`, `lotteryNumber`) pada `StageParticipation` babak aktif disinkronkan secara utuh disertai validasi anti-duplikasi nomor undian.
+
+### Interactive Component & State Mapping
+
+1. **Perhitungan Ulang Saat Perubahan Rubrik/Aturan (P1-07)**:
+   - Ketika Admin mengubah versi rubrik aktif atau aturan cabang pada cabang yang sudah memiliki penilaian, sistem menampilkan konfirmasi peringatan dan menjalankan perhitungan ulang (`calculateScoreWithRubric`) terhadap seluruh lembar penilaian pada cabang tersebut, lalu menyinkronkan pembaruan ke state dan database secara terbatas pada `currentTenantId`.
+2. **Kalkulasi Kategori Kesalahan di Panel Hakim (P1-03)**:
+   - Daftar kategori kesalahan di `PenilaianDualPanelView` difilter hanya untuk `cat.status === 'Aktif'`. Besaran poin pengurangan per kategori dan per bidang yang ditampilkan kepada hakim diambil langsung dari objek `ScoreCalculationResult.deductions` dan `fieldDeductions` yang dihasilkan oleh `calculateScoreWithRubric`.
+3. **Pemetaan Manual Override Murni & Kuota Terpusat (P1-04 & P1-05)**:
+   - `HasilKelulusanView` meneruskan objek parameter lengkap `{ currentStageId, nextStageId, branchId, branchName, qualifiedParticipantIds, manualOverrides, overrideReasons }` ke `advanceQualifiers`.
+   - Hanya peserta yang benar-benar di-override oleh Admin yang masuk ke dalam `manualOverrides`, dan `RankingService` menolak pengesahan (`canFinalize = false`) apabila jumlah peserta lolos melebihi `qualificationQuota` babak atau apabila ada peserta yang diloloskan/digugurkan secara manual tanpa alasan minimal 5 karakter.
+4. **Penyelesaian Outbox & Pengujian Otomatis (Tahap 4 & 5)**:
+   - `MtqContext` mendaftarkan `outboxSyncService.registerProcessor(...)` untuk memproses ulang operasi `UPSERT_ASSESSMENT_DRAFT`, `UPSERT_PARTICIPANT`, `UPSERT_QUESTION`, dan `COMMIT_LOTTERY_DRAW` dengan payload lengkap.
+   - Menambahkan cakupan pengujian multi-cabang dengan nama babak identik, validasi maqra lintas jenjang, otoritas tie-break server, serta skenario E2E siklus penuh dari pembuatan babak hingga pengesahan juara.

@@ -5,7 +5,9 @@ import {
   RubricCriterion,
   DeductionRule,
   JudgeAssessment,
-  AssignedMaqraItem
+  AssignedMaqraItem,
+  Question,
+  Participant
 } from '../types/mtq';
 import { OFFICIAL_SENI_BACA_RUBRIC } from './competitionRules';
 
@@ -361,9 +363,123 @@ export function calculateAssessmentScore(
 }
 
 /**
+ * Validasi relasional 3 dimensi (Cabang + Jenjang + Babak) untuk penetapan Maqra peserta (P0-03).
+ * Digunakan secara konsisten pada:
+ * 1. Pengundian otomatis (BankSoalView & conductLotteryDraw)
+ * 2. Penetapan manual (addQuestionToParticipant)
+ * 3. Pengesahan / commit hasil undian (commitLotteryDrawResults)
+ */
+export function validateMaqraAssignmentForParticipant(
+  paramsOrParticipant:
+    | {
+        question: Question;
+        participant: Participant;
+        targetStageName: string;
+        targetStageId?: string;
+        existingStageQuestions?: AssignedMaqraItem[];
+        existingQuestionIds?: string[];
+      }
+    | Participant,
+  questionArg?: Question,
+  targetStageNameArg?: string,
+  existingQuestionIdsArg?: string[]
+): { valid: boolean; message?: string; reason?: string } {
+  const isPositional = Boolean(questionArg);
+  const participant: Participant = isPositional
+    ? (paramsOrParticipant as Participant)
+    : (paramsOrParticipant as { participant: Participant }).participant;
+  const question: Question = isPositional
+    ? questionArg!
+    : (paramsOrParticipant as { question: Question }).question;
+  const targetStageName: string = isPositional
+    ? targetStageNameArg || ''
+    : (paramsOrParticipant as { targetStageName: string }).targetStageName;
+  const targetStageId: string | undefined = isPositional
+    ? undefined
+    : (paramsOrParticipant as { targetStageId?: string }).targetStageId;
+  const existingStageQuestions: AssignedMaqraItem[] | undefined = isPositional
+    ? undefined
+    : (paramsOrParticipant as { existingStageQuestions?: AssignedMaqraItem[] }).existingStageQuestions;
+  const existingQuestionIds: string[] = isPositional
+    ? existingQuestionIdsArg || []
+    : (paramsOrParticipant as { existingQuestionIds?: string[] }).existingQuestionIds ||
+      (existingStageQuestions ? existingStageQuestions.map((eq) => eq.questionId) : []);
+
+  const fail = (msg: string) => ({ valid: false, message: msg, reason: msg });
+
+  if (!question) {
+    return fail('Paket soal maqra tidak ditemukan di Bank Soal.');
+  }
+
+  if (question.status !== 'Aktif') {
+    return fail(
+      `Paket soal "${question.code} - ${question.title}" berstatus Nonaktif dan tidak dapat ditetapkan.`
+    );
+  }
+
+  // 1. Validasi Babak (Stage)
+  if (targetStageId && question.stageId) {
+    if (question.stageId !== targetStageId && question.stageName !== targetStageName) {
+      return fail(
+        `Ketidaksesuaian babak: Paket soal "${question.code}" diperuntukkan bagi Babak ${question.stageName}, bukan Babak ${targetStageName}.`
+      );
+    }
+  } else if (
+    question.stageName &&
+    targetStageName &&
+    targetStageName !== 'Semua Babak' &&
+    question.stageName !== 'Semua Babak' &&
+    question.stageName !== targetStageName
+  ) {
+    return fail(
+      `Ketidaksesuaian babak: Paket soal "${question.code}" diperuntukkan bagi Babak ${question.stageName}, bukan Babak ${targetStageName}.`
+    );
+  }
+
+  // 2. Validasi Cabang Lomba (Branch)
+  const qBranchName = (question.branchName || '').trim().toLowerCase();
+  const pBranchName = (participant.branchName || '').trim().toLowerCase();
+  if (question.branchId && participant.branchId) {
+    if (question.branchId !== participant.branchId) {
+      return fail(
+        `Ketidaksesuaian cabang lomba: Paket soal "${question.code}" (${question.branchName}) tidak sesuai dengan cabang peserta ${participant.name} (${participant.branchName}).`
+      );
+    }
+  } else if (qBranchName && pBranchName && qBranchName !== 'semua cabang' && qBranchName !== pBranchName) {
+    return fail(
+      `Ketidaksesuaian cabang lomba: Paket soal "${question.code}" (${question.branchName}) tidak sesuai dengan cabang peserta ${participant.name} (${participant.branchName}).`
+    );
+  }
+
+  // 3. Validasi Jenjang / Golongan (Level)
+  const qLevelName = (question.levelName || '').trim().toLowerCase();
+  const pLevelName = (participant.levelName || '').trim().toLowerCase();
+  if (question.levelId && participant.levelId) {
+    if (question.levelId !== participant.levelId) {
+      return fail(
+        `Ketidaksesuaian jenjang: Paket soal "${question.code}" (${question.levelName}) tidak sesuai dengan jenjang peserta ${participant.name} (${participant.levelName}).`
+      );
+    }
+  } else if (qLevelName && pLevelName && qLevelName !== 'semua jenjang' && qLevelName !== pLevelName) {
+    return fail(
+      `Ketidaksesuaian jenjang: Paket soal "${question.code}" (${question.levelName}) tidak sesuai dengan jenjang peserta ${participant.name} (${participant.levelName}).`
+    );
+  }
+
+  // 4. Validasi Duplikasi Soal pada Peserta & Babak yang Sama
+  if (existingQuestionIds.includes(question.id)) {
+    return fail(
+      `Paket soal "${question.code} - ${question.title}" sudah terdaftar pada peserta ${participant.name} di Babak ${targetStageName}.`
+    );
+  }
+
+  return { valid: true };
+}
+
+/**
  * Agregasi penilaian multi-hakim dan multi-maqra untuk satu peserta pada satu babak.
- * Mendukung isolasi ketat berdasarkan stageId dan stageParticipationId agar tidak mencampur
- * penilaian dari cabang/babak lain yang memiliki nama babak serupa.
+ * Mendukung isolasi ketat berdasarkan stageId, stageParticipationId, dan questionId/assignedMaqraId
+ * agar tidak mencampur penilaian dari cabang, babak, atau maqra lain (P0-04).
  */
 export function aggregateParticipantScores(
   participantId: string,
@@ -409,7 +525,7 @@ export function aggregateParticipantScores(
     const maqraAvailableScores: number[] = [];
 
     requiredJudgeIds.forEach((judgeId) => {
-      // 1. Pencocokan utama secara ketat (participantId + judgeId + questionId + stageParticipationId/stageId)
+      // 1. Pencocokan utama secara ketat (participantId + judgeId + questionId/assignedMaqraId + stageParticipationId/stageId)
       let match = assessments.find((a) => {
         if (a.participantId !== participantId) return false;
         if (a.judgeId !== judgeId) return false;
@@ -425,7 +541,8 @@ export function aggregateParticipantScores(
         return true;
       });
 
-      // 2. Fallback aman jika terdapat perbedaan ID babak/partisipasi lokal vs DB pada nama babak yang sama
+      // 2. Fallback pada stageName yang sama jika terjadi duplikasi baris babak (misal beberapa babak "Penyisihan" di DB)
+      // namun WAJIB tetap cocok pada participantId, judgeId, stageName, dan questionId/assignedMaqraId (P0-04).
       if (!match) {
         match = assessments.find((a) => {
           if (a.participantId !== participantId) return false;
@@ -435,13 +552,13 @@ export function aggregateParticipantScores(
         });
       }
 
-      // 3. Fallback untuk peserta dengan 1 Maqra pada babak tersebut bila ID maqra tersinkronisasi berbeda
+      // 3. Fallback terkendali jika peserta memiliki 1 maqra di babak ini dan penilaian berasal dari baris assigned_maqras DB nyata (assignedMaqraId terisi)
       if (!match && stageQuestions.length === 1) {
         match = assessments.find((a) => {
           if (a.participantId !== participantId) return false;
           if (a.judgeId !== judgeId) return false;
           if (a.stageName !== stageName) return false;
-          return true;
+          return Boolean(a.assignedMaqraId);
         });
       }
 

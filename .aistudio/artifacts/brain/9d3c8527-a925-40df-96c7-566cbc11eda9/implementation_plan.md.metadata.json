@@ -1,6 +1,6 @@
 {
-  "summary":  "Dokumen pencatatan penyempurnaan UI/UX MTQ Management System mencakup Bank Soal & Undian Multi-soal, Master Data Jenjang & Cabang dengan pelindung hapus aman, penyederhanaan Rubrik tanpa teks hardcode, pembersihan Workspace Penilaian Hakim, keselarasan Mode Pemantauan Admin (Hanya Baca), dan perombakan modal Rincian Penilaian Juri.",
-  "updatedAt":  "2026-10-25T07:00:01.162548609Z",
+  "summary":  "Rencana implementasi menyeluruh untuk menuntaskan seluruh temuan Audit Lanjutan MTQ Management System (P0-01 s.d. P0-04, P1-01 s.d. P1-07, Reliabilitas Penyimpanan & Outbox, serta Pengujian E2E Multi-Cabang) sesuai pilihan konfirmasi pengguna.",
+  "updatedAt":  "2026-11-08T23:11:32.616352152Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

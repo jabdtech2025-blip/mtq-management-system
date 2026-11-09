@@ -1323,6 +1323,11 @@ DECLARE
     v_incomplete_count INT;
     v_invalid_participant_count INT;
     v_unjustified_override_count INT;
+    v_tie_break_fields TEXT[];
+    v_crit_1 TEXT;
+    v_crit_2 TEXT;
+    v_crit_3 TEXT;
+    v_crit_4 TEXT;
     v_authoritative_snapshot JSONB;
     v_now TIMESTAMPTZ := now();
 BEGIN
@@ -1471,13 +1476,142 @@ BEGIN
     PERFORM set_config('mtq.rpc_stage_finalize_active', 'true', true);
     PERFORM set_config('mtq.rpc_audit_active', 'true', true);
 
-    -- 12A. Hitung nilai akhir resmi (server-authoritative final_score & rank) langsung dari judge_assessments yang terfinalisasi di database
+    -- Ambil konfigurasi urutan tie-break resmi cabang untuk perhitungan otoritatif di server (P1-06)
+    SELECT * INTO v_rule
+    FROM competition_rule_configs crc
+    WHERE crc.tenant_id = v_stage.tenant_id
+      AND (v_stage.branch_id IS NULL OR crc.branch_id = v_stage.branch_id)
+    LIMIT 1;
+
+    SELECT COALESCE(
+        ARRAY(
+            SELECT elem
+            FROM unnest(COALESCE(v_rule.tie_break_order, ARRAY['total', 'Tajwid', 'Lagu', 'Fashahah', 'Suara'])) AS elem
+            WHERE LOWER(elem) <> 'total'
+        ),
+        ARRAY['Tajwid', 'Lagu', 'Fashahah', 'Suara']
+    ) INTO v_tie_break_fields;
+
+    v_crit_1 := v_tie_break_fields[1];
+    v_crit_2 := v_tie_break_fields[2];
+    v_crit_3 := v_tie_break_fields[3];
+    v_crit_4 := v_tie_break_fields[4];
+
+    -- 12A. Hitung nilai akhir resmi & tie-break per bidang (server-authoritative) langsung dari judge_assessments yang terfinalisasi di database
     WITH participant_scores AS (
         SELECT
             sp.id AS stage_participation_id,
             sp.participant_id,
             sp.lottery_number,
             ROUND(AVG(jass.final_score)::numeric, 2) AS computed_score,
+            ROUND(AVG(
+                CASE
+                    WHEN v_crit_1 IS NOT NULL AND COALESCE(
+                        jass.field_scores ->> v_crit_1,
+                        CASE UPPER(v_crit_1)
+                            WHEN 'TAJWID' THEN COALESCE(jass.field_scores ->> 'TJW', jass.field_scores ->> 'Tajwid')
+                            WHEN 'FASHAHAH' THEN COALESCE(jass.field_scores ->> 'FSH', jass.field_scores ->> 'Fashahah')
+                            WHEN 'LAGU' THEN COALESCE(jass.field_scores ->> 'LGU', jass.field_scores ->> 'LAG', jass.field_scores ->> 'Lagu')
+                            WHEN 'SUARA' THEN COALESCE(jass.field_scores ->> 'SUR', jass.field_scores ->> 'SUA', jass.field_scores ->> 'Suara')
+                            WHEN 'TAHFIZH' THEN COALESCE(jass.field_scores ->> 'THF', jass.field_scores ->> 'Tahfizh')
+                            ELSE NULL
+                        END
+                    ) ~ '^-?[0-9]+(\.[0-9]+)?$'
+                    THEN COALESCE(
+                        jass.field_scores ->> v_crit_1,
+                        CASE UPPER(v_crit_1)
+                            WHEN 'TAJWID' THEN COALESCE(jass.field_scores ->> 'TJW', jass.field_scores ->> 'Tajwid')
+                            WHEN 'FASHAHAH' THEN COALESCE(jass.field_scores ->> 'FSH', jass.field_scores ->> 'Fashahah')
+                            WHEN 'LAGU' THEN COALESCE(jass.field_scores ->> 'LGU', jass.field_scores ->> 'LAG', jass.field_scores ->> 'Lagu')
+                            WHEN 'SUARA' THEN COALESCE(jass.field_scores ->> 'SUR', jass.field_scores ->> 'SUA', jass.field_scores ->> 'Suara')
+                            WHEN 'TAHFIZH' THEN COALESCE(jass.field_scores ->> 'THF', jass.field_scores ->> 'Tahfizh')
+                            ELSE NULL
+                        END
+                    )::numeric
+                    ELSE NULL
+                END
+            ), 2) AS crit_1_score,
+            ROUND(AVG(
+                CASE
+                    WHEN v_crit_2 IS NOT NULL AND COALESCE(
+                        jass.field_scores ->> v_crit_2,
+                        CASE UPPER(v_crit_2)
+                            WHEN 'TAJWID' THEN COALESCE(jass.field_scores ->> 'TJW', jass.field_scores ->> 'Tajwid')
+                            WHEN 'FASHAHAH' THEN COALESCE(jass.field_scores ->> 'FSH', jass.field_scores ->> 'Fashahah')
+                            WHEN 'LAGU' THEN COALESCE(jass.field_scores ->> 'LGU', jass.field_scores ->> 'LAG', jass.field_scores ->> 'Lagu')
+                            WHEN 'SUARA' THEN COALESCE(jass.field_scores ->> 'SUR', jass.field_scores ->> 'SUA', jass.field_scores ->> 'Suara')
+                            WHEN 'TAHFIZH' THEN COALESCE(jass.field_scores ->> 'THF', jass.field_scores ->> 'Tahfizh')
+                            ELSE NULL
+                        END
+                    ) ~ '^-?[0-9]+(\.[0-9]+)?$'
+                    THEN COALESCE(
+                        jass.field_scores ->> v_crit_2,
+                        CASE UPPER(v_crit_2)
+                            WHEN 'TAJWID' THEN COALESCE(jass.field_scores ->> 'TJW', jass.field_scores ->> 'Tajwid')
+                            WHEN 'FASHAHAH' THEN COALESCE(jass.field_scores ->> 'FSH', jass.field_scores ->> 'Fashahah')
+                            WHEN 'LAGU' THEN COALESCE(jass.field_scores ->> 'LGU', jass.field_scores ->> 'LAG', jass.field_scores ->> 'Lagu')
+                            WHEN 'SUARA' THEN COALESCE(jass.field_scores ->> 'SUR', jass.field_scores ->> 'SUA', jass.field_scores ->> 'Suara')
+                            WHEN 'TAHFIZH' THEN COALESCE(jass.field_scores ->> 'THF', jass.field_scores ->> 'Tahfizh')
+                            ELSE NULL
+                        END
+                    )::numeric
+                    ELSE NULL
+                END
+            ), 2) AS crit_2_score,
+            ROUND(AVG(
+                CASE
+                    WHEN v_crit_3 IS NOT NULL AND COALESCE(
+                        jass.field_scores ->> v_crit_3,
+                        CASE UPPER(v_crit_3)
+                            WHEN 'TAJWID' THEN COALESCE(jass.field_scores ->> 'TJW', jass.field_scores ->> 'Tajwid')
+                            WHEN 'FASHAHAH' THEN COALESCE(jass.field_scores ->> 'FSH', jass.field_scores ->> 'Fashahah')
+                            WHEN 'LAGU' THEN COALESCE(jass.field_scores ->> 'LGU', jass.field_scores ->> 'LAG', jass.field_scores ->> 'Lagu')
+                            WHEN 'SUARA' THEN COALESCE(jass.field_scores ->> 'SUR', jass.field_scores ->> 'SUA', jass.field_scores ->> 'Suara')
+                            WHEN 'TAHFIZH' THEN COALESCE(jass.field_scores ->> 'THF', jass.field_scores ->> 'Tahfizh')
+                            ELSE NULL
+                        END
+                    ) ~ '^-?[0-9]+(\.[0-9]+)?$'
+                    THEN COALESCE(
+                        jass.field_scores ->> v_crit_3,
+                        CASE UPPER(v_crit_3)
+                            WHEN 'TAJWID' THEN COALESCE(jass.field_scores ->> 'TJW', jass.field_scores ->> 'Tajwid')
+                            WHEN 'FASHAHAH' THEN COALESCE(jass.field_scores ->> 'FSH', jass.field_scores ->> 'Fashahah')
+                            WHEN 'LAGU' THEN COALESCE(jass.field_scores ->> 'LGU', jass.field_scores ->> 'LAG', jass.field_scores ->> 'Lagu')
+                            WHEN 'SUARA' THEN COALESCE(jass.field_scores ->> 'SUR', jass.field_scores ->> 'SUA', jass.field_scores ->> 'Suara')
+                            WHEN 'TAHFIZH' THEN COALESCE(jass.field_scores ->> 'THF', jass.field_scores ->> 'Tahfizh')
+                            ELSE NULL
+                        END
+                    )::numeric
+                    ELSE NULL
+                END
+            ), 2) AS crit_3_score,
+            ROUND(AVG(
+                CASE
+                    WHEN v_crit_4 IS NOT NULL AND COALESCE(
+                        jass.field_scores ->> v_crit_4,
+                        CASE UPPER(v_crit_4)
+                            WHEN 'TAJWID' THEN COALESCE(jass.field_scores ->> 'TJW', jass.field_scores ->> 'Tajwid')
+                            WHEN 'FASHAHAH' THEN COALESCE(jass.field_scores ->> 'FSH', jass.field_scores ->> 'Fashahah')
+                            WHEN 'LAGU' THEN COALESCE(jass.field_scores ->> 'LGU', jass.field_scores ->> 'LAG', jass.field_scores ->> 'Lagu')
+                            WHEN 'SUARA' THEN COALESCE(jass.field_scores ->> 'SUR', jass.field_scores ->> 'SUA', jass.field_scores ->> 'Suara')
+                            WHEN 'TAHFIZH' THEN COALESCE(jass.field_scores ->> 'THF', jass.field_scores ->> 'Tahfizh')
+                            ELSE NULL
+                        END
+                    ) ~ '^-?[0-9]+(\.[0-9]+)?$'
+                    THEN COALESCE(
+                        jass.field_scores ->> v_crit_4,
+                        CASE UPPER(v_crit_4)
+                            WHEN 'TAJWID' THEN COALESCE(jass.field_scores ->> 'TJW', jass.field_scores ->> 'Tajwid')
+                            WHEN 'FASHAHAH' THEN COALESCE(jass.field_scores ->> 'FSH', jass.field_scores ->> 'Fashahah')
+                            WHEN 'LAGU' THEN COALESCE(jass.field_scores ->> 'LGU', jass.field_scores ->> 'LAG', jass.field_scores ->> 'Lagu')
+                            WHEN 'SUARA' THEN COALESCE(jass.field_scores ->> 'SUR', jass.field_scores ->> 'SUA', jass.field_scores ->> 'Suara')
+                            WHEN 'TAHFIZH' THEN COALESCE(jass.field_scores ->> 'THF', jass.field_scores ->> 'Tahfizh')
+                            ELSE NULL
+                        END
+                    )::numeric
+                    ELSE NULL
+                END
+            ), 2) AS crit_4_score,
             (
                 SELECT (snap.elem ->> 'rank')::int
                 FROM jsonb_array_elements(
@@ -1509,6 +1643,10 @@ BEGIN
             ROW_NUMBER() OVER (
                 ORDER BY
                     ps.computed_score DESC,
+                    COALESCE(ps.crit_1_score, -1) DESC,
+                    COALESCE(ps.crit_2_score, -1) DESC,
+                    COALESCE(ps.crit_3_score, -1) DESC,
+                    COALESCE(ps.crit_4_score, -1) DESC,
                     COALESCE(ps.client_tie_break_rank, 999999) ASC,
                     ps.lottery_number ASC NULLS LAST,
                     ps.participant_id ASC
@@ -1521,17 +1659,22 @@ BEGIN
     FROM ranked_scores rs
     WHERE sp.id = rs.stage_participation_id;
 
-    -- 12B. Validasi bahwa setiap peserta lolos di luar peringkat kuota wajib memiliki alasan override minimal 5 karakter
+    -- 12B. Validasi 2 arah untuk override manual (P1-06):
+    -- 1. Peserta di luar kuota yang diloloskan (rank > quota & qualified)
+    -- 2. Peserta di dalam kuota yang digugurkan secara manual (rank <= quota & NOT qualified)
     SELECT COUNT(*) INTO v_unjustified_override_count
     FROM stage_participations sp
     WHERE sp.stage_id = p_stage_id
       AND sp.tenant_id = v_stage.tenant_id
-      AND sp.participant_id = ANY(p_qualified_participant_ids)
-      AND sp.rank > v_stage.qualification_quota
+      AND (
+          (sp.participant_id = ANY(p_qualified_participant_ids) AND sp.rank > v_stage.qualification_quota)
+          OR
+          (NOT (sp.participant_id = ANY(p_qualified_participant_ids)) AND sp.rank <= v_stage.qualification_quota)
+      )
       AND LENGTH(TRIM(COALESCE(p_override_reasons ->> sp.participant_id::text, ''))) < 5;
 
     IF v_unjustified_override_count > 0 THEN
-        RAISE EXCEPTION 'Pengesahan babak ditolak: Peserta yang diloloskan di luar kuota peringkat wajib disertai alasan override atau tie-break minimal 5 karakter.';
+        RAISE EXCEPTION 'Pengesahan babak ditolak: Setiap perubahan kelulusan terhadap peringkat kuota (meloloskan di luar kuota atau menggugurkan di dalam kuota) wajib disertai alasan override minimal 5 karakter.';
     END IF;
 
     -- 12C. Perbarui status kelulusan pada stage_participations babak asal
