@@ -38,8 +38,10 @@ DECLARE
     v_target_field_name TEXT;
     v_field_max_deduction NUMERIC;
     v_deduction NUMERIC;
-    v_rule RECORD;
-    v_crit RECORD;
+    v_rule_deduction_points NUMERIC;
+    v_rule_max_deduction NUMERIC;
+    v_crit_id UUID;
+    v_crit_max_deduction NUMERIC;
     v_unit_deduction NUMERIC;
     v_raw_deduction NUMERIC;
     v_crit_deductions JSONB := '{}'::jsonb;
@@ -158,17 +160,23 @@ BEGIN
 
             -- Dapatkan besaran pengurangan per kejadian
             v_unit_deduction := v_cat.default_deduction;
-            IF v_cat.deduction_rule_id IS NOT NULL THEN
-                SELECT * INTO v_rule FROM deduction_rules WHERE id = v_cat.deduction_rule_id;
-                IF FOUND AND v_rule.deduction_points IS NOT NULL THEN
-                    v_unit_deduction := v_rule.deduction_points;
-                END IF;
-            END IF;
-
             v_raw_deduction := ROUND(v_count * v_unit_deduction, 2);
 
-            IF v_rule.id IS NOT NULL AND v_rule.max_deduction IS NOT NULL AND v_rule.max_deduction >= 0 THEN
-                v_raw_deduction := LEAST(v_raw_deduction, v_rule.max_deduction);
+            IF v_cat.deduction_rule_id IS NOT NULL THEN
+                SELECT dr.deduction_points, dr.max_deduction
+                INTO v_rule_deduction_points, v_rule_max_deduction
+                FROM deduction_rules dr
+                WHERE dr.id = v_cat.deduction_rule_id;
+
+                IF FOUND THEN
+                    IF v_rule_deduction_points IS NOT NULL THEN
+                        v_unit_deduction := v_rule_deduction_points;
+                        v_raw_deduction := ROUND(v_count * v_unit_deduction, 2);
+                    END IF;
+                    IF v_rule_max_deduction IS NOT NULL AND v_rule_max_deduction >= 0 THEN
+                        v_raw_deduction := LEAST(v_raw_deduction, v_rule_max_deduction);
+                    END IF;
+                END IF;
             END IF;
 
             IF v_cat.max_deduction IS NOT NULL AND v_cat.max_deduction >= 0 THEN
@@ -176,14 +184,18 @@ BEGIN
             END IF;
 
             IF v_cat.criterion_id IS NOT NULL THEN
-                SELECT * INTO v_crit FROM rubric_criteria WHERE id = v_cat.criterion_id;
-                IF FOUND AND v_crit.max_deduction IS NOT NULL AND v_crit.max_deduction >= 0 THEN
-                    v_cur_crit_ded := COALESCE((v_crit_deductions ->> v_crit.id::text)::numeric, 0.00);
-                    v_allowed_crit := GREATEST(0.00, v_crit.max_deduction - v_cur_crit_ded);
+                SELECT rc.id, rc.max_deduction
+                INTO v_crit_id, v_crit_max_deduction
+                FROM rubric_criteria rc
+                WHERE rc.id = v_cat.criterion_id;
+
+                IF FOUND AND v_crit_max_deduction IS NOT NULL AND v_crit_max_deduction >= 0 THEN
+                    v_cur_crit_ded := COALESCE((v_crit_deductions ->> v_crit_id::text)::numeric, 0.00);
+                    v_allowed_crit := GREATEST(0.00, v_crit_max_deduction - v_cur_crit_ded);
                     v_raw_deduction := LEAST(v_raw_deduction, v_allowed_crit);
                     v_crit_deductions := jsonb_set(
                         v_crit_deductions,
-                        ARRAY[v_crit.id::text],
+                        ARRAY[v_crit_id::text],
                         to_jsonb(ROUND(v_cur_crit_ded + v_raw_deduction, 2))
                     );
                 END IF;
@@ -388,8 +400,8 @@ DECLARE
     v_actor_id UUID;
     v_actor RECORD;
     v_stage RECORD;
-    v_next_stage RECORD;
-    v_rule RECORD;
+    v_next_stage stages%ROWTYPE;
+    v_rule competition_rule_configs%ROWTYPE;
     v_pid UUID;
     v_override_key TEXT;
     v_override_val TEXT;
@@ -561,14 +573,18 @@ BEGIN
       AND (v_stage.branch_id IS NULL OR crc.branch_id = v_stage.branch_id)
     LIMIT 1;
 
-    SELECT COALESCE(
-        ARRAY(
-            SELECT elem
-            FROM unnest(COALESCE(v_rule.tie_break_order, ARRAY['total', 'Tajwid', 'Lagu', 'Fashahah', 'Suara'])) AS elem
-            WHERE LOWER(elem) <> 'total'
-        ),
-        ARRAY['Tajwid', 'Lagu', 'Fashahah', 'Suara']
-    ) INTO v_tie_break_fields;
+    IF FOUND AND v_rule.tie_break_order IS NOT NULL THEN
+        SELECT COALESCE(
+            ARRAY(
+                SELECT elem
+                FROM unnest(v_rule.tie_break_order) AS elem
+                WHERE LOWER(elem) <> 'total'
+            ),
+            ARRAY['Tajwid', 'Lagu', 'Fashahah', 'Suara']
+        ) INTO v_tie_break_fields;
+    ELSE
+        v_tie_break_fields := ARRAY['Tajwid', 'Lagu', 'Fashahah', 'Suara'];
+    END IF;
 
     v_crit_1 := v_tie_break_fields[1];
     v_crit_2 := v_tie_break_fields[2];
@@ -822,7 +838,6 @@ BEGIN
             id,
             tenant_id,
             stage_id,
-            stage_name,
             participant_id,
             lottery_number,
             status,
@@ -833,7 +848,6 @@ BEGIN
             gen_random_uuid(),
             v_stage.tenant_id,
             v_next_stage.id,
-            v_next_stage.name,
             q_pid,
             (SELECT lottery_number FROM participants WHERE id = q_pid),
             'Belum Dimulai',
@@ -851,55 +865,52 @@ BEGIN
     UPDATE stages
     SET is_finalized = true,
         finalized_at = v_now,
-        status = 'Selesai',
-        updated_at = v_now
+        status = 'Selesai'
     WHERE id = p_stage_id;
 
     -- 16. Bekukan snapshot hasil resmi di stage_result_snapshots
-    SELECT jsonb_agg(
-        jsonb_build_object(
-            'participant_id', sp.participant_id,
-            'participant_name', p.name,
-            'lottery_number', sp.lottery_number,
-            'kafilah_name', COALESCE(k.name, p.kafilah_name, '-'),
-            'branch_name', COALESCE(b.name, v_stage.branch_name, 'Semua Cabang'),
-            'score', sp.final_score,
-            'rank', sp.rank,
-            'is_qualified', sp.is_qualified,
-            'qualification_reason', sp.qualification_reason
-        ) ORDER BY sp.rank ASC
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'participant_id', sp.participant_id,
+                'participant_name', p.name,
+                'lottery_number', sp.lottery_number,
+                'final_score', sp.final_score,
+                'rank', sp.rank,
+                'is_qualified', sp.is_qualified,
+                'qualification_reason', sp.qualification_reason
+            )
+            ORDER BY sp.rank ASC
+        ),
+        '[]'::jsonb
     ) INTO v_authoritative_snapshot
     FROM stage_participations sp
     JOIN participants p ON p.id = sp.participant_id
-    LEFT JOIN kafilahs k ON k.id = p.kafilah_id
-    LEFT JOIN branches b ON b.id = v_stage.branch_id
     WHERE sp.stage_id = p_stage_id
       AND sp.tenant_id = v_stage.tenant_id;
 
-    INSERT INTO stage_result_snapshots (
-        tenant_id,
-        stage_id,
-        stage_name,
-        branch_id,
-        branch_name,
-        rubric_version_id,
-        rankings,
-        qualification_quota,
-        finalized_by,
-        finalized_at
-    )
-    VALUES (
-        v_stage.tenant_id,
-        p_stage_id,
-        v_stage.name,
-        v_stage.branch_id,
-        v_stage.branch_name,
-        COALESCE(v_rule.rubric_version_id, (SELECT id FROM rubric_versions WHERE tenant_id = v_stage.tenant_id LIMIT 1)),
-        COALESCE(v_authoritative_snapshot, '[]'::jsonb),
-        v_stage.qualification_quota,
-        v_actor_id,
-        v_now
-    );
+    IF v_stage.branch_id IS NOT NULL THEN
+        INSERT INTO stage_result_snapshots (
+            tenant_id,
+            stage_id,
+            branch_id,
+            quota,
+            rubric_version_id,
+            tie_break_rule_used,
+            finalized_by,
+            rankings_snapshot
+        )
+        VALUES (
+            v_stage.tenant_id,
+            p_stage_id,
+            v_stage.branch_id,
+            v_stage.qualification_quota,
+            CASE WHEN FOUND AND v_rule.rubric_version_id IS NOT NULL THEN v_rule.rubric_version_id ELSE (SELECT id FROM rubric_versions WHERE tenant_id = v_stage.tenant_id LIMIT 1) END,
+            CASE WHEN FOUND AND v_rule.tie_break_order IS NOT NULL THEN array_to_string(v_rule.tie_break_order, ' > ') ELSE 'total > Tajwid > Lagu > Fashahah' END,
+            v_actor_id,
+            v_authoritative_snapshot
+        );
+    END IF;
 
     -- 17. Catat log audit permanen
     INSERT INTO audit_logs (tenant_id, actor_id, actor_name, action, target, summary, outcome)
@@ -909,7 +920,12 @@ BEGIN
         COALESCE(v_actor.name, 'Admin') || ' (' || COALESCE(v_actor.role, 'admin') || ')',
         'STAGE_FINALIZED',
         'Stage: ' || v_stage.name || ' (ID: ' || p_stage_id::text || ')',
-        'Pengesahan resmi babak dengan ' || v_qualified_count::text || ' peserta diloloskan ke ' || COALESCE(v_next_stage.name, 'Penetapan Juara Akhir'),
+        CASE
+            WHEN p_next_stage_id IS NOT NULL THEN
+                'Pengesahan resmi babak ' || v_stage.name || ' dengan ' || v_qualified_count::text || ' peserta diloloskan ke ' || COALESCE(v_next_stage.name, 'Babak Lanjutan')
+            ELSE
+                'Pengesahan resmi hasil kejuaraan babak final ' || v_stage.name || ' dengan ' || v_qualified_count::text || ' juara ditetapkan.'
+        END,
         'Success'
     );
 

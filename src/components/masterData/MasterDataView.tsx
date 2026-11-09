@@ -61,6 +61,7 @@ export const MasterDataView: React.FC = () => {
     activateRubricVersion,
     archiveRubricVersion,
     deleteRubricVersion,
+    deleteRubricField,
     addCompetitionRule,
     updateCompetitionRule,
     deleteCompetitionRule
@@ -94,10 +95,13 @@ export const MasterDataView: React.FC = () => {
   const [isAddRubricOpen, setIsAddRubricOpen] = useState(false);
   const [newRubricName, setNewRubricName] = useState('');
   const [newRubricCode, setNewRubricCode] = useState('');
-  const [newRubricBranch, setNewRubricBranch] = useState('Tilawah');
-  const [newRubricVersion, setNewRubricVersion] = useState('2025.2');
+  const [newRubricBranchId, setNewRubricBranchId] = useState('');
+  const [newRubricBranch, setNewRubricBranch] = useState('');
+  const [newRubricLevelId, setNewRubricLevelId] = useState('');
+  const [newRubricLevelName, setNewRubricLevelName] = useState('');
+  const [newRubricVersion, setNewRubricVersion] = useState('1.0');
   const [newRubricStartingScore, setNewRubricStartingScore] = useState<number>(100);
-  const [newRubricOfficialSource, setNewRubricOfficialSource] = useState('Buku Pedoman MTQ 2025 LPTQ');
+  const [newRubricOfficialSource, setNewRubricOfficialSource] = useState('');
   const [newRubricDescription, setNewRubricDescription] = useState('');
 
   // Field Edit / Add Modal State
@@ -114,12 +118,12 @@ export const MasterDataView: React.FC = () => {
   // Rule Config Modal State
   const [editingRule, setEditingRule] = useState<CompetitionRuleConfig | null>(null);
   const [isEditRuleOpen, setIsEditRuleOpen] = useState(false);
-  const [ruleBranchName, setRuleBranchName] = useState('Tilawah');
+  const [ruleBranchName, setRuleBranchName] = useState('');
   const [ruleRubricId, setRuleRubricId] = useState('');
-  const [ruleTieBreakInput, setRuleTieBreakInput] = useState('total, Tajwid, Lagu, Fashahah');
+  const [ruleTieBreakList, setRuleTieBreakList] = useState<string[]>(['total']);
   const [ruleQuotaPenyisihan, setRuleQuotaPenyisihan] = useState<number>(3);
   const [ruleQuotaFinal, setRuleQuotaFinal] = useState<number>(3);
-  const [ruleOfficialSource, setRuleOfficialSource] = useState('Buku Pedoman MTQ 2025');
+  const [ruleOfficialSource, setRuleOfficialSource] = useState('');
   const [ruleIsVerified, setRuleIsVerified] = useState(true);
 
   // Babak Modal State
@@ -150,7 +154,10 @@ export const MasterDataView: React.FC = () => {
   const [selectedJudgeId, setSelectedJudgeId] = useState(users.find((u) => u.role === 'judge')?.id || '');
   const [assignStageName, setAssignStageName] = useState('Penyisihan');
   const [assignBranchName, setAssignBranchName] = useState(cabangList[0]?.name || 'Semua Cabang');
-  const [assignField, setAssignField] = useState('Bidang Tajwid & Makhraj');
+  const [assignLevelId, setAssignLevelId] = useState('');
+  const [assignLevelName, setAssignLevelName] = useState('');
+  const [assignFieldId, setAssignFieldId] = useState('');
+  const [assignField, setAssignField] = useState('');
 
   // Feedback notifications
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -225,36 +232,34 @@ export const MasterDataView: React.FC = () => {
     setFeedbackMessage({ type: 'success', text: 'Kategori kesalahan berhasil disimpan dengan relasi bidang yang sah.' });
   };
 
-  // Save Rubric Version
+  // Save Rubric Version (P0: Pure DB, Zero Default Fields, Linked to Branch and Level)
   const handleSaveRubricVersion = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRubricName || !newRubricCode) return;
 
-    // Default 4 fields for new rubric template
-    const defaultFields: RubricField[] = [
-      { id: `fld-${Date.now()}-1`, code: 'TJW', name: 'Tajwid', maxScore: 30, minScore: 0, order: 1 },
-      { id: `fld-${Date.now()}-2`, code: 'FSH', name: 'Fashahah', maxScore: 30, minScore: 0, order: 2 },
-      { id: `fld-${Date.now()}-3`, code: 'LAG', name: 'Lagu', maxScore: 25, minScore: 0, order: 3 },
-      { id: `fld-${Date.now()}-4`, code: 'SUA', name: 'Suara', maxScore: 15, minScore: 0, order: 4 }
-    ];
+    const selectedBranch = cabangList.find((c) => c.id === newRubricBranchId || c.name === newRubricBranch);
+    const selectedLevel = jenjangList.find((j) => j.id === newRubricLevelId || j.name === newRubricLevelName);
 
     addRubricVersion({
       code: newRubricCode.toUpperCase(),
       name: newRubricName,
-      branchCode: newRubricBranch.substring(0, 3).toUpperCase(),
-      branchName: newRubricBranch,
+      branchId: selectedBranch?.id,
+      branchCode: selectedBranch?.code || (newRubricBranch ? newRubricBranch.substring(0, 3).toUpperCase() : 'GEN'),
+      branchName: selectedBranch?.name || newRubricBranch || 'Cabang Umum',
+      levelId: selectedLevel?.id,
+      levelName: selectedLevel?.name,
       version: newRubricVersion,
       description: newRubricDescription || 'Konfigurasi rubrik penilaian MTQ.',
       officialSource: newRubricOfficialSource,
       status: 'Draft',
       startingScore: Number(newRubricStartingScore),
-      fields: defaultFields
+      fields: []
     });
 
     setIsAddRubricOpen(false);
     setNewRubricName('');
     setNewRubricCode('');
-    setFeedbackMessage({ type: 'success', text: `Draft versi rubrik baru "${newRubricName}" berhasil dibuat.` });
+    setFeedbackMessage({ type: 'success', text: `Draft versi rubrik baru "${newRubricName}" berhasil dibuat tanpa data dummy. Tambahkan bidang penilaian pada rubrik ini.` });
   };
 
   // Save Field Edit or Add New Field
@@ -307,41 +312,47 @@ export const MasterDataView: React.FC = () => {
     });
   };
 
-  // Toggle or Remove Rubric Field
-  const handleToggleOrRemoveField = (rubric: RubricVersion, fld: RubricField, mode: 'toggle' | 'remove') => {
-    const updatedFields =
-      mode === 'remove'
-        ? rubric.fields.filter((f) => f.id !== fld.id)
-        : rubric.fields.map((f) =>
-            f.id === fld.id
-              ? { ...f, status: (f.status === 'Nonaktif' ? 'Aktif' : 'Nonaktif') as 'Aktif' | 'Nonaktif' }
-              : f
-          );
+  // Toggle or Remove Rubric Field (Permanently via RPC Cascade)
+  const handleToggleOrRemoveField = async (rubric: RubricVersion, fld: RubricField, mode: 'toggle' | 'remove') => {
+    if (mode === 'remove') {
+      const res = await deleteRubricField(rubric.id, fld.id);
+      setFieldToDelete(null);
+      setFeedbackMessage({
+        type: res.success ? 'success' : 'error',
+        text: res.message
+      });
+      return;
+    }
+    const updatedFields = rubric.fields.map((f) =>
+      f.id === fld.id
+        ? { ...f, status: (f.status === 'Nonaktif' ? 'Aktif' : 'Nonaktif') as 'Aktif' | 'Nonaktif' }
+        : f
+    );
     const res = updateRubricVersion(rubric.id, { fields: updatedFields });
     setFeedbackMessage({
       type: res.success ? 'success' : 'error',
-      text: res.success
-        ? mode === 'remove'
-          ? `Bidang "${fld.name}" berhasil dihapus dari versi rubrik.`
-          : `Status bidang "${fld.name}" berhasil diperbarui.`
-        : res.message
+      text: res.success ? `Status bidang "${fld.name}" berhasil diperbarui.` : res.message
     });
   };
 
-  // Save Competition Rule Config
+  // Save Competition Rule Config (P0: Pure DB & Dynamic Tie-Break Dropdown)
   const handleSaveRuleConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    const tieBreakOrder = ruleTieBreakInput.split(',').map((s) => s.trim()).filter(Boolean);
+    const tieBreakOrder = ruleTieBreakList.filter(Boolean);
+    const effectiveTieBreak = tieBreakOrder.length > 0 ? tieBreakOrder : ['total'];
     const quotaPerStage: Record<string, number> = {
       Penyisihan: Number(ruleQuotaPenyisihan) || 3,
       Final: Number(ruleQuotaFinal) || 3
     };
 
+    const targetBranch = cabangList.find((c) => c.name === ruleBranchName);
+
     if (editingRule) {
       updateCompetitionRule(editingRule.id, {
+        branchId: targetBranch?.id || editingRule.branchId,
         branchName: ruleBranchName,
         rubricVersionId: ruleRubricId,
-        tieBreakOrder,
+        tieBreakOrder: effectiveTieBreak,
         quotaPerStage,
         officialSource: ruleOfficialSource,
         isVerifiedOfficial: ruleIsVerified
@@ -349,9 +360,10 @@ export const MasterDataView: React.FC = () => {
       setEditingRule(null);
     } else {
       addCompetitionRule({
+        branchId: targetBranch?.id,
         branchName: ruleBranchName,
-        rubricVersionId: ruleRubricId || (rubricVersions[0]?.id || 'rubric-seni-baca-2025'),
-        tieBreakOrder,
+        rubricVersionId: ruleRubricId,
+        tieBreakOrder: effectiveTieBreak,
         quotaPerStage,
         officialSource: ruleOfficialSource,
         isVerifiedOfficial: ruleIsVerified,
@@ -442,7 +454,33 @@ export const MasterDataView: React.FC = () => {
     setDeleteWarningItem(null);
   };
 
-  // Save Judge Assignment
+  // Compute fields available for judge assignment based on selected branch and level
+  const availableFieldsForAssignment = useMemo(() => {
+    if (assignBranchName && assignBranchName !== 'Semua Cabang') {
+      const match = rubricVersions.find(
+        (r) =>
+          r.status === 'Aktif' &&
+          (r.branchName === assignBranchName ||
+            (assignLevelId && r.levelId === assignLevelId))
+      );
+      if (match && match.fields.length > 0) {
+        return match.fields;
+      }
+    }
+    const seen = new Set<string>();
+    const list: RubricField[] = [];
+    rubricVersions.forEach((r) => {
+      r.fields.forEach((f) => {
+        if (!seen.has(f.name.toLowerCase())) {
+          seen.add(f.name.toLowerCase());
+          list.push(f);
+        }
+      });
+    });
+    return list;
+  }, [rubricVersions, assignBranchName, assignLevelId]);
+
+  // Save Judge Assignment (P0: Pure DB with Branch, Stage, Jenjang, and Field Relations)
   const handleSaveJudgeAssignment = (e: React.FormEvent) => {
     e.preventDefault();
     const availableJudges = users.filter((u) => u.role === 'judge');
@@ -457,17 +495,23 @@ export const MasterDataView: React.FC = () => {
     }
 
     const effectiveStage = assignStageName || stages[0]?.name || 'Penyisihan';
-    const effectiveBranch = assignBranchName || cabangList[0]?.name || 'Tilawah Dewasa Putra';
+    const effectiveBranch = assignBranchName || cabangList[0]?.name || 'Semua Cabang';
+    const branchObj = cabangList.find((c) => c.name === effectiveBranch);
+    const levelObj = jenjangList.find((j) => j.id === assignLevelId || j.name === assignLevelName);
 
     addJudgeAssignment({
       judgeId: judgeObj.id,
       judgeName: judgeObj.name,
       stageName: effectiveStage,
       branchName: effectiveBranch,
-      judgeField: assignField || judgeObj.judgeField || 'Bidang Tajwid'
+      branchId: branchObj?.id,
+      levelId: levelObj?.id,
+      levelName: levelObj?.name,
+      judgeField: assignField || judgeObj.judgeField || 'Bidang Penilaian',
+      judgeFieldId: assignFieldId || undefined
     });
     setIsAssignJudgeOpen(false);
-    setFeedbackMessage({ type: 'success', text: `Penugasan hakim ${judgeObj.name} berhasil disimpan.` });
+    setFeedbackMessage({ type: 'success', text: `Penugasan hakim ${judgeObj.name} berhasil disimpan ke database.` });
   };
 
   return (
@@ -570,10 +614,21 @@ export const MasterDataView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {errorCategories.map((cat, idx) => {
-                const mappedField = availableRubricFields.find((f) => f.id === cat.fieldId);
-                return (
-                  <tr key={`${cat.id}-${idx}`} className="hover:bg-slate-50/70">
+              {errorCategories.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                    <SlidersHorizontal className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                    <p className="font-bold text-slate-700 text-sm">Belum Ada Kategori Kesalahan</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      Database belum memiliki kategori dan bobot kesalahan. Klik "Tambah Kategori" di atas untuk menambahkan item baru ke database.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                errorCategories.map((cat, idx) => {
+                  const mappedField = availableRubricFields.find((f) => f.id === cat.fieldId);
+                  return (
+                    <tr key={`${cat.id}-${idx}`} className="hover:bg-slate-50/70">
                     <td className="px-5 py-3.5 font-mono font-bold text-slate-900">{cat.code}</td>
                     <td className="px-5 py-3.5">
                       <p className="font-bold text-slate-900">{cat.name}</p>
@@ -637,7 +692,8 @@ export const MasterDataView: React.FC = () => {
                     </td>
                   </tr>
                 );
-              })}
+              })
+              )}
             </tbody>
           </table>
         </div>
@@ -657,12 +713,16 @@ export const MasterDataView: React.FC = () => {
             </div>
             <button
               onClick={() => {
-                setNewRubricName('Rubrik Kustom Seni Baca 2026');
-                setNewRubricCode('RUBRIC-CUSTOM-2026');
-                setNewRubricBranch('Tilawah');
-                setNewRubricVersion('2026.1');
+                setNewRubricName('');
+                setNewRubricCode('');
+                setNewRubricBranch(cabangList[0]?.name || '');
+                setNewRubricBranchId(cabangList[0]?.id || '');
+                setNewRubricLevelId(jenjangList[0]?.id || '');
+                setNewRubricLevelName(jenjangList[0]?.name || '');
+                setNewRubricVersion('1.0');
                 setNewRubricStartingScore(100);
-                setNewRubricOfficialSource('Regulasi LPTQ 2026');
+                setNewRubricOfficialSource('');
+                setNewRubricDescription('');
                 setIsAddRubricOpen(true);
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
@@ -673,171 +733,194 @@ export const MasterDataView: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 gap-5">
-            {rubricVersions.map((rubric, idx) => {
-              const activeFieldsList = rubric.fields.filter((f) => f.status !== 'Nonaktif' && f.status !== 'Arsip');
-              const totalFieldsMax = activeFieldsList.reduce((acc, f) => acc + f.maxScore, 0);
-              const isActive = rubric.status === 'Aktif';
+            {rubricVersions.length === 0 ? (
+              <div className="p-12 bg-white rounded-xl border border-slate-200 text-center text-slate-400">
+                <Layers className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                <p className="font-bold text-slate-700 text-sm">Belum Ada Versi Rubrik</p>
+                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                  Database belum memiliki versi rubrik penilaian. Klik "Buat Versi Rubrik Baru" untuk menautkan rubrik ke cabang dan golongan musabaqah.
+                </p>
+              </div>
+            ) : (
+              rubricVersions.map((rubric, idx) => {
+                const activeFieldsList = rubric.fields.filter((f) => f.status !== 'Nonaktif' && f.status !== 'Arsip');
+                const totalFieldsMax = activeFieldsList.reduce((acc, f) => acc + f.maxScore, 0);
+                const isActive = rubric.status === 'Aktif';
 
-              return (
-                <div
-                  key={`${rubric.id}-${idx}`}
-                  className={`bg-white rounded-xl border transition-all ${
-                    isActive ? 'border-emerald-300 ring-1 ring-emerald-300 shadow-xs' : 'border-slate-200'
-                  } p-5 space-y-4`}
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-extrabold text-sm text-slate-900">{rubric.name}</h3>
-                        <span
-                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                            rubric.status === 'Aktif'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : rubric.status === 'Draft'
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          {rubric.status || 'Aktif'}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-500 font-bold">
-                          v{rubric.version}
-                        </span>
+                return (
+                  <div
+                    key={`${rubric.id}-${idx}`}
+                    className={`bg-white rounded-xl border transition-all ${
+                      isActive ? 'border-emerald-300 ring-1 ring-emerald-300 shadow-xs' : 'border-slate-200'
+                    } p-5 space-y-4`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-extrabold text-sm text-slate-900">{rubric.name}</h3>
+                          <span
+                            className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                              rubric.status === 'Aktif'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : rubric.status === 'Draft'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {rubric.status || 'Aktif'}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-500 font-bold">
+                            v{rubric.version}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Cabang: <strong className="text-slate-700">{rubric.branchName}</strong>
+                          {rubric.levelName && (
+                            <> · Golongan/Jenjang: <strong className="text-slate-700">{rubric.levelName}</strong></>
+                          )}
+                          {' '}· Sumber:{' '}
+                          <span className="font-mono text-slate-600">{rubric.officialSource || 'Standar LPTQ'}</span>
+                        </p>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Cabang: <strong className="text-slate-700">{rubric.branchName}</strong> · Sumber:{' '}
-                        <span className="font-mono text-slate-600">{rubric.officialSource || 'Standar LPTQ'}</span>
-                      </p>
-                    </div>
 
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => {
-                          setEditingRubric(rubric);
-                          setEditingField(null);
-                          setFieldName('Itqan');
-                          setFieldCode('ITQ');
-                          setFieldMaxScore(20);
-                          setFieldMinScore(0);
-                          setFieldOrder(rubric.fields.length + 1);
-                          setFieldDescription('Ketepatan hafalan dan konsistensi bacaan');
-                          setIsEditFieldOpen(true);
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border border-emerald-700 text-emerald-800 hover:bg-emerald-50 cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Tambah Bidang</span>
-                      </button>
-                      {!isActive && (
+                      <div className="flex items-center gap-2 flex-wrap">
                         <button
                           onClick={() => {
-                            const res = activateRubricVersion(rubric.id);
-                            setFeedbackMessage({
-                              type: res.success ? 'success' : 'error',
-                              text: res.message
-                            });
+                            setEditingRubric(rubric);
+                            setEditingField(null);
+                            setFieldName('');
+                            setFieldCode('');
+                            setFieldMaxScore(25);
+                            setFieldMinScore(0);
+                            setFieldOrder(rubric.fields.length + 1);
+                            setFieldDescription('');
+                            setIsEditFieldOpen(true);
                           }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer shadow-xs"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border border-emerald-700 text-emerald-800 hover:bg-emerald-50 cursor-pointer"
                         >
-                          Aktifkan Versi Ini
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Tambah Bidang</span>
                         </button>
-                      )}
-                      {rubric.status !== 'Arsip' && (
+                        {!isActive && (
+                          <button
+                            onClick={() => {
+                              const res = activateRubricVersion(rubric.id);
+                              setFeedbackMessage({
+                                type: res.success ? 'success' : 'error',
+                                text: res.message
+                              });
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer shadow-xs"
+                          >
+                            Aktifkan Versi Ini
+                          </button>
+                        )}
+                        {rubric.status !== 'Arsip' && (
+                          <button
+                            onClick={() => archiveRubricVersion(rubric.id)}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                            title="Arsipkan Rubrik"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
-                          onClick={() => archiveRubricVersion(rubric.id)}
-                          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                          title="Arsipkan Rubrik"
+                          onClick={() => setRubricToDelete(rubric)}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 cursor-pointer inline-flex items-center gap-1"
+                          title="Hapus Versi Rubrik"
                         >
-                          <Archive className="w-3.5 h-3.5" />
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus</span>
                         </button>
-                      )}
-                      <button
-                        onClick={() => setRubricToDelete(rubric)}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 cursor-pointer inline-flex items-center gap-1"
-                        title="Hapus Versi Rubrik"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Hapus</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Fields list in this Rubric */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                      <span>Komposisi Bidang Penilaian Dinamis ({activeFieldsList.length} Aktif / {rubric.fields.length} Total):</span>
-                      <span className="font-mono text-emerald-800">
-                        Total Skor Maks Aktif: {totalFieldsMax} / {rubric.startingScore}
-                      </span>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                      {rubric.fields
-                        .slice()
-                        .sort((a, b) => (a.order || 0) - (b.order || 0))
-                        .map((fld, idx) => {
-                          const isInactive = fld.status === 'Nonaktif' || fld.status === 'Arsip';
-                          return (
-                            <div
-                              key={`${fld.id}-${idx}`}
-                              className={`p-3 rounded-lg border flex flex-col justify-between ${
-                                isInactive
-                                  ? 'bg-slate-100/70 border-slate-200 opacity-60'
-                                  : 'bg-slate-50 border-slate-200/80'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="font-mono font-bold text-[10px] text-slate-500">
-                                  #{fld.order} · {fld.code}
-                                </span>
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => {
-                                      setEditingRubric(rubric);
-                                      setEditingField(fld);
-                                      setFieldName(fld.name);
-                                      setFieldCode(fld.code);
-                                      setFieldMaxScore(fld.maxScore);
-                                      setFieldMinScore(fld.minScore || 0);
-                                      setFieldOrder(fld.order || 1);
-                                      setFieldDescription(fld.description || '');
-                                      setIsEditFieldOpen(true);
-                                    }}
-                                    className="text-[11px] font-bold text-emerald-800 hover:text-emerald-900 cursor-pointer"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    onClick={() => handleToggleOrRemoveField(rubric, fld, 'toggle')}
-                                    className="text-[10px] font-semibold text-slate-500 hover:text-amber-700 cursor-pointer"
-                                    title={isInactive ? 'Aktifkan kembali bidang ini' : 'Nonaktifkan bidang ini'}
-                                  >
-                                    {isInactive ? 'Aktifkan' : 'Nonaktif'}
-                                  </button>
-                                  <button
-                                    onClick={() => setFieldToDelete({ rubric, field: fld })}
-                                    className="p-0.5 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
-                                    title="Hapus Bidang Ini"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                    {/* Fields list in this Rubric */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                        <span>Komposisi Bidang Penilaian Dinamis ({activeFieldsList.length} Aktif / {rubric.fields.length} Total):</span>
+                        <span className="font-mono text-emerald-800">
+                          Total Skor Maks Aktif: {totalFieldsMax} / {rubric.startingScore}
+                        </span>
+                      </div>
+
+                      {rubric.fields.length === 0 ? (
+                        <div className="p-6 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-center text-xs text-slate-500">
+                          <p className="font-bold text-slate-700">Belum Ada Bidang Penilaian</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Rubrik ini belum memiliki bidang. Klik "+ Tambah Bidang" di atas untuk menambahkan bidang penilaian (misal Tajwid, Fashahah, Lagu, dll).
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-3">
+                          {rubric.fields
+                            .slice()
+                            .sort((a, b) => (a.order || 0) - (b.order || 0))
+                            .map((fld, idx) => {
+                              const isInactive = fld.status === 'Nonaktif' || fld.status === 'Arsip';
+                              return (
+                                <div
+                                  key={`${fld.id}-${idx}`}
+                                  className={`flex-1 min-w-[220px] max-w-full p-3.5 rounded-xl border flex flex-col justify-between ${
+                                    isInactive
+                                      ? 'bg-slate-100/70 border-slate-200 opacity-60'
+                                      : 'bg-slate-50 border-slate-200/80'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="font-mono font-bold text-[10px] text-slate-500">
+                                      #{fld.order} · {fld.code}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        onClick={() => {
+                                          setEditingRubric(rubric);
+                                          setEditingField(fld);
+                                          setFieldName(fld.name);
+                                          setFieldCode(fld.code);
+                                          setFieldMaxScore(fld.maxScore);
+                                          setFieldMinScore(fld.minScore || 0);
+                                          setFieldOrder(fld.order || 1);
+                                          setFieldDescription(fld.description || '');
+                                          setIsEditFieldOpen(true);
+                                        }}
+                                        className="text-[11px] font-bold text-emerald-800 hover:text-emerald-900 cursor-pointer"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        onClick={() => handleToggleOrRemoveField(rubric, fld, 'toggle')}
+                                        className="text-[10px] font-semibold text-slate-500 hover:text-amber-700 cursor-pointer"
+                                        title={isInactive ? 'Aktifkan kembali bidang ini' : 'Nonaktifkan bidang ini'}
+                                      >
+                                        {isInactive ? 'Aktifkan' : 'Nonaktif'}
+                                      </button>
+                                      <button
+                                        onClick={() => setFieldToDelete({ rubric, field: fld })}
+                                        className="p-0.5 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                                        title="Hapus Bidang Ini"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="font-extrabold text-sm text-slate-800">{fld.name}</div>
+                                  <div className="mt-2 pt-2 border-t border-slate-200 text-xs flex items-center justify-between font-mono">
+                                    <span className="text-slate-500">Rentang:</span>
+                                    <span className="font-extrabold text-slate-900">
+                                      {fld.minScore ?? 0} – {fld.maxScore} pts
+                                    </span>
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="font-extrabold text-sm text-slate-800">{fld.name}</div>
-                              <div className="mt-2 pt-2 border-t border-slate-200 text-xs flex items-center justify-between font-mono">
-                                <span className="text-slate-500">Rentang:</span>
-                                <span className="font-extrabold text-slate-900">
-                                  {fld.minScore ?? 0} – {fld.maxScore} pts
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
+                              );
+                            })}
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       )}
@@ -851,18 +934,22 @@ export const MasterDataView: React.FC = () => {
                 Konfigurasi Aturan Kompetisi, Prioritas Tie-Break & Kuota per Cabang
               </h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Administrator dapat mengatur urutan pemutus nilai seri (tie-break) dan kuota kelulusan per cabang tanpa mengubah source code.
+                Administrator dapat mengatur urutan pemutus nilai seri (tie-break) menggunakan bidang rubrik aktif dari database.
               </p>
             </div>
             <button
               onClick={() => {
                 setEditingRule(null);
-                setRuleBranchName('Tahfizh 20 Juz');
-                setRuleRubricId(rubricVersions[0]?.id || '');
-                setRuleTieBreakInput('total, Tahfizh, Tajwid, Fashahah');
+                setRuleBranchName(cabangList[0]?.name || '');
+                const defaultRubric = rubricVersions[0];
+                setRuleRubricId(defaultRubric?.id || '');
+                const defaultTieBreak = defaultRubric?.fields?.length
+                  ? ['total', ...defaultRubric.fields.map((f) => f.name)]
+                  : ['total'];
+                setRuleTieBreakList(defaultTieBreak);
                 setRuleQuotaPenyisihan(3);
                 setRuleQuotaFinal(3);
-                setRuleOfficialSource('Pedoman MTQ 2025');
+                setRuleOfficialSource('');
                 setRuleIsVerified(true);
                 setIsEditRuleOpen(true);
               }}
@@ -884,100 +971,112 @@ export const MasterDataView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {competitionRules.map((rule, idx) => {
-                const branchStages = stages.filter(
-                  (s) =>
-                    (rule.branchId && s.branchId === rule.branchId) ||
-                    s.branchName === rule.branchName ||
-                    s.branchName.toLowerCase().includes(rule.branchName.toLowerCase()) ||
-                    rule.branchName.toLowerCase().includes(s.branchName.toLowerCase())
-                );
-                const resolvedQuotas: Record<string, number> = {
-                  ...(rule.quotaPerStage || {})
-                };
-                branchStages.forEach((bs) => {
-                  resolvedQuotas[bs.name] = bs.qualificationQuota;
-                });
+              {competitionRules.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-12 text-center text-slate-400">
+                    <Trophy className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                    <p className="font-bold text-slate-700 text-sm">Belum Ada Aturan Cabang & Tie-Break</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      Database belum memiliki konfigurasi aturan cabang dan prioritas tie-break. Klik "Tambah Aturan Cabang" di atas untuk menambahkan aturan baru.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                competitionRules.map((rule, idx) => {
+                  const branchStages = stages.filter(
+                    (s) =>
+                      (rule.branchId && s.branchId === rule.branchId) ||
+                      s.branchName === rule.branchName ||
+                      s.branchName.toLowerCase().includes(rule.branchName.toLowerCase()) ||
+                      rule.branchName.toLowerCase().includes(s.branchName.toLowerCase())
+                  );
+                  const resolvedQuotas: Record<string, number> = {
+                    ...(rule.quotaPerStage || {})
+                  };
+                  branchStages.forEach((bs) => {
+                    resolvedQuotas[bs.name] = bs.qualificationQuota;
+                  });
 
-                return (
-                  <tr key={`${rule.id}-${idx}`} className="hover:bg-slate-50/70">
-                    <td className="px-5 py-3.5">
-                      <p className="font-bold text-slate-900">{rule.branchName}</p>
-                      <p className="text-[11px] font-mono text-slate-500">
-                        Rubrik ID: {rule.rubricVersionId}
-                      </p>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {rule.tieBreakOrder.map((crit, cIdx) => (
-                          <React.Fragment key={`${crit}-${cIdx}`}>
-                            <span className="px-2 py-0.5 bg-slate-100 rounded text-[11px] font-semibold text-slate-700">
-                              {cIdx + 1}. {crit}
-                            </span>
-                            {cIdx < rule.tieBreakOrder.length - 1 && (
-                              <span className="text-slate-400">➔</span>
-                            )}
-                          </React.Fragment>
+                  return (
+                    <tr key={`${rule.id}-${idx}`} className="hover:bg-slate-50/70">
+                      <td className="px-5 py-3.5">
+                        <p className="font-bold text-slate-900">{rule.branchName}</p>
+                        <p className="text-[11px] font-mono text-slate-500">
+                          Rubrik ID: {rule.rubricVersionId}
+                        </p>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {rule.tieBreakOrder.map((crit, cIdx) => (
+                            <React.Fragment key={`${crit}-${cIdx}`}>
+                              <span className="px-2 py-0.5 bg-slate-100 rounded text-[11px] font-semibold text-slate-700">
+                                {cIdx + 1}. {crit}
+                              </span>
+                              {cIdx < rule.tieBreakOrder.length - 1 && (
+                                <span className="text-slate-400">➔</span>
+                              )}
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 text-center font-mono">
+                        {Object.entries(resolvedQuotas).map(([stg, q], sIdx) => (
+                          <span key={`${stg}-${sIdx}`} className="inline-block mx-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 rounded font-bold text-[10px]">
+                            {stg}: {q}
+                          </span>
                         ))}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 text-center font-mono">
-                      {Object.entries(resolvedQuotas).map(([stg, q], sIdx) => (
-                        <span key={`${stg}-${sIdx}`} className="inline-block mx-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 rounded font-bold text-[10px]">
-                          {stg}: {q}
-                        </span>
-                      ))}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <p className="text-slate-700 text-[11px]">{rule.officialSource || 'Standar'}</p>
-                      {rule.isVerifiedOfficial ? (
-                        <span className="inline-flex items-center text-[10px] text-emerald-700 font-bold gap-0.5 mt-0.5">
-                          <Check className="w-3 h-3" /> Terverifikasi Resmi
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center text-[10px] text-amber-700 font-bold gap-0.5 mt-0.5">
-                          ⚠️ Konfigurasi Penyelenggara
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        <button
-                          onClick={() => {
-                            setEditingRule(rule);
-                            setRuleBranchName(rule.branchName);
-                            setRuleRubricId(rule.rubricVersionId);
-                            setRuleTieBreakInput(rule.tieBreakOrder.join(', '));
-                            setRuleQuotaPenyisihan(resolvedQuotas['Penyisihan'] || 3);
-                            setRuleQuotaFinal(resolvedQuotas['Final'] || 3);
-                            setRuleOfficialSource(rule.officialSource || '');
-                            setRuleIsVerified(Boolean(rule.isVerifiedOfficial));
-                            setIsEditRuleOpen(true);
-                          }}
-                          className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            const res = deleteCompetitionRule(rule.id);
-                            setFeedbackMessage({
-                              type: res.success ? 'success' : 'error',
-                              text: res.message
-                            });
-                          }}
-                          className="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
-                          title="Hapus Aturan Cabang"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Hapus</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className="text-slate-700 text-[11px]">{rule.officialSource || 'Standar'}</p>
+                        {rule.isVerifiedOfficial ? (
+                          <span className="inline-flex items-center text-[10px] text-emerald-700 font-bold gap-0.5 mt-0.5">
+                            <Check className="w-3 h-3" /> Terverifikasi Resmi
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center text-[10px] text-amber-700 font-bold gap-0.5 mt-0.5">
+                            ⚠️ Konfigurasi Penyelenggara
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setEditingRule(rule);
+                              setRuleBranchName(rule.branchName);
+                              setRuleRubricId(rule.rubricVersionId);
+                              setRuleTieBreakList(rule.tieBreakOrder.length > 0 ? rule.tieBreakOrder : ['total']);
+                              setRuleQuotaPenyisihan(resolvedQuotas['Penyisihan'] || 3);
+                              setRuleQuotaFinal(resolvedQuotas['Final'] || 3);
+                              setRuleOfficialSource(rule.officialSource || '');
+                              setRuleIsVerified(Boolean(rule.isVerifiedOfficial));
+                              setIsEditRuleOpen(true);
+                            }}
+                            className="p-1.5 text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              const res = deleteCompetitionRule(rule.id);
+                              setFeedbackMessage({
+                                type: res.success ? 'success' : 'error',
+                                text: res.message
+                              });
+                            }}
+                            className="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                            title="Hapus Aturan Cabang"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Hapus</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -991,7 +1090,13 @@ export const MasterDataView: React.FC = () => {
               Konfigurasi Babak & Kuota Kelulusan
             </h3>
             <button
-              onClick={() => setIsAddStageOpen(true)}
+              onClick={() => {
+                setStageName('');
+                setStageOrder(stages.length + 1);
+                setStageQuota(3);
+                setStageBranch(cabangList[0]?.name || 'Semua Cabang');
+                setIsAddStageOpen(true);
+              }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -1011,66 +1116,78 @@ export const MasterDataView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {stages.map((stg, idx) => (
-                <tr key={`${stg.id}-${idx}`} className="hover:bg-slate-50/70">
-                  <td className="px-5 py-3.5 text-center font-mono font-bold text-slate-500">
-                    {stg.order}
-                  </td>
-                  <td className="px-5 py-3.5 font-bold text-slate-900">{stg.name}</td>
-                  <td className="px-4 py-3.5 text-slate-600">{stg.branchName}</td>
-                  <td className="px-4 py-3.5 text-center font-bold text-emerald-800 font-mono">
-                    Top {stg.qualificationQuota}
-                  </td>
-                  <td className="px-4 py-3.5 text-center">
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                        stg.isFinalized
-                          ? 'bg-slate-100 text-slate-700'
-                          : stg.status === 'Aktif'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {stg.isFinalized ? 'Final' : stg.status}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <div className="inline-flex items-center gap-2">
-                      <button
-                        onClick={() =>
-                          updateStage(stg.id, {
-                            status: stg.status === 'Aktif' ? 'Selesai' : 'Aktif'
-                          })
-                        }
-                        disabled={stg.isFinalized}
-                        className="text-xs text-slate-600 hover:text-emerald-800 disabled:opacity-40 font-semibold cursor-pointer px-2.5 py-1 rounded-md border border-slate-200 hover:bg-slate-50"
-                      >
-                        Ubah Status
-                      </button>
-                      <button
-                        type="button"
-                        disabled={stg.isFinalized || stg.status === 'Selesai'}
-                        onClick={() => {
-                          const res = deleteStage(stg.id);
-                          setFeedbackMessage({
-                            type: res.success ? 'success' : 'error',
-                            text: res.message
-                          });
-                        }}
-                        title={
-                          stg.isFinalized || stg.status === 'Selesai'
-                            ? 'Babak yang sudah selesai/disahkan tidak dapat dihapus'
-                            : 'Hapus babak musabaqah ini'
-                        }
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 disabled:cursor-not-allowed text-rose-700 font-semibold text-xs cursor-pointer transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Hapus</span>
-                      </button>
-                    </div>
+              {stages.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                    <BookOpen className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                    <p className="font-bold text-slate-700 text-sm">Belum Ada Babak Musabaqah</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      Database belum memiliki tahapan babak musabaqah (seperti Penyisihan, Semifinal, Final). Klik "Tambah Babak" untuk memulai.
+                    </p>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                stages.map((stg, idx) => (
+                  <tr key={`${stg.id}-${idx}`} className="hover:bg-slate-50/70">
+                    <td className="px-5 py-3.5 text-center font-mono font-bold text-slate-500">
+                      {stg.order}
+                    </td>
+                    <td className="px-5 py-3.5 font-bold text-slate-900">{stg.name}</td>
+                    <td className="px-4 py-3.5 text-slate-600">{stg.branchName}</td>
+                    <td className="px-4 py-3.5 text-center font-bold text-emerald-800 font-mono">
+                      Top {stg.qualificationQuota}
+                    </td>
+                    <td className="px-4 py-3.5 text-center">
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                          stg.isFinalized
+                            ? 'bg-slate-100 text-slate-700'
+                            : stg.status === 'Aktif'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {stg.isFinalized ? 'Final' : stg.status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="inline-flex items-center gap-2">
+                        <button
+                          onClick={() =>
+                            updateStage(stg.id, {
+                              status: stg.status === 'Aktif' ? 'Selesai' : 'Aktif'
+                            })
+                          }
+                          disabled={stg.isFinalized}
+                          className="text-xs text-slate-600 hover:text-emerald-800 disabled:opacity-40 font-semibold cursor-pointer px-2.5 py-1 rounded-md border border-slate-200 hover:bg-slate-50"
+                        >
+                          Ubah Status
+                        </button>
+                        <button
+                          type="button"
+                          disabled={stg.isFinalized || stg.status === 'Selesai'}
+                          onClick={() => {
+                            const res = deleteStage(stg.id);
+                            setFeedbackMessage({
+                              type: res.success ? 'success' : 'error',
+                              text: res.message
+                            });
+                          }}
+                          title={
+                            stg.isFinalized || stg.status === 'Selesai'
+                              ? 'Babak yang sudah selesai/disahkan tidak dapat dihapus'
+                              : 'Hapus babak musabaqah ini'
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 disabled:cursor-not-allowed text-rose-700 font-semibold text-xs cursor-pointer transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -1080,59 +1197,83 @@ export const MasterDataView: React.FC = () => {
       {activeTab === 'jenjang' && (
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
               Jenjang Usia Musabaqah (Kategori Peserta)
             </h3>
             <button
               onClick={() => setIsAddGenericOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Jenjang</span>
             </button>
           </div>
 
-          <div className="divide-y divide-slate-100">
-            {jenjangList.map((item, idx) => (
-              <div
-                key={`${item.id}-${idx}`}
-                className="p-4 flex items-center justify-between hover:bg-slate-50/60 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 bg-slate-100 rounded text-slate-700">
-                    {item.code}
-                  </span>
-                  <span className="font-bold text-slate-900">{item.name}</span>
-                </div>
-
-                <div className="flex items-center gap-2.5">
-                  <button
-                    onClick={() =>
-                      updateJenjang(item.id, {
-                        status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
-                      })
-                    }
-                    className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
-                      item.status === 'Aktif'
-                        ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                        : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
-                    }`}
-                    title="Klik untuk ubah status"
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase text-[10px]">
+                <th className="px-5 py-3 w-28">Kode</th>
+                <th className="px-5 py-3">Nama Jenjang Usia</th>
+                <th className="px-4 py-3 text-center w-32">Status</th>
+                <th className="px-5 py-3 text-right w-28">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {jenjangList.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-5 py-12 text-center text-slate-400">
+                    <p className="font-semibold text-slate-700 text-xs">Belum Ada Jenjang Usia</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      Database belum memiliki daftar jenjang usia (seperti Anak-anak, Remaja, Dewasa). Klik &quot;Tambah Jenjang&quot; di atas untuk menambahkan.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                jenjangList.map((item, idx) => (
+                  <tr
+                    key={`${item.id}-${idx}`}
+                    className="hover:bg-slate-50/70 transition-colors"
                   >
-                    {item.status}
-                  </button>
-
-                  <button
-                    onClick={() => handleDeleteMasterItem('jenjang', item)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                    title="Hapus Jenjang"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+                    <td className="px-5 py-3">
+                      <span className="font-mono text-[11px] font-medium px-2 py-0.5 bg-slate-100 rounded text-slate-700">
+                        {item.code}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 font-medium text-slate-800">
+                      {item.name}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() =>
+                          updateJenjang(item.id, {
+                            status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
+                          })
+                        }
+                        className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
+                          item.status === 'Aktif'
+                            ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                            : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
+                        }`}
+                        title="Klik untuk ubah status"
+                      >
+                        {item.status}
+                      </button>
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <button
+                        onClick={() => handleDeleteMasterItem('jenjang', item)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium text-xs cursor-pointer transition-colors"
+                        title="Hapus Jenjang"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -1140,59 +1281,83 @@ export const MasterDataView: React.FC = () => {
       {activeTab === 'cabang' && (
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
               Cabang dan Golongan Musabaqah
             </h3>
             <button
               onClick={() => setIsAddGenericOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Cabang</span>
             </button>
           </div>
 
-          <div className="divide-y divide-slate-100">
-            {cabangList.map((item, idx) => (
-              <div
-                key={`${item.id}-${idx}`}
-                className="p-4 flex items-center justify-between hover:bg-slate-50/60 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 bg-slate-100 rounded text-slate-700">
-                    {item.code}
-                  </span>
-                  <span className="font-bold text-slate-900">{item.name}</span>
-                </div>
-
-                <div className="flex items-center gap-2.5">
-                  <button
-                    onClick={() =>
-                      updateCabang(item.id, {
-                        status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
-                      })
-                    }
-                    className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
-                      item.status === 'Aktif'
-                        ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                        : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
-                    }`}
-                    title="Klik untuk ubah status"
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase text-[10px]">
+                <th className="px-5 py-3 w-28">Kode</th>
+                <th className="px-5 py-3">Nama Cabang / Golongan</th>
+                <th className="px-4 py-3 text-center w-32">Status</th>
+                <th className="px-5 py-3 text-right w-28">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {cabangList.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-5 py-12 text-center text-slate-400">
+                    <p className="font-semibold text-slate-700 text-xs">Belum Ada Cabang / Golongan</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      Database belum memiliki cabang atau golongan lomba. Klik &quot;Tambah Cabang&quot; di atas untuk menambahkan cabang baru ke database.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                cabangList.map((item, idx) => (
+                  <tr
+                    key={`${item.id}-${idx}`}
+                    className="hover:bg-slate-50/70 transition-colors"
                   >
-                    {item.status}
-                  </button>
-
-                  <button
-                    onClick={() => handleDeleteMasterItem('cabang', item)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                    title="Hapus Cabang"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+                    <td className="px-5 py-3">
+                      <span className="font-mono text-[11px] font-medium px-2 py-0.5 bg-slate-100 rounded text-slate-700">
+                        {item.code}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 font-medium text-slate-800">
+                      {item.name}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() =>
+                          updateCabang(item.id, {
+                            status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
+                          })
+                        }
+                        className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
+                          item.status === 'Aktif'
+                            ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                            : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
+                        }`}
+                        title="Klik untuk ubah status"
+                      >
+                        {item.status}
+                      </button>
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <button
+                        onClick={() => handleDeleteMasterItem('cabang', item)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium text-xs cursor-pointer transition-colors"
+                        title="Hapus Cabang"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -1201,15 +1366,19 @@ export const MasterDataView: React.FC = () => {
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Penugasan Dewan Hakim per Babak & Bidang
+              Penugasan Dewan Hakim per Babak, Cabang, Jenjang & Bidang
             </h3>
             <button
               onClick={() => {
                 const firstJudge = users.find((u) => u.role === 'judge');
                 setSelectedJudgeId(firstJudge?.id || '');
                 setAssignStageName(stages[0]?.name || 'Penyisihan');
-                setAssignBranchName(cabangList[0]?.name || 'Tilawah Dewasa Putra');
-                setAssignField(firstJudge?.judgeField || 'Bidang Tajwid & Makhraj');
+                setAssignBranchName(cabangList[0]?.name || 'Semua Cabang');
+                setAssignLevelId(jenjangList[0]?.id || '');
+                setAssignLevelName(jenjangList[0]?.name || '');
+                const firstField = availableRubricFields[0];
+                setAssignFieldId(firstField?.id || '');
+                setAssignField(firstField?.name || firstJudge?.judgeField || '');
                 setIsAssignJudgeOpen(true);
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
@@ -1223,30 +1392,43 @@ export const MasterDataView: React.FC = () => {
             <thead>
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
                 <th className="px-5 py-3">Nama Dewan Hakim</th>
-                <th className="px-5 py-3">Babak</th>
+                <th className="px-4 py-3">Babak</th>
                 <th className="px-4 py-3">Cabang</th>
+                <th className="px-4 py-3">Jenjang Usia</th>
                 <th className="px-4 py-3">Bidang Penilaian</th>
                 <th className="px-5 py-3 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {judgeAssignments.map((ja, idx) => (
-                <tr key={`${ja.id}-${idx}`} className="hover:bg-slate-50/70">
-                  <td className="px-5 py-3.5 font-bold text-slate-900">{ja.judgeName}</td>
-                  <td className="px-5 py-3.5 font-semibold text-slate-800">{ja.stageName}</td>
-                  <td className="px-4 py-3.5 text-slate-600">{ja.branchName}</td>
-                  <td className="px-4 py-3.5 font-medium text-emerald-800">{ja.judgeField}</td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => removeJudgeAssignment(ja.id)}
-                      className="p-1 text-slate-400 hover:text-rose-700 rounded cursor-pointer"
-                      title="Hapus Penugasan"
-                    >
-                      <Trash2 className="w-4 h-4 inline" />
-                    </button>
+              {judgeAssignments.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                    <p className="font-bold text-slate-700 text-sm">Belum Ada Penugasan Dewan Hakim</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      Database belum memiliki daftar penugasan dewan hakim. Klik "Tambah Penugasan Hakim" untuk menugaskan hakim pada babak, cabang, jenjang, dan bidang penilaian.
+                    </p>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                judgeAssignments.map((ja, idx) => (
+                  <tr key={`${ja.id}-${idx}`} className="hover:bg-slate-50/70">
+                    <td className="px-5 py-3.5 font-bold text-slate-900">{ja.judgeName}</td>
+                    <td className="px-4 py-3.5 font-semibold text-slate-800">{ja.stageName}</td>
+                    <td className="px-4 py-3.5 text-slate-600">{ja.branchName}</td>
+                    <td className="px-4 py-3.5 text-slate-600">{ja.levelName || 'Semua Jenjang'}</td>
+                    <td className="px-4 py-3.5 font-medium text-emerald-800">{ja.judgeField}</td>
+                    <td className="px-5 py-3.5 text-right">
+                      <button
+                        onClick={() => removeJudgeAssignment(ja.id)}
+                        className="p-1 text-slate-400 hover:text-rose-700 rounded cursor-pointer"
+                        title="Hapus Penugasan"
+                      >
+                        <Trash2 className="w-4 h-4 inline" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -1383,7 +1565,7 @@ export const MasterDataView: React.FC = () => {
                     value={newRubricVersion}
                     onChange={(e) => setNewRubricVersion(e.target.value)}
                     required
-                    placeholder="e.g. 2026.1"
+                    placeholder="e.g. 1.0"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
@@ -1396,23 +1578,68 @@ export const MasterDataView: React.FC = () => {
                   value={newRubricName}
                   onChange={(e) => setNewRubricName(e.target.value)}
                   required
-                  placeholder="e.g. Rubrik Resmi Seni Baca 2026"
+                  placeholder="e.g. Rubrik Resmi Seni Baca Al-Qur'an"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-slate-600 block mb-1">Cabang Lomba</label>
-                  <input
-                    type="text"
-                    value={newRubricBranch}
-                    onChange={(e) => setNewRubricBranch(e.target.value)}
-                    required
-                    placeholder="e.g. Tilawah"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-                  />
+                  <label className="font-bold text-slate-600 block mb-1">Cabang / Golongan Lomba</label>
+                  {cabangList.length > 0 ? (
+                    <select
+                      value={newRubricBranch}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewRubricBranch(val);
+                        const match = cabangList.find((c) => c.name === val);
+                        setNewRubricBranchId(match?.id || '');
+                      }}
+                      required
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    >
+                      <option value="">-- Pilih Cabang Lomba --</option>
+                      {cabangList.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name} ({c.code})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={newRubricBranch}
+                      onChange={(e) => setNewRubricBranch(e.target.value)}
+                      required
+                      placeholder="Ketik cabang (atau tambah di tab Cabang)"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                    />
+                  )}
                 </div>
+
+                <div>
+                  <label className="font-bold text-slate-600 block mb-1">Jenjang Usia Terkait</label>
+                  <select
+                    value={newRubricLevelId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setNewRubricLevelId(id);
+                      const match = jenjangList.find((j) => j.id === id);
+                      setNewRubricLevelName(match?.name || '');
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="">Semua Jenjang / Umum</option>
+                    {jenjangList.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.name} ({j.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-600 block mb-1">Skor Awal Default</label>
                   <input
@@ -1423,17 +1650,16 @@ export const MasterDataView: React.FC = () => {
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 block mb-1">Rujukan Dokumen Resmi</label>
-                <input
-                  type="text"
-                  value={newRubricOfficialSource}
-                  onChange={(e) => setNewRubricOfficialSource(e.target.value)}
-                  placeholder="e.g. Buku Pedoman MTQ 2025 hal. 42-45"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-                />
+                <div>
+                  <label className="font-bold text-slate-600 block mb-1">Rujukan Dokumen Resmi</label>
+                  <input
+                    type="text"
+                    value={newRubricOfficialSource}
+                    onChange={(e) => setNewRubricOfficialSource(e.target.value)}
+                    placeholder="e.g. Buku Pedoman LPTQ"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
@@ -1569,23 +1795,48 @@ export const MasterDataView: React.FC = () => {
             <form onSubmit={handleSaveRuleConfig} className="space-y-4 text-xs">
               <div>
                 <label className="font-bold text-slate-600 block mb-1">Nama Cabang</label>
-                <input
-                  type="text"
-                  value={ruleBranchName}
-                  onChange={(e) => setRuleBranchName(e.target.value)}
-                  required
-                  placeholder="e.g. Tilawah Dewasa Putra"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-                />
+                {cabangList.length > 0 ? (
+                  <select
+                    value={ruleBranchName}
+                    onChange={(e) => setRuleBranchName(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="">-- Pilih Cabang Lomba --</option>
+                    {cabangList.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={ruleBranchName}
+                    onChange={(e) => setRuleBranchName(e.target.value)}
+                    required
+                    placeholder="e.g. Tilawah Dewasa Putra"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                )}
               </div>
 
               <div>
                 <label className="font-bold text-slate-600 block mb-1">Keterkaitan Versi Rubrik</label>
                 <select
                   value={ruleRubricId}
-                  onChange={(e) => setRuleRubricId(e.target.value)}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    setRuleRubricId(selectedId);
+                    const foundRubric = rubricVersions.find((r) => r.id === selectedId);
+                    if (foundRubric && foundRubric.fields.length > 0) {
+                      setRuleTieBreakList(['total', ...foundRubric.fields.map((f) => f.name)]);
+                    }
+                  }}
+                  required
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
                 >
+                  <option value="">-- Pilih Versi Rubrik Database --</option>
                   {rubricVersions.map((r) => (
                     <option key={r.id} value={r.id}>
                       {r.name} ({r.code}) · Status: {r.status}
@@ -1594,20 +1845,86 @@ export const MasterDataView: React.FC = () => {
                 </select>
               </div>
 
+              {/* Dynamic Tie-Break Dropdown Builder */}
               <div>
-                <label className="font-bold text-slate-600 block mb-1">
-                  Urutan Prioritas Tie-Break (Pisahkan koma)
-                </label>
-                <input
-                  type="text"
-                  value={ruleTieBreakInput}
-                  onChange={(e) => setRuleTieBreakInput(e.target.value)}
-                  required
-                  placeholder="total, Tajwid, Lagu, Fashahah"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-bold text-slate-600">
+                    Urutan Prioritas Tie-Break (Mengacu Bidang Database)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const selectedRubric = rubricVersions.find((r) => r.id === ruleRubricId);
+                      const candidateFields = [
+                        'total',
+                        ...(selectedRubric?.fields?.map((f) => f.name) ||
+                          availableRubricFields.map((f) => f.name))
+                      ];
+                      const nextUnused = candidateFields.find((cf) => !ruleTieBreakList.includes(cf)) || candidateFields[0] || 'total';
+                      setRuleTieBreakList((prev) => [...prev, nextUnused]);
+                    }}
+                    className="text-[11px] font-bold text-emerald-800 hover:text-emerald-950 inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Tambah Prioritas</span>
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-44 overflow-y-auto p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  {(() => {
+                    const selectedRubric = rubricVersions.find((r) => r.id === ruleRubricId);
+                    const fieldOptions = Array.from(
+                      new Set([
+                        'total',
+                        ...(selectedRubric?.fields?.map((f) => f.name) || []),
+                        ...availableRubricFields.map((f) => f.name),
+                        ...ruleTieBreakList
+                      ])
+                    ).filter(Boolean);
+
+                    return ruleTieBreakList.map((selectedCrit, idx) => (
+                      <div key={`tb-${idx}`} className="flex items-center gap-2">
+                        <span className="w-6 text-center font-mono font-bold text-slate-500 text-[11px]">
+                          #{idx + 1}
+                        </span>
+                        <select
+                          value={selectedCrit}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setRuleTieBreakList((prev) =>
+                              prev.map((item, i) => (i === idx ? val : item))
+                            );
+                          }}
+                          className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-slate-800"
+                        >
+                          {fieldOptions.map((opt) => (
+                            <option
+                              key={opt}
+                              value={opt}
+                              disabled={ruleTieBreakList.includes(opt) && opt !== selectedCrit}
+                            >
+                              {opt === 'total' ? 'Skor Total (total)' : `Bidang: ${opt}`}
+                            </option>
+                          ))}
+                        </select>
+                        {ruleTieBreakList.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRuleTieBreakList((prev) => prev.filter((_, i) => i !== idx))
+                            }
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg cursor-pointer"
+                            title="Hapus kriteria ini"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ));
+                  })()}
+                </div>
                 <p className="text-[10px] text-slate-500 mt-1">
-                  Contoh Seni Baca: <span className="font-mono">total, Tajwid, Lagu, Fashahah</span>. Sistem membandingkan bidang sesuai urutan ini bila skor total kembar.
+                  Pilihan mengacu langsung pada bidang penilaian aktif pada versi rubrik di database.
                 </p>
               </div>
 
@@ -1642,7 +1959,7 @@ export const MasterDataView: React.FC = () => {
                   type="text"
                   value={ruleOfficialSource}
                   onChange={(e) => setRuleOfficialSource(e.target.value)}
-                  placeholder="e.g. Buku Pedoman Musabaqah 2025 hal. 42-45"
+                  placeholder="e.g. Buku Pedoman Musabaqah LPTQ"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                 />
               </div>
@@ -1693,7 +2010,7 @@ export const MasterDataView: React.FC = () => {
                   value={stageName}
                   onChange={(e) => setStageName(e.target.value)}
                   required
-                  placeholder="e.g. Semifinal"
+                  placeholder="e.g. Penyisihan / Semifinal / Final"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                 />
               </div>
@@ -1793,7 +2110,7 @@ export const MasterDataView: React.FC = () => {
       {isAssignJudgeOpen && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6">
-            <h3 className="font-extrabold text-base text-slate-900 mb-4">Penugasan Hakim</h3>
+            <h3 className="font-extrabold text-base text-slate-900 mb-4">Penugasan Dewan Hakim</h3>
             <form onSubmit={handleSaveJudgeAssignment} className="space-y-4 text-xs">
               <div>
                 <label className="font-bold text-slate-600 block mb-1">Pilih Dewan Hakim</label>
@@ -1842,15 +2159,53 @@ export const MasterDataView: React.FC = () => {
                   </select>
                 </div>
               </div>
+
               <div>
-                <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian</label>
-                <input
-                  type="text"
+                <label className="font-bold text-slate-600 block mb-1">Jenjang Usia</label>
+                <select
+                  value={assignLevelId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setAssignLevelId(id);
+                    const match = jenjangList.find((j) => j.id === id);
+                    setAssignLevelName(match?.name || '');
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="">Semua Jenjang Usia</option>
+                  {jenjangList.map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.name} ({j.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian (Dropdown Database)</label>
+                <select
                   value={assignField}
-                  onChange={(e) => setAssignField(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setAssignField(val);
+                    const match = availableFieldsForAssignment.find((f) => f.name === val);
+                    setAssignFieldId(match?.id || '');
+                  }}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-                />
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-semibold text-slate-800"
+                >
+                  <option value="">-- Pilih Bidang Penilaian --</option>
+                  {availableFieldsForAssignment.map((fld) => (
+                    <option key={fld.id} value={fld.name}>
+                      {fld.name} ({fld.code})
+                    </option>
+                  ))}
+                </select>
+                {availableFieldsForAssignment.length === 0 && (
+                  <p className="text-[10px] text-amber-700 mt-1">
+                    Belum ada bidang penilaian di database. Tambahkan versi rubrik dan bidang terlebih dahulu pada tab Rubrik & Bidang.
+                  </p>
+                )}
               </div>
               <div className="flex justify-end gap-2 pt-3 border-t">
                 <button

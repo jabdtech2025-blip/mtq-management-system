@@ -29,6 +29,7 @@ import { SuperadminDashboardView } from './components/superadmin/SuperadminDashb
 import { SuperadminTenantsView } from './components/superadmin/SuperadminTenantsView';
 import { SuperadminUsersView } from './components/superadmin/SuperadminUsersView';
 import { SuperadminAuditView } from './components/superadmin/SuperadminAuditView';
+import { ActivityLogView } from './components/logs/ActivityLogView';
 
 const AuthenticationGateView: React.FC = () => {
   const {
@@ -792,6 +793,8 @@ const MainLayout: React.FC = () => {
         return <HasilKelulusanView />;
       case 'penilaian_dual_panel':
         return <PenilaianDualPanelView />;
+      case 'log_aktivitas':
+        return <ActivityLogView />;
 
       // Superadmin Platform
       case 'superadmin_dashboard':
@@ -811,15 +814,15 @@ const MainLayout: React.FC = () => {
   const isScoringView = currentView === 'penilaian_dual_panel';
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900 overflow-x-hidden">
+    <div className="flex h-screen w-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
       {/* Sidebar: persistent on desktop, off-canvas drawer on tablet & mobile */}
       <Sidebar />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Offline Demo Simulation Isolation Banner */}
         {isOfflineDemoSimulation && (
-          <div className="bg-amber-900 text-amber-50 px-4 py-2 text-xs font-semibold flex flex-col sm:flex-row sm:items-center justify-between gap-2 sticky top-0 z-40 border-b border-amber-700">
+          <div className="bg-amber-900 text-amber-50 px-4 py-2 text-xs font-semibold flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0 z-40 border-b border-amber-700">
             <div className="flex items-center gap-2">
               <FlaskConical className="w-4 h-4 text-amber-300 shrink-0" />
               <span>
@@ -838,7 +841,7 @@ const MainLayout: React.FC = () => {
 
         {/* Superadmin Workspace Mode Banner */}
         {isSuperadminWorkspaceMode && (
-          <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs sticky top-0 z-40">
+          <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs shrink-0 z-40">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-slate-950 animate-ping"></span>
               <span>Mode Superadmin: Memantau & Mengelola Workspace [{currentTenant.name}]</span>
@@ -855,7 +858,7 @@ const MainLayout: React.FC = () => {
         {/* On standard views, show the TopHeader; on scoring view, PenilaianDualPanelView provides its own specialized header */}
         {!isScoringView && <TopHeader />}
 
-        <main className={`flex-1 ${isScoringView ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <main className={`flex-1 min-w-0 ${isScoringView ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           {renderCurrentView()}
         </main>
       </div>

@@ -420,6 +420,18 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261109_complete_system_improvement.sql'),
     'utf-8'
   );
+  const masterData20261110Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261110_master_data_pure_db.sql'),
+    'utf-8'
+  );
+  const serverScoring20261110Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261110_server_scoring_and_atomic_lottery.sql'),
+    'utf-8'
+  );
+  const fix20261111Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261111_fix_v_rule_unassigned.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -926,8 +938,8 @@ export async function runSupabaseTests(): Promise<{
         rubricVersionId: rubricSeniBacaId,
         status: 'in_progress',
         isLocked: false,
-        errorCounts: { MKH: 1, IDG: 1 },
-        deductions: { MKH: 1.0, IDG: 0.5 },
+        errorCounts: { MKH: 1, SFT: 1 },
+        deductions: { MKH: 1.0, SFT: 0.5 },
         fieldScores: { TJW: 28.5, FSH: 28, SUR: 15, LGU: 25 },
         totalDeductions: 3.5,
         finalScore: 96.5,
@@ -979,12 +991,14 @@ export async function runSupabaseTests(): Promise<{
       overrideReasons: {},
       rankingsSnapshot: [{ participant_id: participantUuid, final_score: 97.0, rank: 1 }]
     });
+    console.log('advancePenyisihanRes:', advancePenyisihanRes);
 
     // Verify Final stage participation was created by the RPC in PostgreSQL
     const finalSpQuery = await pg.query<{ id: string }>(`
       SELECT id FROM stage_participations
       WHERE stage_id = '${stageFinalId}' AND participant_id = '${participantUuid}';
     `);
+    console.log('finalSpQuery rows:', finalSpQuery.rows);
     const finalSpId = finalSpQuery.rows[0]?.id || '';
 
     // Assign maqra and judge on Final stage, score, finalize, and ratify Final Championship (nextStageId = null)
@@ -2052,6 +2066,177 @@ export async function runSupabaseTests(): Promise<{
         invalidTieBreakAdvance.message.includes('override') &&
         validTieBreakAdvance.success === true,
       `invalidTbRejected: ${!invalidTieBreakAdvance.success} (${invalidTieBreakAdvance.message}), validTbAccepted: ${validTieBreakAdvance.success} (${validTieBreakAdvance.message})`
+    );
+
+    // =========================================================================
+    // 59. P0 MASTER DATA PURE DB: ISOLASI TENANT KOSONG, RELASI CABANG+JENJANG RUBRIK & HAKIM, SERTA PENGHAPUSAN PERMANEN BIDANG RUBRIK
+    // =========================================================================
+    const emptyTenantCleanId = '11111111-1111-4111-8111-111111111199';
+    await pg.exec(`
+      INSERT INTO tenants (id, code, name, event_name, region, edition, period, status)
+      VALUES ('${emptyTenantCleanId}', 'LPTQ-EMPTY', 'LPTQ Tenant Bersih', 'MTQ Baru Kosong', 'Banten', '2026', '2026', 'Aktif')
+      ON CONFLICT (id) DO NOTHING;
+      INSERT INTO tenant_memberships (tenant_id, profile_id, role, status)
+      VALUES ('${emptyTenantCleanId}', '${adminUserId}', 'admin', 'Aktif')
+      ON CONFLICT (tenant_id, profile_id) DO NOTHING;
+    `);
+    const emptyTenantHydration = await supabaseDataService.fetchTenantWorkspaceResult(emptyTenantCleanId);
+    const emptyPayload = emptyTenantHydration.payload;
+
+    // Uji pembuatan Rubrik dengan relasi branchId + levelId dan 2 bidang, lalu hapus 1 bidang via deleteRubricField
+    const customRubricId = generateUuid();
+    const fieldKeepId = generateUuid();
+    const fieldDeleteId = generateUuid();
+    const linkedErrorCatId = generateUuid();
+
+    const saveCustomRubricRes = await supabaseDataService.upsertRubricVersionWithFields(tenantJabarId, {
+      id: customRubricId,
+      tenantId: tenantJabarId,
+      code: 'RUBRIC-DWS-PUTRA-2026',
+      name: 'Rubrik Tilawah Dewasa Putra Terkait Jenjang',
+      branchId: branchTilawahPutraId,
+      branchCode: 'TLW-DWS-PA',
+      branchName: 'Tilawah Dewasa Putra',
+      levelId: levelDewasaId,
+      levelName: 'Ulya (Dewasa)',
+      version: '2026.1',
+      description: 'Rubrik spesifik cabang dan jenjang murni DB',
+      officialSource: 'SK LPTQ 2026',
+      startingScore: 100,
+      status: 'Aktif',
+      createdAt: '2026-11-09',
+      fields: [
+        {
+          id: fieldKeepId,
+          code: 'TJW-26',
+          name: 'Tajwid Utama',
+          maxScore: 60,
+          minScore: 0,
+          maxDeduction: 60,
+          order: 1,
+          status: 'Aktif',
+          description: 'Bidang yang dipertahankan',
+          criteria: []
+        },
+        {
+          id: fieldDeleteId,
+          code: 'FSH-26',
+          name: 'Fashahah Sementara',
+          maxScore: 40,
+          minScore: 0,
+          maxDeduction: 40,
+          order: 2,
+          status: 'Aktif',
+          description: 'Bidang yang akan dihapus permanen',
+          criteria: []
+        }
+      ]
+    });
+
+    // Tautkan kategori kesalahan ke fieldDeleteId untuk menguji detaching saat field dihapus
+    await supabaseDataService.upsertErrorCategory({
+      id: linkedErrorCatId,
+      tenantId: tenantJabarId,
+      fieldId: fieldDeleteId,
+      code: 'ERR-FSH-DEL',
+      name: 'Kesalahan Fashahah Terkait',
+      scope: 'Fashahah Sementara',
+      defaultDeduction: 1,
+      methodType: 'Pengurangan tetap',
+      status: 'Aktif',
+      order: 10
+    });
+
+    // Hapus bidang fieldDeleteId menggunakan deleteRubricField (memanggil RPC delete_rubric_field_cascade)
+    const cascadeDeleteFieldRes = await supabaseDataService.deleteRubricField(customRubricId, fieldDeleteId);
+
+    // Simpan penugasan hakim dengan relasi levelId dan judgeFieldId
+    const linkedJudgeAssignmentId = generateUuid();
+    const saveLinkedAssignmentRes = await supabaseDataService.upsertJudgeAssignment({
+      id: linkedJudgeAssignmentId,
+      tenantId: tenantJabarId,
+      stageId: stagePenyisihanId,
+      stageName: 'Penyisihan',
+      branchId: branchTilawahPutraId,
+      branchName: 'Tilawah Dewasa Putra',
+      levelId: levelDewasaId,
+      levelName: 'Ulya (Dewasa)',
+      judgeId: judge2UserId,
+      judgeName: 'Dr. Hj. Maria Ulfah',
+      judgeFieldId: fieldKeepId,
+      judgeField: 'Tajwid Utama'
+    });
+
+    // Hidrasi ulang untuk memastikan fieldDeleteId TIDAK muncul kembali dan relasi tersimpan utuh
+    const rehydratedAfterDelete = await supabaseDataService.fetchTenantWorkspaceResult(tenantJabarId);
+    const hydratedCustomRubric = rehydratedAfterDelete.payload?.rubricVersions.find(
+      (r) => r.id === customRubricId
+    );
+    const hydratedLinkedErrorCat = rehydratedAfterDelete.payload?.errorCategories.find(
+      (c) => c.id === linkedErrorCatId
+    );
+    const hydratedLinkedAssignment = rehydratedAfterDelete.payload?.judgeAssignments.find(
+      (a) => a.id === linkedJudgeAssignmentId
+    );
+
+    assert(
+      '59. P0 Master Data Pure DB: Tenant baru bersih tanpa item bawaan (0 item), penyimpanan relasi branch_id + level_id pada rubrik & penugasan hakim, serta penghapusan permanen bidang rubrik via RPC tanpa muncul kembali saat re-fetch',
+      emptyTenantHydration.success === true &&
+        emptyPayload?.rubricVersions.length === 0 &&
+        emptyPayload?.errorCategories.length === 0 &&
+        emptyPayload?.competitionRules.length === 0 &&
+        emptyPayload?.stages.length === 0 &&
+        emptyPayload?.jenjangList.length === 0 &&
+        emptyPayload?.cabangList.length === 0 &&
+        emptyPayload?.judgeAssignments.length === 0 &&
+        saveCustomRubricRes.success === true &&
+        cascadeDeleteFieldRes.success === true &&
+        hydratedCustomRubric?.branchId === branchTilawahPutraId &&
+        hydratedCustomRubric?.levelId === levelDewasaId &&
+        hydratedCustomRubric?.fields.length === 1 &&
+        hydratedCustomRubric?.fields[0]?.id === fieldKeepId &&
+        !hydratedCustomRubric?.fields.some((f) => f.id === fieldDeleteId) &&
+        !hydratedLinkedErrorCat?.fieldId &&
+        saveLinkedAssignmentRes.success === true &&
+        hydratedLinkedAssignment?.levelId === levelDewasaId &&
+        hydratedLinkedAssignment?.judgeField === 'Tajwid Utama',
+      `emptyRubrics: ${emptyPayload?.rubricVersions.length}, saveRubric: ${saveCustomRubricRes.success}, delField: ${cascadeDeleteFieldRes.success} (${cascadeDeleteFieldRes.message}), remainingFields: ${hydratedCustomRubric?.fields.length}, detachedErrCatField: ${hydratedLinkedErrorCat?.fieldId}, asgLevel: ${hydratedLinkedAssignment?.levelId}`
+    );
+    // 60. Proteksi Server Scoring Terhadap Kategori Tanpa Aturan Deduksi (deduction_rule_id IS NULL)
+    // Memastikan kategori kesalahan custom tanpa deduction_rule_id dengan count > 0 dihitung presisi tanpa crash "Record v_rule is not assigned yet"
+    const customCatId = '88888888-8888-4888-8888-888888888899';
+    await pg.exec(`
+      INSERT INTO error_categories (id, tenant_id, rubric_field_id, code, name, scope, default_deduction, status)
+      VALUES ('${customCatId}', '${tenantJabarId}', '33333333-3333-4333-8333-333333333401', 'CUSTOM_ERR_1', 'Kesalahan Kustom Tajwid', 'Tajwid', 1.50, 'Aktif')
+      ON CONFLICT (id) DO UPDATE SET deduction_rule_id = NULL, default_deduction = 1.50, status = 'Aktif';
+    `);
+
+    let scoreCalcSuccess = false;
+    let scoreCalcError = '';
+    let calcResult: any = null;
+    try {
+      const qRes = await pg.query<{ res: any }>(`
+        SELECT calculate_assessment_score_sql(
+          '${tenantJabarId}'::uuid,
+          '${rubricSeniBacaId}'::uuid,
+          '{"CUSTOM_ERR_1": 2}'::jsonb
+        ) AS res;
+      `);
+      calcResult = typeof qRes.rows[0]?.res === 'string' ? JSON.parse(qRes.rows[0].res) : qRes.rows[0]?.res;
+      scoreCalcSuccess = true;
+    } catch (err: any) {
+      scoreCalcError = err?.message || String(err);
+    }
+
+    assert(
+      '60. Proteksi Server Scoring Terhadap Kategori Tanpa Aturan Deduksi: Kategori kesalahan dengan deduction_rule_id NULL dan jumlah kejadian > 0 berhasil dihitung di PostgreSQL tanpa error v_rule',
+      scoreCalcSuccess &&
+        calcResult &&
+        Number(calcResult.total_deductions) === 3.00 &&
+        Number(calcResult.final_score) === 97.00 &&
+        Number(calcResult.field_scores?.Tajwid) === 27.00,
+      scoreCalcError ||
+        `totalDeductions: ${calcResult?.total_deductions}, finalScore: ${calcResult?.final_score}, tajwidScore: ${calcResult?.field_scores?.Tajwid}`
     );
   } finally {
     supabaseDataService.setTestDatabaseClient(null);

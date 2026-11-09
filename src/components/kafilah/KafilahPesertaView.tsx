@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Plus,
   Search,
@@ -15,7 +15,8 @@ import {
   FileSpreadsheet,
   Filter,
   ArrowUpDown,
-  UserCheck
+  UserCheck,
+  ChevronDown
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Kafilah, Participant } from '../../types/mtq';
@@ -45,8 +46,8 @@ export const KafilahPesertaView: React.FC = () => {
     importParticipantsBatch
   } = useMtq();
 
-  // Dual View Mode: 'grup' (Per Grup / Kafilah) | 'peserta' (Per Peserta)
-  const [viewMode, setViewMode] = useState<'grup' | 'peserta'>('grup');
+  // Dual View Mode: 'peserta' (Per Peserta - 1st option) | 'grup' (Per Grup / Kafilah - 2nd option)
+  const [viewMode, setViewMode] = useState<'peserta' | 'grup'>('peserta');
 
   // Shared Search & Feedback
   const [searchQuery, setSearchQuery] = useState('');
@@ -73,6 +74,22 @@ export const KafilahPesertaView: React.FC = () => {
   const [importValidation, setImportValidation] = useState<ImportValidationResult<ValidatedParticipantRow> | null>(null);
   const [importFileName, setImportFileName] = useState<string>('');
   const [isImporting, setIsImporting] = useState(false);
+  const [isImportDropdownOpen, setIsImportDropdownOpen] = useState(false);
+  const importDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (importDropdownRef.current && !importDropdownRef.current.contains(e.target as Node)) {
+        setIsImportDropdownOpen(false);
+      }
+    };
+    if (isImportDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isImportDropdownOpen]);
 
   // Active Master Data lists (exclude Nonaktif for new entries)
   const activeCabangList = useMemo(
@@ -422,85 +439,69 @@ export const KafilahPesertaView: React.FC = () => {
     : [];
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
-      {/* Top Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5">
+      {/* 1. Top Header: Page Title on Left + Import & Tambah Buttons on Right */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900">Grup & Peserta MTQ</h1>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">Grup & Peserta MTQ</h1>
           <p className="text-xs text-slate-500 mt-1">
             Kelola grup kontingen kabupaten/kota dan seluruh atribut administrasi peserta secara terpadu
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Segmented View Toggle: Mode Per Grup vs Mode Per Peserta */}
-          <div
-            className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200"
-            role="tablist"
-            aria-label="Mode Tampilan Peserta"
-          >
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Unified Single Import Button with Dropdown */}
+          <div className="relative" ref={importDropdownRef}>
             <button
               type="button"
-              role="tab"
-              aria-selected={viewMode === 'grup'}
-              onClick={() => setViewMode('grup')}
-              data-testid="view-mode-grup-btn"
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                viewMode === 'grup'
-                  ? 'bg-white text-emerald-900 shadow-2xs border border-slate-200/80'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => setIsImportDropdownOpen(!isImportDropdownOpen)}
+              data-testid="import-dropdown-btn"
+              className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl shadow-2xs transition-all cursor-pointer"
             >
-              <Users className="w-3.5 h-3.5" />
-              <span>Mode Per Grup ({kafilahs.length})</span>
+              <Upload className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Import</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'peserta'}
-              onClick={() => setViewMode('peserta')}
-              data-testid="view-mode-peserta-btn"
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                viewMode === 'peserta'
-                  ? 'bg-white text-emerald-900 shadow-2xs border border-slate-200/80'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              <span>Mode Per Peserta ({participants.length})</span>
-            </button>
+
+            {isImportDropdownOpen && (
+              <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in duration-100">
+                <button
+                  type="button"
+                  data-testid="open-participant-import-btn"
+                  onClick={() => {
+                    setIsImportDropdownOpen(false);
+                    setImportValidation(null);
+                    setImportFileName('');
+                    setIsImportModalOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Upload className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>Import Excel (.xlsx)</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="download-participant-template-btn"
+                  onClick={() => {
+                    setIsImportDropdownOpen(false);
+                    downloadParticipantExcelTemplate({ kafilahs, cabangList, jenjangList, stages });
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Download className="w-4 h-4 text-slate-500 shrink-0" />
+                  <span>Download Template</span>
+                </button>
+              </div>
+            )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => downloadParticipantExcelTemplate({ kafilahs, cabangList, jenjangList, stages })}
-            data-testid="download-participant-template-btn"
-            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs px-3 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-700" />
-            <span>Template Excel</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setImportValidation(null);
-              setImportFileName('');
-              setIsImportModalOpen(true);
-            }}
-            data-testid="open-participant-import-btn"
-            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-emerald-800 border border-emerald-200 font-semibold text-xs px-3 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>Import Excel</span>
-          </button>
-
+          {/* Tambah Peserta / Tambah Grup Button */}
           {viewMode === 'peserta' ? (
             <button
               type="button"
               onClick={() => openAddParticipantModal()}
               data-testid="add-participant-global-btn"
-              className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-lg shadow-sm transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
             >
               <UserPlus className="w-4 h-4" />
               <span>Tambah Peserta</span>
@@ -510,7 +511,7 @@ export const KafilahPesertaView: React.FC = () => {
               type="button"
               onClick={() => setIsAddKafilahOpen(true)}
               data-testid="add-kafilah-btn"
-              className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-lg shadow-sm transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Tambah Grup</span>
@@ -545,11 +546,111 @@ export const KafilahPesertaView: React.FC = () => {
         </div>
       )}
 
-      {/* Search & Filter Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+      {/* 2. Middle Container: Dedicated Filter & Search Bar Only */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200/80 shadow-2xs">
+        {viewMode === 'peserta' ? (
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* 1. Search Bar */}
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder="Cari No Urut, ID, nama peserta, nama ayah, instansi..."
+                className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 focus:bg-white text-slate-800 placeholder-slate-400 transition-all"
+              />
+            </div>
+
+            {/* 2. Semua Grup */}
+            <select
+              value={filterKafilahId}
+              onChange={(e) => {
+                setFilterKafilahId(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+            >
+              <option value="ALL">Semua Grup</option>
+              {kafilahs.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </select>
+
+            {/* 3. Semua Cabang */}
+            <select
+              value={filterBranch}
+              onChange={(e) => {
+                setFilterBranch(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+            >
+              <option value="ALL">Semua Cabang</option>
+              {cabangList.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+
+            {/* 4. Semua Jenjang */}
+            <select
+              value={filterLevel}
+              onChange={(e) => {
+                setFilterLevel(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+            >
+              <option value="ALL">Semua Jenjang</option>
+              {jenjangList.map((j) => (
+                <option key={j.id} value={j.name}>
+                  {j.name}
+                </option>
+              ))}
+            </select>
+
+            {/* 5. Semua Babak */}
+            <select
+              value={filterStage}
+              onChange={(e) => {
+                setFilterStage(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+            >
+              <option value="ALL">Semua Babak</option>
+              {stages.map((s) => (
+                <option key={s.id} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+
+            {/* 6. No Urut (Sorting) */}
+            <select
+              value={sortBy}
+              onChange={(e) =>
+                setSortBy(e.target.value as 'adminSeq' | 'lottery' | 'name' | 'kafilah')
+              }
+              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+            >
+              <option value="adminSeq">No Urut</option>
+              <option value="lottery">No Undian</option>
+              <option value="name">Nama Peserta</option>
+              <option value="kafilah">Grup / Kafilah</option>
+            </select>
+          </div>
+        ) : (
+          /* Tampilan Grup: Search Bar Only */
+          <div className="relative w-full">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
@@ -557,147 +658,72 @@ export const KafilahPesertaView: React.FC = () => {
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder={
-                viewMode === 'grup'
-                  ? 'Cari kode, nama grup, atau wilayah...'
-                  : 'Cari No Urut, ID, nama peserta, nama ayah, asal pesantren/kota...'
-              }
-              className="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 text-slate-800 placeholder-slate-400"
+              placeholder="Cari kode grup, nama kabupaten/kota, atau wilayah kontingen..."
+              className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 focus:bg-white text-slate-800 placeholder-slate-400 transition-all"
             />
           </div>
-          <div className="text-xs text-slate-500 font-medium">
-            {viewMode === 'grup'
-              ? `${filteredKafilahs.length} Grup Terdaftar`
-              : `Menampilkan ${filteredParticipants.length} dari ${participants.length} Peserta`}
-          </div>
+        )}
+      </div>
+
+      {/* 3. Switch Tab below Filter Container: 1st = Tampilan Per Peserta, 2nd = Tampilan Grup */}
+      <div className="flex items-center justify-between border-b border-slate-200">
+        <div className="flex items-center gap-6" role="tablist" aria-label="Tab Tampilan">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'peserta'}
+            onClick={() => setViewMode('peserta')}
+            data-testid="view-mode-peserta-btn"
+            className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+              viewMode === 'peserta'
+                ? 'border-emerald-800 text-emerald-800'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>Tampilan Per Peserta</span>
+            <span
+              className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
+                viewMode === 'peserta'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {participants.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'grup'}
+            onClick={() => setViewMode('grup')}
+            data-testid="view-mode-grup-btn"
+            className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+              viewMode === 'grup'
+                ? 'border-emerald-800 text-emerald-800'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Tampilan Grup</span>
+            <span
+              className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
+                viewMode === 'grup'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-slate-100 text-slate-700'
+              }`}
+            >
+              {kafilahs.length}
+            </span>
+          </button>
         </div>
 
-        {viewMode === 'peserta' && (
-          <div className="pt-3 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                <Filter className="w-3 h-3 inline mr-1" />
-                Grup / Kafilah
-              </label>
-              <select
-                value={filterKafilahId}
-                onChange={(e) => {
-                  setFilterKafilahId(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50/60"
-              >
-                <option value="ALL">Semua Grup</option>
-                {kafilahs.map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Cabang Lomba
-              </label>
-              <select
-                value={filterBranch}
-                onChange={(e) => {
-                  setFilterBranch(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50/60"
-              >
-                <option value="ALL">Semua Cabang</option>
-                {cabangList.map((c) => (
-                  <option key={c.id} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Jenjang Lomba
-              </label>
-              <select
-                value={filterLevel}
-                onChange={(e) => {
-                  setFilterLevel(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50/60"
-              >
-                <option value="ALL">Semua Jenjang</option>
-                {jenjangList.map((j) => (
-                  <option key={j.id} value={j.name}>
-                    {j.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Babak Aktif
-              </label>
-              <select
-                value={filterStage}
-                onChange={(e) => {
-                  setFilterStage(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50/60"
-              >
-                <option value="ALL">Semua Babak</option>
-                {stages.map((s) => (
-                  <option key={s.id} value={s.name}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Status Peserta
-              </label>
-              <select
-                value={filterStatus}
-                onChange={(e) => {
-                  setFilterStatus(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50/60"
-              >
-                <option value="ALL">Semua Status</option>
-                <option value="Menunggu">Menunggu</option>
-                <option value="Berlangsung">Berlangsung</option>
-                <option value="Lolos">Lolos</option>
-                <option value="Gugur">Gugur</option>
-                <option value="Final">Final</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                <ArrowUpDown className="w-3 h-3 inline mr-1" />
-                Urutkan
-              </label>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as 'adminSeq' | 'lottery' | 'name' | 'kafilah')}
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50/60"
-              >
-                <option value="adminSeq">No Urut Administrasi</option>
-                <option value="lottery">Nomor Undian Tampil</option>
-                <option value="name">Nama Peserta (A-Z)</option>
-                <option value="kafilah">Grup / Kafilah</option>
-              </select>
-            </div>
-          </div>
-        )}
+        <span className="text-xs text-slate-400 font-normal hidden sm:inline pb-2">
+          {viewMode === 'peserta'
+            ? `Menampilkan ${filteredParticipants.length} dari ${participants.length} Peserta`
+            : `${filteredKafilahs.length} Grup Terdata`}
+        </span>
       </div>
 
       {/* MODE 1: Main Grup Table */}
@@ -792,114 +818,57 @@ export const KafilahPesertaView: React.FC = () => {
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-600 font-semibold">
-                  <th className="py-3.5 px-4">No Urut / ID</th>
-                  <th className="py-3.5 px-4">Undian</th>
-                  <th className="py-3.5 px-4">Biodata Peserta</th>
-                  <th className="py-3.5 px-4">Asal & Instansi</th>
+                  <th className="py-3.5 px-4 whitespace-nowrap">No Urut</th>
+                  <th className="py-3.5 px-4">Nama Peserta</th>
+                  <th className="py-3.5 px-4">Nama Ayah</th>
+                  <th className="py-3.5 px-4">Instansi Asal</th>
                   <th className="py-3.5 px-4">Grup (Kafilah)</th>
-                  <th className="py-3.5 px-4">Cabang · Jenjang · Babak</th>
-                  <th className="py-3.5 px-4">Maqra Ditugaskan</th>
-                  <th className="py-3.5 px-4 text-center">Status</th>
+                  <th className="py-3.5 px-4">Cabang</th>
+                  <th className="py-3.5 px-4">Jenjang</th>
                   <th className="py-3.5 px-4 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {paginatedParticipants.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-10 text-center text-slate-400">
+                    <td colSpan={8} className="py-10 text-center text-slate-400">
                       Tidak ada data peserta yang sesuai dengan filter pencarian.
                     </td>
                   </tr>
                 ) : (
                   paginatedParticipants.map((p, idx) => (
                     <tr key={`${p.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 px-4 font-mono">
-                        <div className="font-bold text-slate-900">
-                          {p.adminSequenceNumber || '-'}
-                        </div>
-                        <div className="text-[11px] font-semibold text-emerald-700">
-                          {p.participantId}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 font-mono font-extrabold text-slate-900">
-                        {p.lotteryNumber || '-'}
+                      <td className="py-3 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
+                        {p.adminSequenceNumber || p.lotteryNumber || p.participantId || '-'}
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-900">{p.name}</div>
-                        <div className="text-[11px] text-slate-500">
-                          {p.gender} {p.fatherName ? `· Bin/Binti ${p.fatherName}` : ''}
-                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono">{p.participantId}</div>
                       </td>
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-slate-800">
-                          {p.originInstitution || '-'}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {[p.originCity, p.originRegion].filter(Boolean).join(', ') || '-'}
-                        </div>
+                      <td className="py-3 px-4 text-slate-700 font-medium">
+                        {p.fatherName || '-'}
+                      </td>
+                      <td className="py-3 px-4 text-slate-700">
+                        <p className="font-medium text-slate-800">{p.originInstitution || '-'}</p>
+                        {(p.originCity || p.originRegion) && (
+                          <p className="text-[11px] text-slate-400">
+                            {[p.originCity, p.originRegion].filter(Boolean).join(', ')}
+                          </p>
+                        )}
                       </td>
                       <td className="py-3 px-4 font-semibold text-slate-800">{p.kafilahName}</td>
-                      <td className="py-3 px-4">
-                        <div className="font-semibold text-slate-900">{p.branchName}</div>
-                        <div className="flex flex-wrap items-center gap-1 mt-0.5">
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
-                            {p.levelName || 'Umum'}
-                          </span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 font-mono font-semibold">
-                            {p.stageName}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="text-[11px] text-slate-700 font-medium line-clamp-2">
-                          {p.assignedMaqra || 'Belum Ditetapkan'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${
-                            p.status === 'Final' || p.status === 'Lolos'
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : p.status === 'Berlangsung'
-                              ? 'bg-amber-50 text-amber-700'
-                              : p.status === 'Gugur'
-                              ? 'bg-rose-50 text-rose-700'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
+                      <td className="py-3 px-4 font-medium text-slate-800">{p.branchName}</td>
+                      <td className="py-3 px-4 font-medium text-slate-700">{p.levelName || 'Umum'}</td>
+                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => setDetailParticipant(p)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 font-bold text-xs transition-colors cursor-pointer shadow-2xs"
+                          title="Lihat detail lengkap peserta"
                         >
-                          {p.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => setDetailParticipant(p)}
-                            className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-emerald-800 hover:bg-slate-50 transition-colors cursor-pointer"
-                            title="Lihat detail lengkap peserta"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEditParticipant(p)}
-                            className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-emerald-800 hover:bg-slate-50 transition-colors cursor-pointer"
-                            title="Edit data peserta"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              const res = deleteParticipant(p.id);
-                              setFeedbackMessage({
-                                type: res.success ? 'success' : 'error',
-                                text: res.message
-                              });
-                            }}
-                            className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                            title="Hapus peserta"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                          <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Lihat Data</span>
+                        </button>
                       </td>
                     </tr>
                   ))

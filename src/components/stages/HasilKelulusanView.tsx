@@ -73,8 +73,28 @@ export const HasilKelulusanView: React.FC = () => {
     return Array.from(map.values()).sort((a, b) => a.order - b.order);
   }, [tenantStages, stageParticipations, currentTenant.id]);
 
-  // Active stage selector
-  const [selectedStageName, setSelectedStageName] = useState<string>('Penyisihan');
+  // Active stage selector - otomatis memilih babak yang sedang berjalan (status 'Aktif'),
+  // atau babak paling terakhir apabila semua babak telah selesai
+  const defaultRunningStage = useMemo(() => {
+    if (uniqueStages.length === 0) return undefined;
+    const activeStage = uniqueStages.find((s) => s.status === 'Aktif' && !s.isFinalized);
+    if (activeStage) return activeStage;
+    const anyActive = uniqueStages.find((s) => s.status === 'Aktif');
+    if (anyActive) return anyActive;
+    const allFinished = uniqueStages.every((s) => s.status === 'Selesai' || s.isFinalized);
+    if (allFinished) return uniqueStages[uniqueStages.length - 1];
+    return uniqueStages[0];
+  }, [uniqueStages]);
+
+  const [selectedStageName, setSelectedStageName] = useState<string>(
+    () => defaultRunningStage?.name || 'Penyisihan'
+  );
+
+  useEffect(() => {
+    if (defaultRunningStage?.name) {
+      setSelectedStageName(defaultRunningStage.name);
+    }
+  }, [defaultRunningStage?.name]);
 
   // Selected branch filter for multi-branch isolation
   const [selectedBranch, setSelectedBranch] = useState<string>('Semua Cabang');

@@ -1,6 +1,6 @@
 {
-  "summary":  "Rencana implementasi menyeluruh untuk menuntaskan seluruh temuan Audit Lanjutan MTQ Management System (P0-01 s.d. P0-04, P1-01 s.d. P1-07, Reliabilitas Penyimpanan & Outbox, serta Pengujian E2E Multi-Cabang) sesuai pilihan konfirmasi pengguna.",
-  "updatedAt":  "2026-11-08T23:11:32.616352152Z",
+  "summary":  "Rencana implementasi perbaikan lanjutan untuk tata letak Dashboard, TopHeader non-bold, penyusunan ulang halaman Grup & Peserta, penyederhanaan Bank Soal & Audit Undian, penyeragaman tipografi Master Data (Jenjang & Cabang), otomatisasi filter babak terakhir di Hasil & Kelulusan, penyesuaian ukuran tabel & warna kartu di Log Aktivitas, pembersihan footer Sidebar, serta penyederhanaan empty state Notifikasi.",
+  "updatedAt":  "2026-11-09T13:16:08.310143708Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

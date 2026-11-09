@@ -274,8 +274,11 @@ export interface RubricVersion {
   tenantId: string;
   code: string; // e.g. "RUBRIC-SENI-BACA-2025"
   name: string; // e.g. "Rubrik Resmi Seni Baca Al-Qur'an Pedoman 2025"
+  branchId?: string;
   branchCode: string;
   branchName: string;
+  levelId?: string;
+  levelName?: string;
   version: string; // e.g. "2025.1"
   description: string;
   officialSource?: string; // e.g. "Buku Pedoman MTQ 2025 LPTQ hal. 42-45"
@@ -311,7 +314,10 @@ export interface JudgeAssignment {
   stageName: string;
   branchName: string;
   branchId?: string;
+  levelId?: string;
+  levelName?: string;
   judgeField: string;
+  judgeFieldId?: string;
   rubricFieldId?: string;
   rubricFieldName?: string;
 }

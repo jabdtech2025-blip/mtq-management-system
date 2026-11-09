@@ -50,6 +50,7 @@ export const PenilaianDualPanelView: React.FC = () => {
     syncStatus,
     lastSyncTime,
     toggleSidebar,
+    judgeAssignments,
     getActiveRubricForBranch
   } = useMtq();
 
@@ -57,7 +58,12 @@ export const PenilaianDualPanelView: React.FC = () => {
   const currentParticipant =
     participants.find((p) => p.id === selectedParticipantId) || participants[0] || null;
   const activeRubric = currentParticipant
-    ? getActiveRubricForBranch(currentParticipant.branchName, currentParticipant.branchId)
+    ? getActiveRubricForBranch(
+        currentParticipant.branchName,
+        currentParticipant.branchId,
+        currentParticipant.levelId,
+        currentParticipant.levelName
+      )
     : null;
 
   const activeStageName = currentParticipant?.stageName || 'Penyisihan';
@@ -363,11 +369,60 @@ export const PenilaianDualPanelView: React.FC = () => {
   const [isFlawlessConfirmed, setIsFlawlessConfirmed] = useState<boolean>(false);
   const [isFinalizing, setIsFinalizing] = useState<boolean>(false);
 
-  // Error counting values from active assessment (P1-03: filter only active categories & use calculateAssessmentScore)
-  const activeErrorCategories = useMemo(
-    () => errorCategories.filter((cat) => cat.status !== 'Nonaktif'),
-    [errorCategories]
-  );
+  // Active judge assignment & field resolution
+  const currentJudgeAssignment = useMemo(() => {
+    if (!currentParticipant) return null;
+    return judgeAssignments.find(
+      (ja) =>
+        ja.judgeId === activeJudgeId &&
+        ja.stageName === activeStageName &&
+        (!ja.branchName || ja.branchName === 'Semua Cabang' || ja.branchName === currentParticipant.branchName)
+    );
+  }, [judgeAssignments, activeJudgeId, activeStageName, currentParticipant]);
+
+  const assignedFieldName =
+    currentJudgeAssignment?.judgeField ||
+    inspectedJudge?.judgeField ||
+    (currentUser.role === 'judge' ? currentUser.judgeField : '');
+  const assignedFieldId = currentJudgeAssignment?.judgeFieldId;
+
+  // Error counting values from active assessment
+  // Restrict judges to accessing and scoring ONLY error categories for their assigned field
+  const activeErrorCategories = useMemo(() => {
+    const activeOnly = errorCategories.filter((cat) => cat.status !== 'Nonaktif');
+
+    // If user is a judge or admin monitoring a specific judge with an assigned field
+    if (assignedFieldId || assignedFieldName) {
+      const lowerAssigned = (assignedFieldName || '').toLowerCase();
+      // Match field in rubric if available
+      const matchingRubricField = activeRubric?.fields?.find(
+        (f) =>
+          (assignedFieldId && f.id === assignedFieldId) ||
+          f.name.toLowerCase() === lowerAssigned ||
+          f.code.toLowerCase() === lowerAssigned ||
+          lowerAssigned.includes(f.name.toLowerCase()) ||
+          lowerAssigned.includes(f.code.toLowerCase())
+      );
+
+      const targetFieldId = assignedFieldId || matchingRubricField?.id;
+      const targetFieldName = (matchingRubricField?.name || assignedFieldName || '').toLowerCase();
+
+      const filtered = activeOnly.filter((cat) => {
+        if (targetFieldId && cat.fieldId === targetFieldId) return true;
+        const catScope = (cat.scope || '').toLowerCase();
+        const catName = (cat.name || '').toLowerCase();
+        if (targetFieldName && (catScope.includes(targetFieldName) || targetFieldName.includes(catScope))) return true;
+        if (targetFieldName && (catName.includes(targetFieldName) || targetFieldName.includes(catName))) return true;
+        return false;
+      });
+
+      // If specific categories exist for this field, return only those
+      if (filtered.length > 0) return filtered;
+    }
+
+    // Fallback: If no field is assigned or user is general admin, return all active categories
+    return activeOnly;
+  }, [errorCategories, assignedFieldId, assignedFieldName, activeRubric]);
   const errorCounts = currentAssessment?.errorCounts || {};
   const startingScore = activeRubric?.startingScore ?? 100.0;
   const liveScoreCalc = useMemo(() => {
@@ -920,87 +975,98 @@ export const PenilaianDualPanelView: React.FC = () => {
               </div>
 
               <div className="space-y-2.5">
-                {activeErrorCategories.map((cat) => {
-                  const count = errorCounts[cat.id] || 0;
-                  const exactDeduction =
-                    currentAssessment?.deductions?.[cat.id] ??
-                    liveScoreCalc?.deductions?.[cat.id] ??
-                    count * cat.defaultDeduction;
-                  const pts = exactDeduction.toFixed(2);
+                {activeErrorCategories.length === 0 ? (
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center text-xs text-slate-500">
+                    <p className="font-semibold text-slate-700">Belum Ada Kategori Kesalahan Terhubung</p>
+                    <p className="text-[11px] mt-1 text-slate-500">
+                      {assignedFieldName
+                        ? `Tidak ada kategori kesalahan untuk bidang "${assignedFieldName}". Hubungkan kategori kesalahan ke bidang ini di Master Data.`
+                        : 'Belum ada kategori kesalahan yang dikonfigurasi pada database.'}
+                    </p>
+                  </div>
+                ) : (
+                  activeErrorCategories.map((cat) => {
+                    const count = errorCounts[cat.id] || 0;
+                    const exactDeduction =
+                      currentAssessment?.deductions?.[cat.id] ??
+                      liveScoreCalc?.deductions?.[cat.id] ??
+                      count * cat.defaultDeduction;
+                    const pts = exactDeduction.toFixed(2);
 
-                  return (
-                    <div
-                      key={cat.id}
-                      className="p-3 bg-slate-50 border border-slate-200/90 rounded-xl flex items-center justify-between gap-2.5 hover:border-slate-300 transition-colors"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline flex-wrap gap-x-1.5 gap-y-0.5">
-                          <span className="text-xs font-bold text-slate-900 break-words leading-tight">
-                            {cat.name}
-                          </span>
-                          <span className="text-[10px] font-mono font-medium text-slate-500 tabular-nums">
-                            (-{cat.defaultDeduction.toFixed(2)}/err)
-                          </span>
+                    return (
+                      <div
+                        key={cat.id}
+                        className="p-3 bg-slate-50 border border-slate-200/90 rounded-xl flex items-center justify-between gap-2.5 hover:border-slate-300 transition-colors"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline flex-wrap gap-x-1.5 gap-y-0.5">
+                            <span className="text-xs font-bold text-slate-900 break-words leading-tight">
+                              {cat.name}
+                            </span>
+                            <span className="text-[10px] font-mono font-medium text-slate-500 tabular-nums">
+                              (-{cat.defaultDeduction.toFixed(2)}/err)
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 leading-normal line-clamp-1 mt-0.5" title={cat.scope}>
+                            {cat.scope}
+                          </p>
                         </div>
-                        <p className="text-[10px] text-slate-500 leading-normal line-clamp-1 mt-0.5" title={cat.scope}>
-                          {cat.scope}
-                        </p>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right w-11">
+                            <span className="font-mono font-bold text-sm text-slate-900 block tabular-nums">
+                              {count}
+                            </span>
+                            <span className="text-[10px] font-mono font-semibold text-rose-600 block tabular-nums">
+                              -{pts}
+                            </span>
+                          </div>
+
+                          {/* Plus / Minus Buttons (Disabled if admin mode or finalized) */}
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() =>
+                                updateErrorCount(
+                                  currentParticipant.id,
+                                  activeJudgeId,
+                                  cat.id,
+                                  -1,
+                                  activeStageName,
+                                  activeQuestionId
+                                )
+                              }
+                              disabled={count <= 0 || isFinalized || isAdminMode || participantAssignedQuestions.length === 0}
+                              className="w-7 h-7 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
+                              title="Kurangi 1 Kesalahan"
+                              aria-label={`Kurangi kesalahan ${cat.name}`}
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={() =>
+                                updateErrorCount(
+                                  currentParticipant.id,
+                                  activeJudgeId,
+                                  cat.id,
+                                  1,
+                                  activeStageName,
+                                  activeQuestionId
+                                )
+                              }
+                              disabled={isFinalized || isAdminMode || participantAssignedQuestions.length === 0}
+                              className="w-7 h-7 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
+                              title="Tambah 1 Kesalahan"
+                              aria-label={`Tambah kesalahan ${cat.name}`}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="text-right w-11">
-                          <span className="font-mono font-bold text-sm text-slate-900 block tabular-nums">
-                            {count}
-                          </span>
-                          <span className="text-[10px] font-mono font-semibold text-rose-600 block tabular-nums">
-                            -{pts}
-                          </span>
-                        </div>
-
-                        {/* Plus / Minus Buttons (Disabled if admin mode or finalized) */}
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() =>
-                              updateErrorCount(
-                                currentParticipant.id,
-                                activeJudgeId,
-                                cat.id,
-                                -1,
-                                activeStageName,
-                                activeQuestionId
-                              )
-                            }
-                            disabled={count <= 0 || isFinalized || isAdminMode || participantAssignedQuestions.length === 0}
-                            className="w-7 h-7 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
-                            title="Kurangi 1 Kesalahan"
-                            aria-label={`Kurangi kesalahan ${cat.name}`}
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              updateErrorCount(
-                                currentParticipant.id,
-                                activeJudgeId,
-                                cat.id,
-                                1,
-                                activeStageName,
-                                activeQuestionId
-                              )
-                            }
-                            disabled={isFinalized || isAdminMode || participantAssignedQuestions.length === 0}
-                            className="w-7 h-7 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
-                            title="Tambah 1 Kesalahan"
-                            aria-label={`Tambah kesalahan ${cat.name}`}
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
@@ -1076,7 +1142,12 @@ export const PenilaianDualPanelView: React.FC = () => {
 
             {finalizeError && (
               <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold mb-3">
-                {finalizeError}
+                <p>{finalizeError}</p>
+                {finalizeError.toLowerCase().includes('v_rule') && (
+                  <p className="mt-1 text-[11px] font-normal text-rose-700">
+                    💡 <strong>Solusi:</strong> Fungsi database di Supabase perlu diperbarui dengan migrasi terbaru. Buka <strong>SQL Editor</strong> di dasbor Supabase Anda, jalankan skrip migrasi perbaikan <code className="font-mono bg-rose-100 px-1 py-0.5 rounded">supabase/migrations/20261111_fix_v_rule_unassigned.sql</code>, lalu coba simpan kembali.
+                  </p>
+                )}
               </div>
             )}
 

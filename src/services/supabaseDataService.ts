@@ -794,7 +794,7 @@ export const supabaseDataService = {
       client.from('stage_participations').select('*').eq('tenant_id', tenantUuid),
       client.from('assigned_maqras').select('*').eq('tenant_id', tenantUuid),
       client.from('error_categories').select('*').eq('tenant_id', tenantUuid).order('sort_order', { ascending: true }),
-      client.from('rubric_versions').select('*').in('tenant_id', [tenantUuid, SYSTEM_TENANT_UUID]),
+      client.from('rubric_versions').select('*').eq('tenant_id', tenantUuid),
       client.from('rubric_fields').select('*').order('field_order', { ascending: true }),
       client.from('rubric_criteria').select('*').order('sort_order', { ascending: true }),
       client.from('deduction_rules').select('*'),
@@ -1329,8 +1329,10 @@ export const supabaseDataService = {
         tenantId: rawTenant === SYSTEM_TENANT_UUID ? 'system' : rawTenant,
         code: codeStr,
         name: String(rv.name || ''),
+        branchId: rv.branch_id ? String(rv.branch_id) : undefined,
         branchCode: String(rv.branch_code || ''),
         branchName: String(rv.branch_name || ''),
+        levelId: rv.level_id ? String(rv.level_id) : undefined,
         version: String(rv.version || '2025.1'),
         description: String(rv.description || ''),
         officialSource: sourceStr,
@@ -1384,7 +1386,9 @@ export const supabaseDataService = {
             ? stgInfo.branchName
             : 'Semua Cabang'),
         judgeField: jField,
-        rubricFieldId: ja.rubric_field_id ? String(ja.rubric_field_id) : undefined
+        rubricFieldId: ja.rubric_field_id ? String(ja.rubric_field_id) : undefined,
+        levelId: ja.level_id ? String(ja.level_id) : undefined,
+        levelName: ja.level_name ? String(ja.level_name) : undefined
       };
     });
 
@@ -2589,6 +2593,8 @@ export const supabaseDataService = {
       tenant_id: assignment.tenantId,
       stage_id: assignment.stageId,
       branch_id: assignment.branchId && isValidUuid(assignment.branchId) ? assignment.branchId : null,
+      level_id: assignment.levelId && isValidUuid(assignment.levelId) ? assignment.levelId : null,
+      level_name: assignment.levelName || null,
       rubric_field_id: assignment.rubricFieldId && isValidUuid(assignment.rubricFieldId) ? assignment.rubricFieldId : null,
       judge_field: assignment.judgeField,
       judge_profile_id: assignment.judgeId,
@@ -3307,8 +3313,10 @@ export const supabaseDataService = {
       tenant_id: effectiveTenantId,
       code: rubric.code,
       name: rubric.name,
+      branch_id: rubric.branchId && isValidUuid(rubric.branchId) ? rubric.branchId : null,
       branch_code: rubric.branchCode || null,
       branch_name: rubric.branchName || null,
+      level_id: rubric.levelId && isValidUuid(rubric.levelId) ? rubric.levelId : null,
       version: rubric.version,
       description: rubric.description || null,
       official_source: rubric.officialSource || null,
@@ -3337,18 +3345,63 @@ export const supabaseDataService = {
       if (rfError) return { success: false, mode: 'supabase_live', message: rfError.message };
     }
 
-    // Hapus bidang yang telah dihapus dari daftar rubric.fields
-    if (activeFieldIds.length > 0) {
-      await client
+    // Hapus bidang yang telah dihapus dari daftar rubric.fields secara kaskade aman
+    try {
+      const { data: existingFields } = await client
         .from('rubric_fields')
-        .delete()
-        .eq('rubric_version_id', rubric.id)
-        .not('id', 'in', `(${activeFieldIds.join(',')})`);
-    } else {
-      await client.from('rubric_fields').delete().eq('rubric_version_id', rubric.id);
+        .select('id')
+        .eq('rubric_version_id', rubric.id);
+      const activeSet = new Set(activeFieldIds);
+      const removeIds = (existingFields || [])
+        .map((f: { id: string }) => f.id)
+        .filter((id: string) => !activeSet.has(id));
+      if (removeIds.length > 0) {
+        await client.from('error_categories').update({ rubric_field_id: null }).in('rubric_field_id', removeIds);
+        await client.from('judge_assignments').update({ rubric_field_id: null }).in('rubric_field_id', removeIds);
+        const { data: critRows } = await client.from('rubric_criteria').select('id').in('rubric_field_id', removeIds);
+        if (critRows && critRows.length > 0) {
+          const critIds = critRows.map((c: { id: string }) => c.id);
+          await client.from('deduction_rules').delete().in('criterion_id', critIds);
+          await client.from('rubric_criteria').delete().in('rubric_field_id', removeIds);
+        }
+        await client.from('rubric_fields').delete().in('id', removeIds);
+      }
+    } catch (cleanErr) {
+      console.warn('[upsertRubricVersionWithFields] Cleanup warning:', cleanErr);
     }
 
     return { success: true, mode: 'supabase_live', message: 'Versi rubrik & struktur bidang tersimpan di Supabase.' };
+  },
+
+  async deleteRubricField(rubricVersionId: string, fieldId: string): Promise<RpcServiceResult> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
+    }
+    try {
+      const { data: rpcData, error: rpcError } = await client.rpc('delete_rubric_field_cascade', {
+        p_rubric_version_id: rubricVersionId,
+        p_field_id: fieldId
+      });
+      if (!rpcError && rpcData) {
+        const res = rpcData as { success: boolean; message: string };
+        return { success: res.success, mode: 'supabase_live', message: res.message };
+      }
+      // Direct cascade cleanup if RPC not yet deployed
+      await client.from('error_categories').update({ rubric_field_id: null }).eq('rubric_field_id', fieldId);
+      await client.from('judge_assignments').update({ rubric_field_id: null }).eq('rubric_field_id', fieldId);
+      const { data: criteria } = await client.from('rubric_criteria').select('id').eq('rubric_field_id', fieldId);
+      if (criteria && criteria.length > 0) {
+        const critIds = criteria.map((c: { id: string }) => c.id);
+        await client.from('deduction_rules').delete().in('criterion_id', critIds);
+        await client.from('rubric_criteria').delete().eq('rubric_field_id', fieldId);
+      }
+      const { error: delError } = await client.from('rubric_fields').delete().eq('id', fieldId);
+      if (delError) return { success: false, mode: 'supabase_live', message: delError.message };
+      return { success: true, mode: 'supabase_live', message: 'Bidang berhasil dihapus dari database.' };
+    } catch (err) {
+      return { success: false, mode: 'supabase_live', message: err instanceof Error ? err.message : 'Gagal menghapus bidang' };
+    }
   },
 
   async deleteRubricVersion(tenantId: string, rubricId: string): Promise<RpcServiceResult> {

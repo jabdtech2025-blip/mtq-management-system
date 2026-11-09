@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Plus,
   Search,
@@ -14,7 +14,8 @@ import {
   Download,
   Upload,
   FileSpreadsheet,
-  History
+  History,
+  ChevronDown
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Question } from '../../types/mtq';
@@ -101,6 +102,22 @@ export const BankSoalView: React.FC = () => {
   const [importValidation, setImportValidation] = useState<ImportValidationResult<ValidatedQuestionRow> | null>(null);
   const [importFileName, setImportFileName] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [isImportDropdownOpen, setIsImportDropdownOpen] = useState(false);
+  const importDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (importDropdownRef.current && !importDropdownRef.current.contains(e.target as Node)) {
+        setIsImportDropdownOpen(false);
+      }
+    };
+    if (isImportDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isImportDropdownOpen]);
 
   // Add / Edit Form Modal (Separated Cabang, Jenjang, Babak)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -675,46 +692,67 @@ export const BankSoalView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => downloadQuestionExcelTemplate({ cabangList, jenjangList, stages })}
-            data-testid="download-question-template-btn"
-            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs px-3 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-700" />
-            <span>Template Excel</span>
-          </button>
+          {/* Unified Single Import Dropdown Button (Item 11) */}
+          <div className="relative" ref={importDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsImportDropdownOpen(!isImportDropdownOpen)}
+              data-testid="import-dropdown-btn"
+              className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl shadow-2xs transition-all cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Import</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setImportValidation(null);
-              setImportFileName('');
-              setIsImportModalOpen(true);
-            }}
-            data-testid="open-question-import-btn"
-            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-emerald-200 text-emerald-800 font-semibold text-xs px-3 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>Import Excel</span>
-          </button>
+            {isImportDropdownOpen && (
+              <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in duration-100">
+                <button
+                  type="button"
+                  data-testid="open-question-import-btn"
+                  onClick={() => {
+                    setIsImportDropdownOpen(false);
+                    setImportValidation(null);
+                    setImportFileName('');
+                    setIsImportModalOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Upload className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>Import Excel (.xlsx)</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="download-question-template-btn"
+                  onClick={() => {
+                    setIsImportDropdownOpen(false);
+                    downloadQuestionExcelTemplate({ cabangList, jenjangList, stages });
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Download className="w-4 h-4 text-slate-500 shrink-0" />
+                  <span>Download Template</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           <button
             onClick={handleOpenLotteryWorkflow}
             data-testid="open-lottery-modal-btn"
-            className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-semibold text-xs px-3.5 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs px-3.5 py-2 rounded-xl shadow-2xs transition-all cursor-pointer"
           >
-            <Dice5 className="w-4 h-4 text-emerald-700" />
-            <span>Undian Penentuan Soal</span>
+            <Dice5 className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Undian</span>
           </button>
 
           <button
             onClick={handleOpenAdd}
             data-testid="add-question-btn"
-            className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-lg shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Tambah Soal / Maqra</span>
+            <span>Tambah</span>
           </button>
         </div>
       </div>
@@ -745,11 +783,70 @@ export const BankSoalView: React.FC = () => {
         </div>
       )}
 
-      {/* Tabs Navigation */}
+      {/* Filter and Search Bar */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200/80 shadow-2xs flex flex-wrap items-center gap-2.5">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={
+              activeTab === 'daftar_soal'
+                ? 'Cari kode soal, nama surah, atau judul maqra...'
+                : activeTab === 'penetapan_soal'
+                ? 'Cari nama santri, nomor undian, atau kode maqra...'
+                : 'Cari riwayat undian, babak, cabang, atau nama peserta...'
+            }
+            className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 focus:bg-white text-slate-800 placeholder-slate-400 transition-all"
+          />
+        </div>
+
+        <select
+          value={selectedBranch}
+          onChange={(e) => setSelectedBranch(e.target.value)}
+          className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
+        >
+          <option value="Semua Cabang">Semua Cabang</option>
+          {cabangList.map((c) => (
+            <option key={c.id} value={c.name}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedLevel}
+          onChange={(e) => setSelectedLevel(e.target.value)}
+          className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
+        >
+          <option value="Semua Jenjang">Semua Jenjang</option>
+          {jenjangList.map((j) => (
+            <option key={j.id} value={j.name}>
+              {j.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedStage}
+          onChange={(e) => setSelectedStage(e.target.value)}
+          className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
+        >
+          <option value="Semua Babak">Semua Babak</option>
+          {stages.map((stg) => (
+            <option key={stg.id} value={stg.name}>
+              Babak {stg.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Tabs Navigation (below filter bar) */}
       <div className="flex border-b border-slate-200 gap-6">
         <button
           onClick={() => setActiveTab('daftar_soal')}
-          className={`pb-3 text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'daftar_soal'
               ? 'border-emerald-800 text-emerald-800'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -768,7 +865,7 @@ export const BankSoalView: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('penetapan_soal')}
-          className={`pb-3 text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'penetapan_soal'
               ? 'border-emerald-800 text-emerald-800'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -788,7 +885,7 @@ export const BankSoalView: React.FC = () => {
         <button
           onClick={() => setActiveTab('riwayat_undian')}
           data-testid="tab-riwayat-undian"
-          className={`pb-3 text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'riwayat_undian'
               ? 'border-emerald-800 text-emerald-800'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -806,65 +903,6 @@ export const BankSoalView: React.FC = () => {
             {lotteryDrawLogs.length}
           </span>
         </button>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={
-              activeTab === 'daftar_soal'
-                ? 'Cari kode soal, nama surah, atau judul maqra...'
-                : 'Cari nama santri, nomor undian, atau kode maqra...'
-            }
-            className="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 text-slate-800 placeholder-slate-400 bg-white"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          <select
-            value={selectedBranch}
-            onChange={(e) => setSelectedBranch(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
-          >
-            <option value="Semua Cabang">Semua Cabang</option>
-            {cabangList.map((c) => (
-              <option key={c.id} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={selectedLevel}
-            onChange={(e) => setSelectedLevel(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
-          >
-            <option value="Semua Jenjang">Semua Jenjang</option>
-            {jenjangList.map((j) => (
-              <option key={j.id} value={j.name}>
-                {j.name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={selectedStage}
-            onChange={(e) => setSelectedStage(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
-          >
-            <option value="Semua Babak">Semua Babak</option>
-            {stages.map((stg) => (
-              <option key={stg.id} value={stg.name}>
-                Babak {stg.name}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
 
       {/* Tab 1: Questions Table */}
@@ -1087,72 +1125,113 @@ export const BankSoalView: React.FC = () => {
 
       {/* Tab 3: Riwayat & Audit Undian Maqra */}
       {activeTab === 'riwayat_undian' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
+        <div className="space-y-4">
           {lotteryDrawLogs.length === 0 ? (
-            <div className="p-10 text-center text-slate-400 text-xs">
-              Belum ada riwayat eksekusi undian maqra pada tenant ini.
+            <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs p-10 text-center text-slate-400 text-xs">
+              Belum ada riwayat eksekusi undian maqra pada penyelenggaraan ini.
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
-              {lotteryDrawLogs.map((log) => (
-                <div key={log.id} className="p-5 space-y-3 hover:bg-slate-50/40">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 font-mono text-xs font-extrabold">
+            lotteryDrawLogs
+              .filter((log) => {
+                if (selectedBranch !== 'Semua Cabang' && log.branchName && log.branchName !== selectedBranch) {
+                  return false;
+                }
+                if (selectedLevel !== 'Semua Jenjang' && log.levelName && log.levelName !== selectedLevel) {
+                  return false;
+                }
+                if (selectedStage !== 'Semua Babak' && log.stageName !== selectedStage) {
+                  return false;
+                }
+                if (!searchQuery.trim()) return true;
+                const q = searchQuery.toLowerCase();
+                return (
+                  log.stageName.toLowerCase().includes(q) ||
+                  (log.branchName || '').toLowerCase().includes(q) ||
+                  (log.levelName || '').toLowerCase().includes(q) ||
+                  log.actorName.toLowerCase().includes(q) ||
+                  log.drawResults.some(
+                    (r) =>
+                      r.participantName.toLowerCase().includes(q) ||
+                      r.assignedQuestionCodes.some((c) => c.toLowerCase().includes(q))
+                  )
+                );
+              })
+              .map((log) => (
+                <div
+                  key={log.id}
+                  className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden"
+                >
+                  {/* Header Card */}
+                  <div className="px-5 py-3.5 bg-slate-50/70 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-900 font-mono text-xs font-bold">
                         Undian v{log.drawVersion}
                       </span>
-                      <span className="font-bold text-sm text-slate-900">
+                      <span className="font-bold text-xs text-slate-900">
                         Babak {log.stageName}
                       </span>
                       {log.branchName && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                        <span className="text-xs px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700 font-medium">
                           {log.branchName}
                         </span>
                       )}
                       {log.levelName && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                        <span className="text-xs px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-600 font-medium">
                           {log.levelName}
                         </span>
                       )}
+                      <span className="text-[11px] text-slate-500">
+                        · {log.participantIds.length} Peserta · Pool {log.questionPoolIds.length} Soal
+                      </span>
                     </div>
-                    <div className="text-xs text-slate-500 font-mono">
-                      Oleh <strong className="text-slate-800">{log.actorName}</strong> ·{' '}
+
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      Oleh <span className="font-semibold text-slate-800">{log.actorName}</span> ·{' '}
                       {new Date(log.createdAt).toLocaleString('id-ID')}
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-600 flex flex-wrap gap-4">
-                    <span>
-                      Peserta Diundi: <strong>{log.participantIds.length} peserta</strong>
-                    </span>
-                    <span>
-                      Pool Soal Terpilih: <strong>{log.questionPoolIds.length} maqra</strong>
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
-                    {log.drawResults.map((r, i) => (
-                      <div
-                        key={`${log.id}-${r.participantId}-${i}`}
-                        className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex flex-col justify-between gap-1"
-                      >
-                        <span className="font-bold text-slate-900">{r.participantName}</span>
-                        <div className="flex flex-wrap gap-1">
-                          {r.assignedQuestionCodes.map((qt, qi) => (
-                            <span
-                              key={qi}
-                              className="text-[10px] font-mono bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded"
-                            >
-                              {qt}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                  {/* Structured Results Table */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-slate-500 bg-white text-[11px] font-semibold">
+                          <th className="px-5 py-2.5 w-14">No</th>
+                          <th className="px-5 py-2.5">Nama Peserta</th>
+                          <th className="px-5 py-2.5">Kode Maqra Ditugaskan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {log.drawResults.map((r, i) => (
+                          <tr
+                            key={`${log.id}-${r.participantId}-${i}`}
+                            className="hover:bg-slate-50/50 transition-colors"
+                          >
+                            <td className="px-5 py-2.5 font-mono text-slate-400">
+                              {i + 1}
+                            </td>
+                            <td className="px-5 py-2.5 font-semibold text-slate-900">
+                              {r.participantName}
+                            </td>
+                            <td className="px-5 py-2.5">
+                              <div className="flex flex-wrap gap-1.5">
+                                {r.assignedQuestionCodes.map((qt, qi) => (
+                                  <span
+                                    key={qi}
+                                    className="text-[11px] font-mono font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-2 py-0.5 rounded"
+                                  >
+                                    {qt}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              ))}
-            </div>
+              ))
           )}
         </div>
       )}

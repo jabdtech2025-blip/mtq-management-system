@@ -105,29 +105,6 @@ export const DashboardView: React.FC = () => {
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
-      {/* Top Breadcrumb & Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold text-slate-500 tracking-wide">
-            {currentTenant.name}
-          </p>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-0.5">
-            Dashboard Utama
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">{currentTenant.eventName}</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setCurrentView('rekap_nilai')}
-            className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-all cursor-pointer"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>Rekap Nilai</span>
-          </button>
-        </div>
-      </div>
-
       {/* 4 Stat Cards Row derived dynamically */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Peserta */}
@@ -298,7 +275,13 @@ export const DashboardView: React.FC = () => {
               Aktivitas Penilaian & Penyimpanan Terbaru
             </h3>
           </div>
-          <span className="text-[10px] text-slate-400 font-medium">Tersimpan di database</span>
+          <button
+            type="button"
+            onClick={() => setCurrentView('log_aktivitas')}
+            className="text-xs font-bold text-emerald-800 hover:text-emerald-950 hover:underline cursor-pointer transition-colors"
+          >
+            Lihat Semua Log Aktivitas →
+          </button>
         </div>
 
         <div className="space-y-2.5">

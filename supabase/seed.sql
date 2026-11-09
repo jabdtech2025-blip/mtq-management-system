@@ -40,7 +40,7 @@ INSERT INTO rubric_versions (id, tenant_id, code, name, branch_code, branch_name
 VALUES
     (
         '33333333-3333-4333-8333-333333333301',
-        '00000000-0000-0000-0000-000000000000',
+        '11111111-1111-4111-8111-111111111101',
         'RUBRIC-SENI-BACA-2025',
         'Rubrik Resmi Seni Baca Al-Qur''an (Pedoman MTQ 2025)',
         'TLW',
@@ -53,7 +53,7 @@ VALUES
     ),
     (
         '33333333-3333-4333-8333-333333333302',
-        '00000000-0000-0000-0000-000000000000',
+        '11111111-1111-4111-8111-111111111101',
         'RUBRIC-TAHFIZH-2025',
         'Template Rubrik Tahfizh Al-Qur''an (Konfigurasi Penyelenggara)',
         'THF',

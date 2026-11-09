@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   Tenant,
   User,
@@ -79,13 +79,28 @@ export type ViewType =
   | 'stage_management'
   | 'hasil_kelulusan'
   | 'penilaian_dual_panel'
+  | 'log_aktivitas'
   // Superadmin
   | 'superadmin_dashboard'
   | 'superadmin_tenants'
   | 'superadmin_users'
   | 'superadmin_audit';
 
+export interface LocalNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+  timestamp: string;
+  isRead: boolean;
+  module?: string;
+}
+
 interface MtqContextType {
+  notifications: LocalNotification[];
+  addNotification: (notif: { title: string; message: string; type: 'success' | 'error' | 'warning' | 'info'; module?: string }) => void;
+  markAllNotificationsAsRead: () => void;
+  clearNotifications: () => void;
   tenants: Tenant[];
   currentTenant: Tenant;
   setTenantId: (id: string) => void;
@@ -132,10 +147,11 @@ interface MtqContextType {
   activateRubricVersion: (id: string) => { success: boolean; message: string };
   archiveRubricVersion: (id: string) => void;
   deleteRubricVersion: (id: string) => { success: boolean; message: string };
+  deleteRubricField: (rubricVersionId: string, fieldId: string) => Promise<{ success: boolean; message: string }>;
   addCompetitionRule: (rule: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => void;
   updateCompetitionRule: (id: string, updated: Partial<CompetitionRuleConfig>) => void;
   deleteCompetitionRule: (id: string) => { success: boolean; message: string };
-  getActiveRubricForBranch: (branchName: string, branchId?: string) => RubricVersion | null;
+  getActiveRubricForBranch: (branchName: string, branchId?: string, levelId?: string, levelName?: string) => RubricVersion | null;
   getBranchRuleConfigByBranch: (branchName: string, branchId?: string) => CompetitionRuleConfig;
 
   currentView: ViewType;
@@ -477,9 +493,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [errorCategories, setErrorCategories] = useState<ErrorCategory[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'categories');
-      return saved ? JSON.parse(saved) : INITIAL_ERROR_CATEGORIES;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_ERROR_CATEGORIES;
+      return [];
     }
   });
 
@@ -573,21 +589,48 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  // Local ephemeral in-memory notifications (cleared on refresh as requested)
+  const [notifications, setNotifications] = useState<LocalNotification[]>([]);
+
+  const addNotification = useCallback(
+    (notif: { title: string; message: string; type: 'success' | 'error' | 'warning' | 'info'; module?: string }) => {
+      const newNotif: LocalNotification = {
+        id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        title: notif.title,
+        message: notif.message,
+        type: notif.type,
+        module: notif.module || 'Sistem',
+        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        isRead: false
+      };
+      setNotifications((prev) => [newNotif, ...prev.slice(0, 49)]);
+    },
+    []
+  );
+
+  const markAllNotificationsAsRead = useCallback(() => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+  }, []);
+
+  const clearNotifications = useCallback(() => {
+    setNotifications([]);
+  }, []);
+
   const [stages, setStages] = useState<CompetitionStage[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'stages');
-      return saved ? JSON.parse(saved) : INITIAL_STAGES;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_STAGES;
+      return [];
     }
   });
 
   const [judgeAssignments, setJudgeAssignments] = useState<JudgeAssignment[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'judge_assignments');
-      return saved ? JSON.parse(saved) : INITIAL_JUDGE_ASSIGNMENTS;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_JUDGE_ASSIGNMENTS;
+      return [];
     }
   });
 
@@ -595,18 +638,18 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [jenjangList, setJenjangList] = useState<GenericMasterItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'jenjang_list');
-      return saved ? JSON.parse(saved) : INITIAL_JENJANG;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_JENJANG;
+      return [];
     }
   });
 
   const [cabangList, setCabangList] = useState<GenericMasterItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'cabang_list');
-      return saved ? JSON.parse(saved) : INITIAL_CABANG;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_CABANG;
+      return [];
     }
   });
 
@@ -614,27 +657,18 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [rubricVersions, setRubricVersions] = useState<RubricVersion[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'rubric_versions');
-      return saved ? JSON.parse(saved) : INITIAL_RUBRIC_VERSIONS;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_RUBRIC_VERSIONS;
+      return [];
     }
   });
 
   const [competitionRules, setCompetitionRules] = useState<CompetitionRuleConfig[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + 'competition_rules');
-      if (saved) return JSON.parse(saved);
-      return Object.values(DEFAULT_COMPETITION_RULES).map((r) => ({
-        ...r,
-        tenantId: 'tenant-jabar',
-        status: 'Aktif' as const
-      }));
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return Object.values(DEFAULT_COMPETITION_RULES).map((r) => ({
-        ...r,
-        tenantId: 'tenant-jabar',
-        status: 'Aktif' as const
-      }));
+      return [];
     }
   });
 
@@ -1247,29 +1281,33 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setStageSnapshots(hydrated.stageSnapshots || []);
         setAuditLogs(hydrated.auditLogs || []);
         setLotteryDrawLogs(hydrated.lotteryDrawLogs || []);
-        if (hydrated.rubricVersions && hydrated.rubricVersions.length > 0) {
-          const deletedIds = (() => {
-            try {
-              return new Set(JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'deleted_rubrics') || '[]'));
-            } catch {
-              return new Set<string>();
-            }
-          })();
-          const filteredRubrics = hydrated.rubricVersions.filter(
-            (r) => !deletedIds.has(r.id) && !deletedIds.has(toDeterministicUuid(r.id))
-          );
-          setRubricVersions(filteredRubrics);
-        }
+        const hydratedRubrics = hydrated.rubricVersions || [];
+        const deletedIds = (() => {
+          try {
+            return new Set(JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'deleted_rubrics') || '[]'));
+          } catch {
+            return new Set<string>();
+          }
+        })();
+        const filteredRubrics = hydratedRubrics.filter(
+          (r) => !deletedIds.has(r.id) && !deletedIds.has(toDeterministicUuid(r.id))
+        );
+        setRubricVersions(filteredRubrics);
       } else {
         setDataSourceMode('supabase_error');
         setWorkspaceError(hydration.error || 'Gagal memuat workspace database.');
         setSyncStatus('Gagal Memuat Workspace Database');
         setUsers([mappedUser]);
         setKafilahs([]);
+        setCabangList([]);
+        setJenjangList([]);
         setStages([]);
         setQuestions([]);
         setParticipants([]);
         setStageParticipations([]);
+        setErrorCategories([]);
+        setRubricVersions([]);
+        setCompetitionRules([]);
         setJudgeAssignments([]);
         setAssessments([]);
         setStageSnapshots([]);
@@ -1282,10 +1320,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setWorkspaceError(info.lastError || info.statusLabel);
         setUsers([]);
         setKafilahs([]);
+        setCabangList([]);
+        setJenjangList([]);
         setStages([]);
         setQuestions([]);
         setParticipants([]);
         setStageParticipations([]);
+        setErrorCategories([]);
+        setRubricVersions([]);
+        setCompetitionRules([]);
         setJudgeAssignments([]);
         setAssessments([]);
         setStageSnapshots([]);
@@ -1716,10 +1759,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return getBranchRuleConfig(branchName, currentTenantId, competitionRules, branchId);
   };
 
-  const getActiveRubricForBranch = (branchName: string, branchId?: string): RubricVersion | null => {
+  const getActiveRubricForBranch = (
+    branchName: string,
+    branchId?: string,
+    levelId?: string,
+    levelName?: string
+  ): RubricVersion | null => {
     const res = resolveActiveRubricForBranch({
       branchName,
       branchId,
+      levelId,
+      levelName,
       tenantId: currentTenantId,
       competitionRules,
       rubricVersions
@@ -1806,7 +1856,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .upsertRubricVersionWithFields(toDeterministicUuid(currentTenantId), {
           ...newRubric,
           id: toDeterministicUuid(newRubric.id),
-          tenantId: toDeterministicUuid(currentTenantId)
+          tenantId: toDeterministicUuid(currentTenantId),
+          branchId: newRubric.branchId ? toDeterministicUuid(newRubric.branchId) : undefined,
+          levelId: newRubric.levelId ? toDeterministicUuid(newRubric.levelId) : undefined
         })
         .then((res) => {
           if (!res.success) {
@@ -1860,6 +1912,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .upsertRubricVersionWithFields(toDeterministicUuid(currentTenantId), {
           ...mergedRubric,
           id: toDeterministicUuid(mergedRubric.id),
+          branchId: mergedRubric.branchId ? toDeterministicUuid(mergedRubric.branchId) : undefined,
+          levelId: mergedRubric.levelId ? toDeterministicUuid(mergedRubric.levelId) : undefined,
           tenantId: toDeterministicUuid(
             mergedRubric.tenantId === 'system'
               ? '00000000-0000-0000-0000-000000000000'
@@ -2018,6 +2072,61 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       success: true,
       message: `Versi rubrik "${target.name}" (${target.version}) berhasil dihapus.`
     };
+  };
+
+  const deleteRubricField = async (
+    rubricVersionId: string,
+    fieldId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const targetRubric = rubricVersions.find((r) => r.id === rubricVersionId);
+    if (!targetRubric) {
+      return { success: false, message: 'Versi rubrik tidak ditemukan.' };
+    }
+
+    const targetField = targetRubric.fields.find((f) => f.id === fieldId);
+    if (!targetField) {
+      return { success: false, message: 'Bidang penilaian tidak ditemukan pada rubrik ini.' };
+    }
+
+    const isUsedInSnapshots = stageSnapshots.some((s) => s.rubricVersionId === rubricVersionId);
+    if (isUsedInSnapshots) {
+      return {
+        success: false,
+        message: `Bidang "${targetField.name}" tidak dapat dihapus karena versi rubrik ini telah digunakan pada babak yang sudah disahkan.`
+      };
+    }
+
+    const updatedFields = targetRubric.fields.filter((f) => f.id !== fieldId);
+    const updatedRubric: RubricVersion = { ...targetRubric, fields: updatedFields };
+
+    setRubricVersions((prev) =>
+      prev.map((r) => (r.id === rubricVersionId ? updatedRubric : r))
+    );
+
+    // Detach or cleanup categories referencing this field
+    setErrorCategories((prev) =>
+      prev.map((c) => (c.fieldId === fieldId ? { ...c, fieldId: undefined } : c))
+    );
+
+    if (isLiveDbActive) {
+      setSyncStatus(`Menghapus bidang "${targetField.name}" dari database...`);
+      const res = await supabaseDataService.deleteRubricField(
+        toDeterministicUuid(rubricVersionId),
+        toDeterministicUuid(fieldId)
+      );
+
+      if (!res.success) {
+        setRubricVersions((prev) =>
+          prev.map((r) => (r.id === rubricVersionId ? targetRubric : r))
+        );
+        setSyncStatus(`Gagal menghapus bidang: ${res.message}`);
+        return { success: false, message: `Gagal menghapus bidang dari database: ${res.message}` };
+      } else {
+        setSyncStatus('Bidang Rubrik Berhasil Dihapus Permanen dari Database');
+      }
+    }
+
+    return { success: true, message: `Bidang "${targetField.name}" berhasil dihapus secara permanen.` };
   };
 
   /**
@@ -2527,12 +2636,31 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Mandatory official judge assignment check
     const stageBranchAssignments = getStageBranchJudgeAssignments(targetStage, targetStageObj?.id, part);
-    if (
-      stageBranchAssignments.length === 0 ||
-      !stageBranchAssignments.some((ja) => ja.judgeId === judgeId)
-    ) {
+    const judgeAssignment = stageBranchAssignments.find((ja) => ja.judgeId === judgeId);
+    if (!judgeAssignment) {
       console.warn('Penilaian ditolak: Hakim tidak memiliki penugasan resmi pada babak dan cabang ini.');
       return;
+    }
+
+    // Field-level access restriction: Judge may only score categories within their assigned field
+    if (judgeAssignment.judgeField || judgeAssignment.judgeFieldId) {
+      const cat = errorCategories.find((c) => c.id === categoryId);
+      if (cat && cat.fieldId && judgeAssignment.judgeFieldId) {
+        if (cat.fieldId !== judgeAssignment.judgeFieldId) {
+          console.warn(`Perubahan nilai ditolak: Kategori "${cat.name}" bukan bagian dari bidang penugasan hakim.`);
+          return;
+        }
+      } else if (cat && judgeAssignment.judgeField) {
+        const assignedName = judgeAssignment.judgeField.toLowerCase();
+        const catScope = (cat.scope || '').toLowerCase();
+        const catName = (cat.name || '').toLowerCase();
+        const matchesScope = catScope.includes(assignedName) || assignedName.includes(catScope);
+        const matchesName = catName.includes(assignedName) || assignedName.includes(catName);
+        if (cat.scope && !matchesScope && !matchesName && !assignedName.includes('umum')) {
+          console.warn(`Perubahan nilai ditolak: Kategori "${cat.name}" bukan bagian dari bidang penugasan hakim (${judgeAssignment.judgeField}).`);
+          return;
+        }
+      }
     }
 
     const prevAssessmentsSnapshot = assessments;
@@ -2680,6 +2808,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         actorName: targetJudge.name
       };
       setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
+      addNotification({
+        title: 'Koreksi Nilai Dicatat',
+        message: `${cat.name} (${sign}) pada peserta ${part.name} oleh ${targetJudge.name}.`,
+        type: 'info',
+        module: 'Penilaian'
+      });
     }
 
     if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
@@ -2715,6 +2849,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           } else {
             setSyncStatus(`Gagal Menyimpan ke Database: ${res.message}`);
+            addNotification({
+              title: 'Gagal Menyimpan ke Database',
+              message: res.message,
+              type: 'error',
+              module: 'Penilaian'
+            });
             void outboxSyncService.enqueueOperation({
               idempotencyKey: `assessment-draft-${updatedAssessment.id}`,
               tenantId: currentTenantId,
@@ -3137,6 +3277,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const rpcRes = await supabaseDataService.finalizeJudgeAssessmentRpc(persistedAssessmentId);
       if (!rpcRes.success) {
         setSyncStatus('Gagal Memfinalisasi di Database');
+        addNotification({
+          title: 'Finalisasi Penilaian Ditolak',
+          message: `Finalisasi database ditolak: ${rpcRes.message}`,
+          type: 'error',
+          module: 'Penilaian'
+        });
         return {
           success: false,
           message: `Finalisasi database ditolak: ${rpcRes.message}`
@@ -3148,6 +3294,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nowTime = getWibTime();
     const targetJudge = users.find((u) => u.id === judgeId) || currentUser;
     const finalizedScore = scoreResult.finalScore;
+
+    addNotification({
+      title: 'Penilaian Berhasil Difinalisasi',
+      message: `Nilai peserta ${part.name} difinalisasi oleh ${targetJudge.name} (Skor: ${finalizedScore.toFixed(2)})`,
+      type: 'success',
+      module: 'Penilaian'
+    });
 
     const currentAssessmentsList = assessmentsRef.current.some((a) => a.id === existing!.id)
       ? assessmentsRef.current
@@ -6226,9 +6379,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (!rpcRes.success) {
         setSyncStatus('Gagal Mengesahkan Babak di Database');
+        const isMigrationNeeded = rpcRes.message?.includes('v_next_stage') || rpcRes.message?.includes('v_rule');
+        const errMsg = isMigrationNeeded
+          ? `Pengesahan babak di database ditolak: ${rpcRes.message}. Silakan jalankan file migrasi terbaru (supabase/migrations/20261111_fix_v_rule_unassigned.sql) di SQL Editor Supabase Anda.`
+          : `Pengesahan babak di database ditolak: ${rpcRes.message}`;
+        addNotification({
+          title: 'Pengesahan Babak Ditolak',
+          message: errMsg,
+          type: 'error',
+          module: 'Babak'
+        });
         return {
           success: false,
-          message: `Pengesahan babak di database ditolak: ${rpcRes.message}`
+          message: errMsg
         };
       }
     }
@@ -6239,6 +6402,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nowTime = getWibTime();
     const quota = currentStg.qualificationQuota;
     const stagePartIds = new Set(stageParts.map((sp) => sp.id));
+
+    addNotification({
+      title: `Babak ${currentStageName} Berhasil Disahkan`,
+      message: `Hasil kualifikasi Babak ${currentStageName} (${currentStg.branchName || 'Semua Cabang'}) telah disahkan oleh ${currentUser.name}.`,
+      type: 'success',
+      module: 'Babak'
+    });
 
     if (isFinalChampionship) {
       // FINAL STAGE CHAMPIONSHIP FINALIZATION FLOW
@@ -6520,7 +6690,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (c.name === asg.branchName || asg.branchName.includes(c.name) || c.name.includes(asg.branchName))
     );
 
-    let resolvedRubricFieldId = asg.rubricFieldId;
+    let resolvedRubricFieldId = asg.rubricFieldId || asg.judgeFieldId;
     if (!resolvedRubricFieldId && asg.judgeField) {
       for (const rv of rubricVersions) {
         const matchedFld = rv.fields.find(
@@ -6537,6 +6707,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const resolvedStageId = asg.stageId || matchedStage?.id || 'stage-penyisihan';
     const resolvedBranchId = asg.branchId || matchedBranch?.id;
+    const resolvedLevelId = asg.levelId;
 
     const newAsg: JudgeAssignment = {
       ...asg,
@@ -6544,7 +6715,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       tenantId: currentTenantId,
       stageId: resolvedStageId,
       ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
-      ...(resolvedRubricFieldId ? { rubricFieldId: resolvedRubricFieldId } : {})
+      ...(resolvedLevelId ? { levelId: resolvedLevelId } : {}),
+      ...(resolvedRubricFieldId ? { rubricFieldId: resolvedRubricFieldId, judgeFieldId: resolvedRubricFieldId } : {})
     };
     setJudgeAssignments((prev) => [...prev, newAsg]);
     if (isLiveDbActive) {
@@ -6555,7 +6727,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           tenantId: toDeterministicUuid(currentTenantId),
           stageId: toDeterministicUuid(resolvedStageId),
           branchId: resolvedBranchId ? toDeterministicUuid(resolvedBranchId) : undefined,
+          levelId: resolvedLevelId ? toDeterministicUuid(resolvedLevelId) : undefined,
           rubricFieldId: resolvedRubricFieldId ? toDeterministicUuid(resolvedRubricFieldId) : undefined,
+          judgeFieldId: resolvedRubricFieldId ? toDeterministicUuid(resolvedRubricFieldId) : undefined,
           judgeId: toDeterministicUuid(newAsg.judgeId)
         })
         .then((res) => {
@@ -6634,6 +6808,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         activateRubricVersion,
         archiveRubricVersion,
         deleteRubricVersion,
+        deleteRubricField,
         addCompetitionRule,
         updateCompetitionRule,
         deleteCompetitionRule,
@@ -6715,7 +6890,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         signOutSupabase,
         requestPasswordReset,
         completePasswordReset,
-        bootstrapFirstSuperadmin
+        bootstrapFirstSuperadmin,
+        notifications,
+        addNotification,
+        markAllNotificationsAsRead,
+        clearNotifications
       }}
     >
       {children}

@@ -118,6 +118,11 @@ export const Sidebar: React.FC = () => {
         id: 'hasil_kelulusan',
         label: 'Hasil & Kelulusan',
         icon: <Award className="w-4 h-4" />
+      },
+      {
+        id: 'log_aktivitas',
+        label: 'Log Aktivitas',
+        icon: <History className="w-4 h-4" />
       }
     ];
   }
@@ -224,10 +229,6 @@ export const Sidebar: React.FC = () => {
             Ganti
           </span>
         </button>
-
-        <p className="text-[10px] text-center text-slate-400 leading-tight">
-          Simulasi Prototype MTQ v2.0
-        </p>
       </div>
     </aside>
   );
