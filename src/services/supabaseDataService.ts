@@ -1843,6 +1843,62 @@ export const supabaseDataService = {
   },
 
   /**
+   * P0-04: Transaksi Atomik Undian & Penetapan Maqra via commit_lottery_draw RPC.
+   * Memvalidasi relasi 3D (babak, cabang, jenjang) dan mencatat assigned_maqras,
+   * stage_participations, lottery_draw_logs, dan audit_logs dalam 1 transaksi atomik.
+   */
+  async commitLotteryDrawRpc(params: {
+    tenantId: string;
+    stageId: string;
+    stageName: string;
+    branchId?: string | null;
+    branchName?: string | null;
+    levelId?: string | null;
+    levelName?: string | null;
+    actorId?: string | null;
+    actorName?: string | null;
+    results: Array<{
+      participantId: string;
+      questionIds: string[];
+    }>;
+    questionsPerParticipant?: number;
+    notes?: string | null;
+  }): Promise<{ success: boolean; message: string; data?: any }> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, message: 'Koneksi database tidak tersedia.' };
+    }
+
+    const { data, error } = await client.rpc('commit_lottery_draw', {
+      p_tenant_id: params.tenantId,
+      p_stage_id: params.stageId,
+      p_stage_name: params.stageName,
+      p_branch_id: params.branchId || null,
+      p_branch_name: params.branchName || null,
+      p_level_id: params.levelId || null,
+      p_level_name: params.levelName || null,
+      p_actor_id: params.actorId || null,
+      p_actor_name: params.actorName || 'Administrator MTQ',
+      p_results: params.results,
+      p_questions_per_participant: params.questionsPerParticipant || 1,
+      p_notes: params.notes || null
+    });
+
+    if (error) {
+      return {
+        success: false,
+        message: error.message || 'Gagal mengeksekusi RPC commit_lottery_draw.'
+      };
+    }
+
+    return {
+      success: true,
+      message: (data as { message?: string })?.message || 'Hasil undian maqra berhasil ditetapkan secara atomik.',
+      data
+    };
+  },
+
+  /**
    * Mencari atau menyimpan baris assigned_maqras yang nyata di database
    * dan mengembalikan ID primary key sebenarnya dari tabel assigned_maqras.
    */

@@ -39,6 +39,7 @@ export default defineConfig({
       name: 'iPad Pro Landscape (Dewan Hakim)',
       use: {
         ...devices['iPad Pro 11 landscape'],
+        defaultBrowserType: 'chromium',
         viewport: { width: 1194, height: 834 }
       }
     }

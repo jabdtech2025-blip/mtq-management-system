@@ -404,6 +404,7 @@ export const SuperadminUsersView: React.FC = () => {
                           <Pencil className="w-3.5 h-3.5 inline" />
                         </button>
                         <button
+                          disabled={u.id === currentUser.id}
                           onClick={async () => {
                             const res = await toggleUserStatus(u.id);
                             setOperationBanner({
@@ -411,12 +412,20 @@ export const SuperadminUsersView: React.FC = () => {
                               message: res.message
                             });
                           }}
-                          className={`p-1.5 rounded cursor-pointer transition-colors ${
-                            u.status === 'Nonaktif'
-                              ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
-                              : 'text-amber-600 hover:text-amber-800 hover:bg-amber-50'
+                          className={`p-1.5 rounded transition-colors ${
+                            u.id === currentUser.id
+                              ? 'text-slate-300 cursor-not-allowed'
+                              : u.status === 'Nonaktif'
+                              ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 cursor-pointer'
+                              : 'text-amber-600 hover:text-amber-800 hover:bg-amber-50 cursor-pointer'
                           }`}
-                          title={u.status === 'Nonaktif' ? 'Aktifkan Akun' : 'Nonaktifkan Akun'}
+                          title={
+                            u.id === currentUser.id
+                              ? 'Akun Sedang Digunakan'
+                              : u.status === 'Nonaktif'
+                              ? 'Aktifkan Akun'
+                              : 'Nonaktifkan Akun'
+                          }
                         >
                           <Power className="w-3.5 h-3.5 inline" />
                         </button>

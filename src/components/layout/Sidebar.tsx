@@ -39,7 +39,7 @@ export const Sidebar: React.FC = () => {
       },
       {
         id: 'superadmin_tenants',
-        label: 'Manajemen MTQ',
+        label: 'Penyelenggara MTQ (Manajemen MTQ)',
         icon: <Building className="w-4 h-4" />
       },
       {
@@ -155,7 +155,7 @@ export const Sidebar: React.FC = () => {
           {/* Close button for tablet / mobile drawer */}
           <button
             onClick={() => setIsSidebarOpen(false)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 xl:hidden"
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 lg:hidden"
             title="Tutup Menu"
           >
             <X className="w-5 h-5" />
@@ -234,14 +234,14 @@ export const Sidebar: React.FC = () => {
 
   return (
     <>
-      {/* Desktop Persistent Sidebar (hidden on tablet/mobile) */}
-      <div className="hidden xl:block h-screen max-h-screen sticky top-0 shrink-0 overflow-hidden">
+      {/* Desktop Persistent Sidebar (visible on lg screens >= 1024px including iPad Pro Landscape) */}
+      <div className="hidden lg:block h-screen max-h-screen sticky top-0 shrink-0 overflow-hidden">
         {sidebarContent}
       </div>
 
-      {/* Off-canvas mobile/tablet drawer */}
+      {/* Off-canvas mobile/tablet drawer (for screens < lg) */}
       {isSidebarOpen && (
-        <div className="fixed inset-0 z-50 xl:hidden">
+        <div className="fixed inset-0 z-50 lg:hidden">
           <div
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
             onClick={() => setIsSidebarOpen(false)}

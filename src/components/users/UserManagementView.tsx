@@ -513,7 +513,7 @@ export const UserManagementView: React.FC = () => {
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                   />
                   <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                    Jika diisi, akun akan langsung dapat digunakan untuk masuk ke aplikasi.
+                    Jika diisi, sistem akan langsung mendaftarkan akun di auth.users dan public.profiles dengan kata sandi ini tanpa mengeluarkan sesi aktif Anda.
                   </p>
                 </div>
               )}

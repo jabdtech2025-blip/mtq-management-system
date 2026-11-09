@@ -895,7 +895,54 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const res = await supabaseDataService.insertLotteryDrawLog(drawLog as LotteryDrawLogItem);
           return { success: res.success, message: res.message };
         }
-        return { success: true };
+        if (op.operationType === 'DELETE_PARTICIPANT') {
+          const { participantId } = (op.payload as { participantId?: string }) || {};
+          if (!participantId) {
+            return { success: false, message: 'Payload ID peserta tidak lengkap di antrean outbox.' };
+          }
+          const res = await supabaseDataService.deleteParticipant(
+            toDeterministicUuid(op.tenantId),
+            toDeterministicUuid(participantId)
+          );
+          return { success: res.success, message: res.message };
+        }
+        if (op.operationType === 'DELETE_QUESTION') {
+          const { questionId } = (op.payload as { questionId?: string }) || {};
+          if (!questionId) {
+            return { success: false, message: 'Payload ID soal tidak lengkap di antrean outbox.' };
+          }
+          const res = await supabaseDataService.deleteQuestion(
+            toDeterministicUuid(op.tenantId),
+            toDeterministicUuid(questionId)
+          );
+          return { success: res.success, message: res.message };
+        }
+        if (op.operationType === 'UPSERT_MASTER_DATA') {
+          const { entityType, item } = (op.payload as { entityType?: string; item?: any }) || {};
+          if (!entityType || !item) {
+            return { success: false, message: 'Payload master data tidak lengkap di antrean outbox.' };
+          }
+          if (entityType === 'branch') {
+            const res = await supabaseDataService.upsertBranch(toDeterministicUuid(op.tenantId), item);
+            return { success: res.success, message: res.message };
+          }
+          if (entityType === 'level') {
+            const res = await supabaseDataService.upsertLevel(toDeterministicUuid(op.tenantId), item);
+            return { success: res.success, message: res.message };
+          }
+          if (entityType === 'stage') {
+            const res = await supabaseDataService.upsertStage({
+              ...(item as any),
+              tenantId: toDeterministicUuid(op.tenantId)
+            });
+            return { success: res.success, message: res.message };
+          }
+          return { success: false, message: `Tipe master data tidak dikenal: ${entityType}` };
+        }
+        return {
+          success: false,
+          message: `Operasi antrean outbox "${op.operationType}" tidak dikenal atau tidak didukung untuk sinkronisasi otomatis.`
+        };
       } catch (err) {
         return {
           success: false,
@@ -4694,53 +4741,64 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updated;
     });
 
-    // Persist assigned_maqras to live database if connected
+    // 4. Resolve branch and level metadata for atomic RPC and audit logging
+    const firstPart = participants.find((p) => p.id === results[0]?.participantId && p.tenantId === currentTenantId);
+    const resolvedBranchName = metadata?.branchName || firstPart?.branchName || 'Semua Cabang';
+    const resolvedLevelName = metadata?.levelName || firstPart?.levelName || undefined;
+    const matchedBranchObj = cabangList.find((c) => c.name === resolvedBranchName);
+    const matchedLevelObj = resolvedLevelName ? jenjangList.find((j) => j.name === resolvedLevelName) : undefined;
+
+    // Persist assigned_maqras atomically to live database if connected via commit_lottery_draw RPC (P0-04)
     if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
-      results.forEach((r) => {
-        const part = participants.find((p) => p.id === r.participantId && p.tenantId === currentTenantId);
-        const sp =
-          resolvedSpByParticipant[r.participantId] ||
-          stageParticipationsRef.current.find(
-            (item) =>
-              item.tenantId === currentTenantId &&
-              item.stageName === stageName &&
-              item.participantId === r.participantId
-          );
-        const newItems = itemsByParticipant[r.participantId] || [];
-        if (part && sp) {
-          newItems.forEach((maqraItem) => {
-            void supabaseDataService
-              .assignMaqraRecord({
-                id: maqraItem.id || generateUuid(),
-                tenantId: toDeterministicUuid(currentTenantId),
-                stageParticipationId: toDeterministicUuid(sp.id),
-                questionId: toDeterministicUuid(maqraItem.questionId),
-                method: 'undian',
-                stageParticipation: sp,
-                participant: part
-              })
-              .then((res) => {
-                const dbMaqraId = res.data?.assignedMaqraId;
-                if (res.success && dbMaqraId) {
-                  setStageParticipations((prev) => {
-                    const next = prev.map((item) =>
-                      item.id === sp.id
-                        ? {
-                            ...item,
-                            assignedQuestions: (item.assignedQuestions || []).map((aq) =>
-                              aq.questionId === maqraItem.questionId ? { ...aq, id: dbMaqraId } : aq
-                            )
-                          }
-                        : item
-                    );
-                    stageParticipationsRef.current = next;
-                    return next;
+      void supabaseDataService
+        .commitLotteryDrawRpc({
+          tenantId: toDeterministicUuid(currentTenantId),
+          stageId: toDeterministicUuid(stageId),
+          stageName,
+          branchId: matchedBranchObj ? toDeterministicUuid(matchedBranchObj.id) : null,
+          branchName: resolvedBranchName !== 'Semua Cabang' ? resolvedBranchName : null,
+          levelId: matchedLevelObj ? toDeterministicUuid(matchedLevelObj.id) : null,
+          levelName: resolvedLevelName || null,
+          actorId: authenticatedProfile?.authUserId || null,
+          actorName: currentUser.name || 'Administrator MTQ',
+          results: results.map((r) => ({
+            participantId: toDeterministicUuid(r.participantId),
+            questionIds: r.questionIds.map((qid) => toDeterministicUuid(qid))
+          })),
+          questionsPerParticipant: metadata?.questionsPerParticipant || results[0]?.questionIds.length || 1,
+          notes: metadata?.notes || null
+        })
+        .then((res) => {
+          if (!res.success) {
+            console.warn('[commitLotteryDraw] commit_lottery_draw RPC fallback:', res.message);
+            // Fallback per-record sync
+            results.forEach((r) => {
+              const part = participants.find((p) => p.id === r.participantId && p.tenantId === currentTenantId);
+              const sp =
+                resolvedSpByParticipant[r.participantId] ||
+                stageParticipationsRef.current.find(
+                  (item) =>
+                    item.tenantId === currentTenantId &&
+                    item.stageName === stageName &&
+                    item.participantId === r.participantId
+                );
+              const newItems = itemsByParticipant[r.participantId] || [];
+              if (part && sp) {
+                newItems.forEach((maqraItem) => {
+                  void supabaseDataService.assignMaqraRecord({
+                    id: maqraItem.id || generateUuid(),
+                    tenantId: toDeterministicUuid(currentTenantId),
+                    stageParticipationId: toDeterministicUuid(sp.id),
+                    questionId: toDeterministicUuid(maqraItem.questionId),
+                    method: 'undian',
+                    stageParticipation: sp,
+                    participant: part
                   });
-                }
-              });
-          });
-        }
-      });
+                });
+              }
+            });
+          }
+        });
     }
 
     // 4. Atomic Questions Update
@@ -4761,11 +4819,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     // 5. Record Lottery Draw Audit Log (Riwayat Undian Maqra)
-    const firstPart = participants.find((p) => p.id === results[0]?.participantId && p.tenantId === currentTenantId);
-    const resolvedBranchName = metadata?.branchName || firstPart?.branchName || 'Semua Cabang';
-    const resolvedLevelName = metadata?.levelName || firstPart?.levelName || undefined;
-    const matchedBranchObj = cabangList.find((c) => c.name === resolvedBranchName);
-    const matchedLevelObj = resolvedLevelName ? jenjangList.find((j) => j.name === resolvedLevelName) : undefined;
     const prevDrawsCount = lotteryDrawLogs.filter(
       (l) => l.tenantId === currentTenantId && l.stageName === stageName && l.branchName === resolvedBranchName
     ).length;
@@ -5470,10 +5523,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: false, message: res.message };
       }
       setSyncStatus(`Status Akun (${nextStatus}) Tersimpan di Database`);
-      return { success: true, message: `Status akun "${existing.name}" berhasil diubah menjadi ${nextStatus}.` };
+      const statusVerb = nextStatus === 'Nonaktif' ? 'berhasil dinonaktifkan' : 'berhasil diaktifkan';
+      return { success: true, message: `Akun "${existing.name}" ${statusVerb}.` };
     }
 
-    return { success: true, message: `Status akun "${existing.name}" berhasil diubah menjadi ${nextStatus}.` };
+    const statusVerb = nextStatus === 'Nonaktif' ? 'berhasil dinonaktifkan' : 'berhasil diaktifkan';
+    return { success: true, message: `Akun "${existing.name}" ${statusVerb}.` };
   };
 
   const deleteUser = async (

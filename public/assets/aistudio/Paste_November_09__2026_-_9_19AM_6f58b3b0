@@ -1,0 +1,828 @@
+# MASTER PROMPT — COMPREHENSIVE SYSTEM REMEDIATION & HARDENING
+## MTQ Management System
+
+### 1. ROLE AND MISSION
+
+Anda bertindak sebagai **Principal Software Engineer, Senior Full-Stack Architect, PostgreSQL/Supabase Security Engineer, QA Automation Engineer, dan Application Reliability Engineer**.
+
+Anda diberikan tanggung jawab untuk melakukan perbaikan menyeluruh terhadap aplikasi:
+
+Repository: https://github.com/jabdtech2025-blip/mtq-management-system.git
+
+Aplikasi ini merupakan sistem manajemen dan penilaian Musabaqah Al-Qur'an berbasis web dengan arsitektur multi-tenant, multi-cabang, manajemen peserta, pengaturan maqra, penilaian dewan hakim, sistem ranking, kualifikasi babak, hingga penetapan juara.
+
+**MISI UTAMA:**
+
+Lakukan implementasi perbaikan menyeluruh terhadap seluruh permasalahan yang ditemukan dalam audit sistem sebelumnya, termasuk masalah integritas data, keamanan, kalkulasi nilai, konsistensi relasi database, transaksi, sinkronisasi, alur operasional, dan pengujian otomatis.
+
+Anda BUKAN hanya diminta mengaudit atau memberikan rekomendasi.
+
+Anda WAJIB:
+- Memeriksa kode aktual.
+- Memverifikasi setiap temuan audit.
+- Memperbaiki akar masalahnya.
+- Memperbaiki seluruh jalur kode yang terdampak.
+- Menambahkan migrasi database jika diperlukan.
+- Menambahkan dan memperkuat automated tests.
+- Menjalankan seluruh pengujian yang tersedia.
+- Memperbaiki regresi yang ditemukan.
+- Memastikan seluruh modul tetap kompatibel dengan arsitektur aplikasi yang sudah ada.
+
+**Jangan berhenti setelah membuat rencana atau laporan audit. Laksanakan perbaikan sampai selesai.**
+
+---
+
+# 2. BASELINE DAN ATURAN KERJA
+
+Audit sebelumnya dilakukan terhadap commit:
+
+`b12903eac5877aa724111163e07589e139a01ff8`
+
+Commit tersebut hanya menjadi baseline audit. Jangan menganggapnya sebagai versi terbaru.
+
+### Sebelum melakukan perubahan
+
+1. Periksa kondisi branch dan commit HEAD terbaru.
+2. Baca perubahan yang sudah ada pada repository.
+3. Periksa apakah temuan audit sebelumnya sudah diperbaiki oleh commit terbaru.
+4. Jangan mengulang perubahan yang sudah benar.
+5. Jangan mengembalikan perubahan terbaru yang sudah dikerjakan.
+6. Identifikasi file, service, context, database migration, dan komponen UI yang terkait dengan setiap masalah.
+7. Buat implementation plan berdasarkan dependency antarmodul.
+
+Jika terdapat perubahan lokal yang belum di-commit, lindungi perubahan tersebut. Jangan menggunakan reset, clean, atau tindakan destruktif terhadap pekerjaan yang sudah ada.
+
+### Prinsip wajib
+
+**A. Root-cause fixing**
+
+Jangan memperbaiki gejala saja. Cari dan perbaiki akar permasalahannya.
+
+**B. Single source of truth**
+
+Data kritis harus memiliki satu sumber kebenaran yang konsisten. Jangan membuat beberapa sumber data yang memiliki nilai berbeda.
+
+**C. Database-authoritative**
+
+Perhitungan nilai resmi, finalisasi, ranking, dan pengesahan harus diverifikasi serta dijalankan secara otoritatif di database/server.
+
+**D. Strict relational integrity**
+
+Gunakan ID relasional yang sebenarnya. Jangan mengandalkan nama, label, atau teks sebagai pengganti identitas data.
+
+**E. Transactional consistency**
+
+Operasi yang mengubah beberapa tabel dan harus konsisten wajib dijalankan secara atomik.
+
+**F. Backward compatibility**
+
+Pertahankan data lama dan dukung migrasi secara aman. Jangan menghapus atau merusak data produksi.
+
+**G. Preserve existing architecture**
+
+Jangan melakukan redesign atau rewrite besar-besaran jika tidak diperlukan. Pertahankan UI, desain, fitur, dan business workflow yang sudah berjalan dengan baik.
+
+**H. No fake success**
+
+Jangan mengembalikan status berhasil sebelum operasi yang dijanjikan benar-benar berhasil.
+
+**I. No false-positive tests**
+
+Jangan mengubah atau melemahkan assertion hanya agar pengujian menjadi hijau. Perbaiki masalah sebenarnya.
+
+---
+
+# 3. PRIORITAS P0 — CRITICAL SYSTEM INTEGRITY
+
+Empat kelompok pekerjaan berikut WAJIB diselesaikan terlebih dahulu karena berkaitan langsung dengan keabsahan hasil musabaqah.
+
+## P0-01. Server-authoritative scoring and assessment finalization
+
+### Masalah yang ditemukan
+
+Pada implementasi sebelumnya, perhitungan nilai dilakukan melalui:
+
+`src/context/MtqContext.tsx`
+
+menggunakan:
+
+- `calculateAssessmentScore`
+- `errorCounts`
+- `errorCategories`
+- `activeRubric`
+
+Hasil perhitungan `finalScore`, `fieldScores`, `totalDeductions`, dan `deductions` kemudian dikirim ke Supabase menggunakan `syncAssessmentToRemote`.
+
+RPC `finalize_judge_assessment` selanjutnya hanya mengunci lembar penilaian tanpa melakukan kalkulasi ulang secara otoritatif.
+
+Ini menyebabkan nilai final yang tersimpan masih dapat dipengaruhi oleh data kalkulasi yang berasal dari browser.
+
+### Tugas perbaikan
+
+Rancang ulang proses penyimpanan dan finalisasi agar database menjadi otoritas nilai resmi.
+
+Wajib dilakukan:
+
+1. Periksa seluruh formula perhitungan pada `scoringEngine.ts`.
+2. Periksa struktur tabel:
+   - `judge_assessments`
+   - `rubric_versions`
+   - `rubric_fields`
+   - `rubric_criteria`
+   - `deduction_rules`
+   - `error_categories`
+   - `assigned_maqras`
+   - `stage_participations`
+3. Buat mekanisme perhitungan skor yang dijalankan di server/database.
+4. Pastikan input asli penilaian, terutama jumlah kesalahan, menjadi sumber perhitungan.
+5. Ambil rubrik dan konfigurasi pengurangan dari database, bukan dari objek yang dipercaya begitu saja dari browser.
+6. Hitung ulang:
+   - Skor setiap bidang.
+   - Total pengurangan.
+   - Nilai akhir.
+   - Batas minimum dan maksimum setiap bidang.
+   - Deduction rule.
+   - Criterion cap.
+   - Field cap.
+7. Simpan hasil kalkulasi dan kunci lembar penilaian dalam transaksi yang sama.
+8. Pastikan identitas hakim, tenant, penugasan, babak, maqra, dan versi rubrik diverifikasi server.
+9. Pertahankan dukungan nilai desimal seperti 0,5 poin.
+10. Pertahankan dukungan rubrik dinamis tanpa hardcoding nama bidang tertentu.
+
+### Persyaratan keamanan
+
+Browser tidak boleh dapat menetapkan nilai resmi dengan cara mengirimkan `final_score` atau `field_scores` palsu.
+
+Operasi Data API biasa tidak boleh dapat melewati mekanisme perhitungan dan finalisasi resmi.
+
+Apabila diperlukan, pisahkan dengan jelas:
+- Penyimpanan input penilaian/draft.
+- Perhitungan skor.
+- Finalisasi dan penguncian.
+
+Jangan menghilangkan kemampuan autosave, pemantauan nilai, maupun proses penilaian yang sedang berlangsung.
+
+### Acceptance criteria
+
+- Manipulasi `final_score` dari browser tidak dapat menghasilkan nilai resmi yang salah.
+- Manipulasi `field_scores` tidak dapat melewati kalkulasi server.
+- Skor yang dihasilkan server identik dengan formula resmi di scoring engine.
+- Rubrik dinamis tetap berfungsi.
+- Nilai 0,5 tetap dihitung presisi.
+- Finalisasi gagal apabila referensi, penugasan hakim, atau konfigurasi rubrik tidak valid.
+- Setelah finalisasi, lembar penilaian tidak dapat diubah melalui Data API biasa.
+- Finalisasi dan audit log berjalan secara konsisten.
+
+Buat tes keamanan untuk seluruh kondisi tersebut menggunakan PGlite/PostgreSQL.
+
+---
+
+## P0-02. Server-authoritative ranking and tie-break
+
+### Masalah yang ditemukan
+
+Fungsi SQL `advance_stage_qualifiers` telah menghitung nilai rata-rata dari `judge_assessments`.
+
+Namun, implementasi sebelumnya masih memasukkan `client_tie_break_rank` dari `p_rankings_snapshot` sebagai bagian dari pengurutan ranking.
+
+Ini tidak boleh menjadi sumber keputusan resmi.
+
+### Tugas perbaikan
+
+Lakukan perombakan mekanisme ranking server agar seluruh keputusan peringkat berasal dari data resmi di PostgreSQL.
+
+Wajib dilakukan:
+
+1. Ambil seluruh penilaian final yang valid dari database.
+2. Hitung agregasi nilai peserta berdasarkan aturan resmi.
+3. Ambil konfigurasi tie-break dari `competition_rule_configs`.
+4. Resolusikan setiap kriteria tie-break berdasarkan versi rubrik yang berlaku.
+5. Hitung perbandingan skor berdasarkan urutan tie-break resmi.
+6. Jangan menerima ranking yang dikirim browser sebagai penentu hasil resmi.
+7. Jangan menerima nilai total atau peringkat dari browser sebagai pengganti perhitungan server.
+8. Bangun ranking snapshot dari hasil perhitungan database.
+9. Terapkan aturan kuota dan manual override secara konsisten.
+
+### Aturan tie-break
+
+Sistem harus mendukung urutan dinamis, misalnya:
+
+`Tajwid > Fashahah > Lagu > Suara`
+
+atau:
+
+`Lagu > Tajwid > Fashahah > Suara`
+
+Jangan mengunci logika ke empat nama bidang tertentu.
+
+Jika terdapat jumlah bidang dinamis, dukung berdasarkan konfigurasi rubrik dan urutan tie-break yang valid. Jika terdapat konfigurasi yang tidak dapat diproses, blokir pengesahan dan berikan pesan kesalahan yang jelas.
+
+Jika seluruh kriteria resmi tetap menghasilkan nilai seri:
+- Jangan memilih pemenang berdasarkan ranking browser.
+- Jangan menggunakan fallback tersembunyi yang dapat mengubah keputusan resmi.
+- Tandai kondisi seri.
+- Blokir pengesahan otomatis jika seri berada pada batas kuota atau posisi podium yang belum terselesaikan.
+- Minta keputusan manual sesuai aturan kompetisi, disertai alasan dan audit log.
+
+### Manual override
+
+Pastikan database memverifikasi kedua arah penyimpangan:
+
+1. Peserta di luar kuota diloloskan secara manual.
+2. Peserta di dalam kuota digugurkan secara manual.
+
+Keduanya wajib memiliki alasan yang valid.
+
+### Acceptance criteria
+
+- Mengirim ranking palsu dari browser tidak mengubah hasil ranking PostgreSQL.
+- Mengubah `client_tie_break_rank` tidak memengaruhi hasil resmi.
+- Mengubah urutan tie-break pada konfigurasi resmi menghasilkan ranking yang sesuai.
+- Tie yang belum terselesaikan memblokir pengesahan.
+- Override tanpa alasan ditolak.
+- Peserta yang diloloskan tidak boleh melebihi kuota.
+- Snapshot hasil berasal dari kalkulasi database.
+- Hasil preview browser harus sesuai dengan hasil server sebelum dikonfirmasi.
+
+---
+
+## P0-03. Strict stage, branch, and level identity integrity
+
+### Masalah yang ditemukan
+
+Beberapa bagian aplikasi masih menggunakan `stageName` sebagai pengganti `stageId`.
+
+Contoh permasalahan:
+- Soal dan peserta memiliki nama babak sama tetapi ID berbeda.
+- Peserta dapat ditemukan melalui pencarian babak berdasarkan nama saja.
+- Validator maqra masih mengizinkan ID berbeda apabila nama babak sama.
+- Agregasi maqra menggabungkan partisipasi berdasarkan nama.
+- Ranking memiliki fallback berbasis nama.
+
+### Tugas perbaikan
+
+Lakukan audit menyeluruh terhadap seluruh relasi:
+
+- `tenantId`
+- `branchId`
+- `branchName`
+- `levelId`
+- `levelName`
+- `stageId`
+- `stageName`
+- `stageParticipationId`
+- `participantId`
+- `questionId`
+- `assignedMaqraId`
+
+Gunakan identitas database sebagai sumber utama.
+
+Prioritaskan pemeriksaan:
+
+- `MtqContext.tsx`
+- `scoringEngine.ts`
+- `rankingService.ts`
+- `HasilKelulusanView.tsx`
+- `BankSoalView.tsx`
+- `supabaseDataService.ts`
+- Seluruh SQL RPC yang berkaitan.
+
+### Aturan wajib
+
+1. Jika kedua objek memiliki `stageId`, ID harus identik.
+2. Jika ID berbeda, validasi harus gagal meskipun nama babaknya sama.
+3. Jika `branchId` tersedia, harus cocok.
+4. Jika `levelId` tersedia, harus cocok.
+5. Setiap `StageParticipation` harus merujuk pada babak dan peserta yang benar.
+6. Setiap `AssignedMaqra` harus terkait dengan partisipasi babak yang benar.
+7. Setiap assessment harus terkait dengan maqra yang benar.
+8. Setiap proses ranking harus mengevaluasi identitas babak dan cabang yang benar.
+9. Fallback berbasis nama hanya boleh digunakan untuk data legacy yang benar-benar belum memiliki ID.
+10. Jangan membiarkan fallback legacy mengalahkan referensi ID yang sudah tersedia.
+
+### Perbaiki seluruh fungsi yang terkait
+
+Secara khusus periksa:
+- `addParticipant`
+- `updateParticipant`
+- `getParticipantStageQuestions`
+- `getStageParticipation`
+- `addQuestion`
+- `updateQuestion`
+- `addQuestionToParticipant`
+- `commitLotteryDrawResults`
+- `validateMaqraAssignmentForParticipant`
+- `aggregateParticipantScores`
+- `evaluateStageParticipants`
+- `advanceQualifiers`
+
+Gunakan parameter terstruktur, bukan parameter positional yang menghilangkan informasi `stageId` atau `branchId`.
+
+### Acceptance criteria
+
+Buat tes untuk:
+
+- Dua cabang memiliki nama babak yang sama.
+- Dua babak memiliki nama sama tetapi ID berbeda.
+- Peserta memiliki beberapa partisipasi babak.
+- Soal dari babak yang berbeda ditolak.
+- Soal dari cabang berbeda ditolak.
+- Soal dari jenjang berbeda ditolak.
+- Soal duplikat ditolak.
+- Penilaian dari maqra lain tidak dihitung.
+- Penilaian dari stage lain tidak dihitung.
+- Data legacy tanpa ID tetap dapat dimigrasikan secara terkendali.
+
+---
+
+## P0-04. Atomic lottery draw and Maqra assignment
+
+### Masalah yang ditemukan
+
+`commitLotteryDrawResults` sebelumnya memperbarui state lokal dan memanggil `assignMaqraRecord` menggunakan operasi asynchronous fire-and-forget.
+
+Fungsi tetap dapat mengembalikan `success: true` meskipun beberapa operasi database gagal.
+
+Outbox juga hanya menyimpan `drawLog`, bukan keseluruhan transaksi penetapan maqra.
+
+### Tugas perbaikan
+
+Buat mekanisme undian dan penetapan maqra yang atomik.
+
+Jika diperlukan, buat PostgreSQL RPC khusus, misalnya:
+
+`commit_lottery_draw`
+
+RPC harus menerima:
+- Tenant.
+- Babak.
+- Cabang.
+- Jenjang.
+- Daftar peserta.
+- Daftar soal.
+- Jumlah maqra per peserta.
+- Metode undian.
+- Informasi pelaksana.
+
+### Validasi server wajib
+
+Sebelum transaksi dijalankan, pastikan:
+
+1. Seluruh peserta benar-benar terdaftar pada tenant yang dimaksud.
+2. Seluruh peserta terdaftar pada babak dan cabang yang benar.
+3. Seluruh soal aktif.
+4. Seluruh soal sesuai babak.
+5. Seluruh soal sesuai cabang.
+6. Seluruh soal sesuai jenjang.
+7. Tidak ada soal duplikat untuk peserta yang sama.
+8. Jumlah soal sesuai permintaan.
+9. Tidak ada referensi database yang tidak valid.
+10. Penetapan tidak bertentangan dengan hasil finalisasi atau aturan re-draw.
+
+### Operasi transaksi
+
+Dalam satu transaksi:
+
+- Validasi seluruh hasil.
+- Hapus atau ganti penetapan lama secara terkontrol apabila re-draw diizinkan.
+- Masukkan seluruh `assigned_maqras`.
+- Perbarui `stage_participations`.
+- Perbarui relasi penugasan soal yang diperlukan.
+- Simpan `lottery_draw_logs`.
+- Buat audit log.
+- Kembalikan hasil transaksi.
+
+Jika satu operasi gagal, seluruh transaksi harus rollback.
+
+Jangan mengembalikan sukses sebelum RPC mengonfirmasi commit.
+
+Pastikan proses re-draw aman terhadap duplikasi dan concurrent requests.
+
+### Acceptance criteria
+
+- Penetapan tidak dapat tersimpan sebagian.
+- Log undian tidak dapat tersimpan tanpa hasil penetapan yang sesuai.
+- Kegagalan satu peserta membatalkan seluruh transaksi batch jika operasi menggunakan mode atomik.
+- Penetapan ganda ditolak.
+- Penetapan salah cabang/jenjang/babak ditolak.
+- Re-draw tidak menghapus riwayat penilaian resmi.
+- Sistem menampilkan hasil sesuai data database setelah transaksi selesai.
+
+---
+
+# 4. PRIORITAS P1 — DATA RELIABILITY AND OPERATIONAL CONSISTENCY
+
+## P1-01. Participant and question CRUD, import Excel, and database persistence
+
+### Masalah
+
+Fungsi import sebelumnya menghitung keberhasilan berdasarkan respons lokal dari `addParticipant`, `updateParticipant`, dan operasi terkait, meskipun penyimpanan Supabase masih berjalan asynchronous.
+
+Beberapa relasi `StageParticipation` juga tidak diperbarui sepenuhnya di database saat peserta diubah.
+
+### Tugas
+
+Ubah operasi kritis menjadi asynchronous yang benar.
+
+Audit:
+- `addParticipant`
+- `updateParticipant`
+- `deleteParticipant`
+- `addQuestion`
+- `updateQuestion`
+- `deleteQuestion`
+- `importParticipantsBatch`
+- `importQuestionsBatch`
+- `updateParticipantRecord`
+- `upsertParticipantWithStage`
+
+Persyaratan:
+
+1. Setiap fungsi harus mengembalikan hasil yang benar dari operasi database.
+2. Import hanya menghitung berhasil setelah penyimpanan dikonfirmasi.
+3. Update peserta harus menyinkronkan `stageId`, `branchId`, `levelId`, nama babak, dan atribut partisipasi terkait.
+4. Cegah duplikasi ID peserta.
+5. Cegah duplikasi nomor undian dalam scope yang benar.
+6. Cegah duplikasi kode soal.
+7. Validasi semua master data sebelum penyimpanan.
+8. Periksa error dari setiap query database.
+9. Jangan melakukan silent rollback tanpa informasi.
+10. Tampilkan laporan import yang menjelaskan baris berhasil, gagal, dan penyebabnya.
+
+Jika memungkinkan, gunakan mekanisme batch/transaction yang konsisten.
+
+### Acceptance criteria
+
+- Jumlah sukses import sama dengan jumlah record yang benar-benar tersimpan.
+- Kegagalan database tidak dihitung sukses.
+- Update cabang/babak peserta tidak meninggalkan relasi lama.
+- Import ulang secara idempoten dan tidak menghasilkan duplikasi.
+- Error per baris dapat ditelusuri.
+
+---
+
+## P1-02. Strict assessment aggregation
+
+### Masalah
+
+`aggregateParticipantScores` pernah memiliki fallback yang mengabaikan identitas maqra atau babak.
+
+### Tugas
+
+Perbaiki seluruh fallback pencocokan assessment.
+
+Pencocokan utama wajib berdasarkan:
+- Tenant.
+- Participant.
+- Judge.
+- StageParticipation.
+- Stage.
+- AssignedMaqra.
+- Question.
+
+Fallback tidak boleh menerima assessment hanya karena `assignedMaqraId` terisi.
+
+Jika identitas relasional tidak cocok atau tidak dapat dibuktikan, assessment tidak boleh ikut agregasi.
+
+Perhatikan:
+- Multi-maqra.
+- Multi-hakim.
+- Nilai sementara.
+- Nilai final.
+- Kelengkapan penilaian.
+- Penilaian ulang setelah reopen.
+- Data legacy.
+
+### Acceptance criteria
+
+Buat tes khusus untuk assessment yang memiliki:
+- `questionId` salah.
+- `assignedMaqraId` salah tetapi terisi.
+- `stageParticipationId` salah.
+- `stageId` berbeda dengan nama sama.
+- Tenant berbeda.
+- Hakim tidak sesuai.
+
+Seluruh data yang tidak cocok wajib dikeluarkan dari agregasi.
+
+---
+
+## P1-03. Immutable rubric versioning
+
+### Masalah
+
+Aktivasi rubrik dapat memicu kalkulasi ulang assessment lokal tanpa sinkronisasi database yang sesuai.
+
+Versi rubrik lama juga berpotensi tetap aktif di database saat state lokal mengarsipkannya.
+
+### Tugas
+
+Perbaiki seluruh lifecycle rubrik.
+
+Audit:
+- `addRubricVersion`
+- `updateRubricVersion`
+- `activateRubricVersion`
+- `archiveRubricVersion`
+- `deleteRubricVersion`
+- `updateRubricVersionStatus`
+- `upsertRubricVersionWithFields`
+- `recalculateAssessmentsForRubricOrRuleChange`
+
+Persyaratan:
+
+1. Versi rubrik yang digunakan oleh assessment harus dapat diidentifikasi secara historis.
+2. Finalized assessment tidak boleh dihitung ulang diam-diam.
+3. Snapshot hasil final harus tetap mencatat konfigurasi yang digunakan.
+4. Rubrik yang telah digunakan pada hasil final harus dilindungi dari perubahan struktural.
+5. Aktivasi versi baru dan pengarsipan versi lama harus konsisten di database dan state lokal.
+6. Aktivasi rubrik harus diisolasi berdasarkan tenant dan cabang.
+7. Perubahan konfigurasi harus ditangani secara transaksional.
+8. Penonaktifan atau penghapusan field tidak boleh merusak histori.
+9. Struktur `criteria` dan `deduction_rules` harus tetap konsisten ketika field disimpan atau diperbarui.
+10. Jangan menganggap `success` jika hanya state lokal yang berubah.
+
+Jangan memaksakan penghitungan ulang terhadap lembar yang sudah final.
+
+Jika penilaian aktif perlu dipindahkan ke versi rubrik baru, tentukan prosedur yang eksplisit, tervalidasi, dan memiliki audit trail.
+
+### Acceptance criteria
+
+- Assessment final tidak berubah akibat aktivasi rubrik baru.
+- Status versi rubrik lama dan baru konsisten di database.
+- Tenant lain tidak ikut berubah.
+- Snapshot lama tetap utuh.
+- Rollback tersedia saat penyimpanan gagal.
+
+---
+
+## P1-04. Complete and reliable Outbox synchronization
+
+### Masalah
+
+Outbox sudah menggunakan IndexedDB dan telah memiliki processor, tetapi cakupan produsen dan pemulihannya belum lengkap.
+
+Beberapa operation type sudah didefinisikan tetapi belum tentu memiliki processor yang benar.
+
+Implementasi processor sebelumnya juga memiliki perilaku default yang mengembalikan sukses untuk operasi yang tidak dikenal. Ini tidak boleh dibiarkan karena dapat menghapus antrean tanpa melakukan perubahan database.
+
+### Tugas
+
+Audit dan perbaiki:
+
+`src/services/outboxSyncService.ts`
+
+dan seluruh pemanggilnya di `MtqContext.tsx`.
+
+Persyaratan:
+
+1. Setiap operation type harus memiliki processor yang eksplisit.
+2. Operasi yang tidak dikenal harus gagal secara eksplisit dan tidak boleh ditandai synced.
+3. Jangan menghapus antrean sebelum operasi server terkonfirmasi berhasil.
+4. Jalankan flush setelah processor terdaftar dan koneksi terautentikasi tersedia.
+5. Jalankan retry ketika browser kembali online.
+6. Sediakan mekanisme retry manual.
+7. Terapkan idempotency untuk mencegah operasi ganda.
+8. Terapkan retry policy yang wajar.
+9. Simpan error terakhir dan jumlah retry.
+10. Pastikan antrean terisolasi berdasarkan tenant.
+11. Jangan memasukkan operasi finalisasi dan pengesahan resmi ke antrean yang dapat memberikan kesan seolah-olah transaksi berhasil secara offline.
+12. Pastikan payload operasi cukup untuk melakukan pemulihan seluruh transaksi yang dijanjikan.
+
+Lengkapi producer untuk operasi CRUD yang memang dirancang agar dapat dipulihkan.
+
+Jangan mengantrekan operasi yang tidak memiliki recovery processor.
+
+### Acceptance criteria
+
+- Antrean yang tertinggal saat browser ditutup tetap terbaca setelah dibuka kembali.
+- Flush dilakukan ketika koneksi dan sesi sudah siap.
+- Tidak ada operasi tanpa processor yang dianggap sukses.
+- Data tidak hilang ketika sinkronisasi gagal.
+- Retry tidak menghasilkan data duplikat.
+- Status pending, syncing, failed, dan synced sesuai keadaan sebenarnya.
+- Operasi resmi yang membutuhkan server tidak pernah diklaim selesai saat offline.
+
+---
+
+# 5. PRIORITAS P1 — UI WORKFLOW AND RANKING CONSISTENCY
+
+## P1-05. Hasil babak, per cabang, dan advancement workflow
+
+Audit seluruh:
+
+- `HasilKelulusanView.tsx`
+- `rankingService.ts`
+- `advanceQualifiers` di `MtqContext.tsx`.
+
+Pastikan halaman hasil benar-benar bekerja per identitas cabang dan babak.
+
+Persyaratan:
+
+1. Ranking setiap cabang harus independen.
+2. Hakim cabang A tidak boleh memengaruhi kelengkapan peserta cabang B.
+3. Kuota harus berasal dari konfigurasi babak yang benar.
+4. Babak berikutnya harus dicari berdasarkan cabang dan identitas babak.
+5. Pengesahan harus membawa `currentStageId`, `nextStageId`, `branchId`, serta `manualOverrides` yang sebenarnya.
+6. Tidak boleh memilih stage berdasarkan nama pertama yang ditemukan.
+7. Setiap peserta yang lolos harus masuk ke babak yang benar.
+8. Tidak boleh ada peserta yang terdaftar ganda dalam babak tujuan.
+9. Pengesahan babak harus ditolak jika peserta atau penilaiannya belum lengkap.
+10. Ranking browser harus diverifikasi ulang terhadap hasil server sebelum hasil diumumkan.
+11. Kuota override harus konsisten antara preview, aplikasi, dan PostgreSQL.
+12. Final championship harus dapat disahkan ketika tidak ada `nextStageId`.
+
+### Acceptance criteria
+
+Tes minimal mencakup:
+- Dua cabang dengan nama babak sama.
+- Dua cabang dengan kuota berbeda.
+- Dua rubrik berbeda.
+- Dua konfigurasi tie-break berbeda.
+- Manual override.
+- Reopen assessment.
+- Babak semifinal.
+- Babak final.
+- Penetapan juara 1, 2, dan 3.
+- Finalisasi tanpa babak berikutnya.
+
+Pastikan hasil snapshot tidak mencampurkan cabang atau babak.
+
+---
+
+# 6. DATABASE SECURITY AND MIGRATION HARDENING
+
+Lakukan audit keamanan database secara menyeluruh sebagai bagian dari pekerjaan di atas.
+
+Periksa:
+- Seluruh RLS policies.
+- Foreign key.
+- Unique constraints.
+- Check constraints.
+- SECURITY DEFINER functions.
+- Search path.
+- Authorization.
+- Tenant isolation.
+- Transaction boundaries.
+- Audit log.
+- Immutability triggers.
+- Direct Data API access.
+
+### Persyaratan wajib
+
+1. Tidak ada operasi yang memungkinkan tenant membaca atau mengubah data tenant lain.
+2. Hakim hanya dapat mengakses penilaian yang ditugaskan.
+3. Hakim tidak dapat mengubah nilai final yang sudah terkunci.
+4. Admin tidak dapat mengubah hasil final tanpa mekanisme pembukaan ulang yang sah.
+5. Snapshot hasil resmi tidak dapat ditulis langsung melalui Data API.
+6. RPC harus memvalidasi identitas pengguna, peran, tenant, dan referensi data.
+7. SECURITY DEFINER function harus memiliki `search_path` yang aman.
+8. Operasi sensitif harus memiliki audit trail.
+9. Unique constraints harus melindungi transaksi yang rentan duplikasi.
+10. Jangan membuat bypass RLS untuk mempermudah fitur.
+
+### Database migrations
+
+Jika perubahan memerlukan migrasi:
+
+- Buat migration baru, jangan mengubah histori migration yang sudah pernah digunakan pada deployment.
+- Pastikan migration kompatibel dengan database lama.
+- Pastikan skema instalasi baru tetap konsisten.
+- Update `supabase/schema.sql` jika file tersebut merupakan representasi skema instalasi bersih yang digunakan tes.
+- Jangan menghapus data historis.
+- Gunakan perubahan additive bila memungkinkan.
+- Jika ada transformasi data, buat proses migrasi yang dapat diverifikasi.
+- Uji migration dari database kosong dan dari kondisi schema sebelumnya.
+- Jangan menjalankan destructive migration terhadap database produksi.
+- Jangan mengakses atau mengubah data produksi tanpa izin eksplisit.
+
+---
+
+# 7. CI/CD, TYPESCRIPT, DEPENDENCY, DAN PLAYWRIGHT
+
+### Masalah yang telah ditemukan
+
+GitHub Actions pada commit baseline menunjukkan:
+
+- Typecheck: lulus.
+- Domain/integration/database tests: 65/65 lulus.
+- Production build: lulus.
+- Playwright: gagal.
+- 27 test gagal dan 10 test lulus.
+- Sejumlah kegagalan proyek iPad berasal dari executable WebKit yang tidak dipasang.
+- Beberapa skenario Desktop Chrome gagal menemukan elemen atau mengalami click timeout.
+
+### Tugas A — Perbaiki browser configuration
+
+Periksa:
+
+- `.github/workflows/ci.yml`
+- `playwright.config.ts`
+- `tests/e2e/`
+
+Jika proyek iPad memang ditujukan untuk menguji WebKit, pastikan workflow memasang WebKit yang sesuai.
+
+Jika proyek dimaksudkan menggunakan Chromium dengan viewport tablet, sesuaikan konfigurasi secara eksplisit.
+
+Jangan menghapus pengujian tablet hanya untuk membuat CI hijau.
+
+### Tugas B — Perbaiki Desktop Chrome failures
+
+Investigasi semua skenario yang gagal.
+
+Gunakan:
+- Screenshot.
+- Trace.
+- Error context.
+- DOM locator.
+- Console output.
+- Network errors jika tersedia.
+
+Bedakan:
+1. Selector test yang tidak sesuai dengan UI.
+2. UI yang memang mengalami bug.
+3. State yang tidak terinisialisasi.
+4. Race condition.
+5. Navigation issue.
+6. Elemen yang tertutup atau tidak dapat diklik.
+
+Perbaiki berdasarkan akar masalah.
+
+Jangan menghapus assertion penting atau menggantinya dengan assertion yang lebih lemah.
+
+### Tugas C — Node.js dan dependency
+
+Workflow sebelumnya menggunakan Node.js 20, sementara versi paket Supabase memberikan peringatan membutuhkan Node.js 22 atau lebih baru.
+
+Tugas:
+- Pindahkan CI ke Node.js 22 atau versi yang didukung seluruh dependency.
+- Pertahankan lockfile yang konsisten.
+- Periksa satu temuan high severity dari `npm audit`.
+- Perbarui dependency yang rentan dengan versi kompatibel.
+- Hindari `npm audit fix --force` tanpa analisis dampak.
+- Jangan menutupi vulnerability tanpa penjelasan.
+
+### Acceptance criteria
+
+Seluruh tahapan berikut harus berhasil:
+
+1. Install dependencies.
+2. TypeScript typecheck.
+3. Unit/domain tests.
+4. PostgreSQL integration tests.
+5. Security/RLS tests.
+6. Production build.
+7. Desktop Playwright E2E.
+8. Tablet Playwright E2E.
+
+Jika ada pengujian live yang membutuhkan credentials, jangan membuat credentials palsu. Jalankan semua tes yang dapat dijalankan tanpa credentials dan jelaskan pengujian live yang belum dapat dilakukan.
+
+---
+
+# 8. END-TO-END OPERATIONAL TESTING — FULL MTQ LIFECYCLE
+
+Tambahkan atau tingkatkan tes Playwright dan integrasi agar menguji proses musabaqah secara menyeluruh.
+
+Buat skenario end-to-end yang benar-benar melakukan interaksi, bukan hanya memeriksa keberadaan halaman.
+
+Target skenario:
+
+### Tahap 1 — Competition setup
+- Membuat cabang.
+- Membuat jenjang.
+- Mengatur rubrik.
+- Mengatur urutan tie-break.
+- Mengatur kuota.
+- Membuat babak penyisihan, semifinal, dan final.
+
+### Tahap 2 — Participant registration
+- Membuat grup/kafilah.
+- Menambahkan peserta.
+- Import peserta melalui Excel.
+- Mengubah data peserta.
+- Memvalidasi duplikasi.
+- Memverifikasi relasi database.
+
+### Tahap 3 — Question and Maqra setup
+- Membuat bank soal.
+- Import soal melalui Excel.
+- Mengatur cabang, jenjang, dan babak soal.
+- Melakukan undian maqra.
+- Melakukan penetapan manual.
+- Memastikan penetapan benar-benar tersimpan.
+
+### Tahap 4 — Judge assessment
+- Membuat akun atau penugasan hakim.
+- Memastikan hakim hanya dapat mengakses peserta yang ditugaskan.
+- Membuka lembar penilaian.
+- Mengisi kesalahan.
+- Menggunakan nilai desimal.
+- Menyimpan draft.
+- Finalisasi penilaian.
+- Menguji larangan mengubah nilai final.
+
+### Tahap 5 — Monitoring and aggregation
+- Memastikan nilai semua hakim terhitung.
+- Memastikan multi-maqra teragregasi benar.
+- Memeriksa status sementara dan final.
+- Memeriksa progres per

@@ -1084,7 +1084,224 @@ WITH CHECK (
 
 -- 15. STORED PROCEDURES / RPC FUNCTIONS (ATOMIC & HARDENED)
 
--- RPC 1: Finalisasi & Penguncian Lembar Penilaian oleh Hakim Bertugas (Finalize Judge Assessment)
+-- RPC 0: Mesin Perhitungan Nilai Resmi Server (Server-Authoritative Scoring Engine — P0-01)
+CREATE OR REPLACE FUNCTION public.calculate_assessment_score_sql(
+    p_tenant_id UUID,
+    p_rubric_version_id UUID,
+    p_error_counts JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_rubric RECORD;
+    v_field RECORD;
+    v_cat RECORD;
+    v_cat_key TEXT;
+    v_count_val TEXT;
+    v_count NUMERIC;
+    v_target_field_name TEXT;
+    v_field_max_deduction NUMERIC;
+    v_deduction NUMERIC;
+    v_rule RECORD;
+    v_crit RECORD;
+    v_unit_deduction NUMERIC;
+    v_raw_deduction NUMERIC;
+    v_crit_deductions JSONB := '{}'::jsonb;
+    v_field_deductions JSONB := '{}'::jsonb;
+    v_field_scores JSONB := '{}'::jsonb;
+    v_deductions JSONB := '{}'::jsonb;
+    v_total_deductions NUMERIC := 0.00;
+    v_final_score NUMERIC := 0.00;
+    v_cur_crit_ded NUMERIC;
+    v_allowed_crit NUMERIC;
+    v_field_score NUMERIC;
+BEGIN
+    SELECT * INTO v_rubric FROM rubric_versions WHERE id = p_rubric_version_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Rubrik penilaian tidak ditemukan di database.';
+    END IF;
+
+    -- Inisialisasi bidang aktif
+    FOR v_field IN
+        SELECT * FROM rubric_fields
+        WHERE rubric_version_id = p_rubric_version_id
+          AND status = 'Aktif'
+        ORDER BY field_order ASC
+    LOOP
+        v_field_deductions := jsonb_set(v_field_deductions, ARRAY[v_field.name], '0'::jsonb);
+        v_field_scores := jsonb_set(v_field_scores, ARRAY[v_field.name], to_jsonb(v_field.max_score));
+    END LOOP;
+
+    -- Iterasi setiap entri error_counts
+    IF p_error_counts IS NOT NULL AND jsonb_typeof(p_error_counts) = 'object' THEN
+        FOR v_cat_key, v_count_val IN
+            SELECT key, value #>> '{}' FROM jsonb_each(p_error_counts)
+        LOOP
+            IF v_count_val IS NULL OR TRIM(v_count_val) = '' THEN
+                CONTINUE;
+            END IF;
+
+            IF NOT (v_count_val ~ '^[0-9]+$') THEN
+                RAISE EXCEPTION 'Jumlah kejadian kesalahan kategori % wajib berupa bilangan bulat non-negatif.', v_cat_key;
+            END IF;
+
+            v_count := v_count_val::numeric;
+            IF v_count <= 0 THEN
+                CONTINUE;
+            END IF;
+
+            -- Cari error_categories berdasarkan ID atau CODE pada tenant
+            SELECT * INTO v_cat
+            FROM error_categories
+            WHERE tenant_id = p_tenant_id
+              AND (id::text = v_cat_key OR code = v_cat_key)
+              AND status = 'Aktif'
+            LIMIT 1;
+
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'Kategori kesalahan % tidak ditemukan atau tidak berstatus aktif pada tenant ini.', v_cat_key;
+            END IF;
+
+            -- Resolusi bidang rubrik
+            v_target_field_name := NULL;
+            IF v_cat.rubric_field_id IS NOT NULL THEN
+                SELECT name INTO v_target_field_name
+                FROM rubric_fields
+                WHERE id = v_cat.rubric_field_id
+                  AND rubric_version_id = p_rubric_version_id
+                  AND status = 'Aktif';
+            END IF;
+
+            IF v_target_field_name IS NULL AND v_cat.criterion_id IS NOT NULL THEN
+                SELECT rf.name INTO v_target_field_name
+                FROM rubric_criteria rc
+                JOIN rubric_fields rf ON rf.id = rc.rubric_field_id
+                WHERE rc.id = v_cat.criterion_id
+                  AND rf.rubric_version_id = p_rubric_version_id
+                  AND rf.status = 'Aktif';
+            END IF;
+
+            IF v_target_field_name IS NULL AND v_cat.deduction_rule_id IS NOT NULL THEN
+                SELECT rf.name INTO v_target_field_name
+                FROM deduction_rules dr
+                JOIN rubric_criteria rc ON rc.id = dr.criterion_id
+                JOIN rubric_fields rf ON rf.id = rc.rubric_field_id
+                WHERE dr.id = v_cat.deduction_rule_id
+                  AND rf.rubric_version_id = p_rubric_version_id
+                  AND rf.status = 'Aktif';
+            END IF;
+
+            IF v_target_field_name IS NULL THEN
+                SELECT name INTO v_target_field_name
+                FROM rubric_fields
+                WHERE rubric_version_id = p_rubric_version_id
+                  AND status = 'Aktif'
+                  AND (
+                      LOWER(name) = LOWER(v_cat.name)
+                      OR LOWER(code) = LOWER(v_cat.code)
+                      OR (v_cat.scope IS NOT NULL AND LOWER(name) = LOWER(v_cat.scope))
+                  )
+                LIMIT 1;
+            END IF;
+
+            IF v_target_field_name IS NULL AND (v_rubric.code = 'RUBRIC-SENI-BACA-2025' OR v_rubric.name ILIKE '%Seni Baca%') THEN
+                IF v_cat.name ILIKE '%tajwid%' OR v_cat.name ILIKE '%makharij%' OR v_cat.code IN ('tjw', 'mkh', 'idg') OR COALESCE(v_cat.scope, '') ILIKE '%tajwid%' THEN
+                    v_target_field_name := 'Tajwid';
+                ELSIF v_cat.name ILIKE '%fashahah%' OR v_cat.name ILIKE '%fasahah%' OR v_cat.name ILIKE '%waqf%' OR v_cat.code = 'fsh' OR COALESCE(v_cat.scope, '') ILIKE '%fashahah%' THEN
+                    v_target_field_name := 'Fashahah';
+                ELSIF v_cat.name ILIKE '%lagu%' OR v_cat.name ILIKE '%irama%' OR v_cat.code IN ('lag', 'lgu') OR COALESCE(v_cat.scope, '') ILIKE '%lagu%' THEN
+                    v_target_field_name := 'Lagu';
+                ELSIF v_cat.name ILIKE '%suara%' OR v_cat.name ILIKE '%vokal%' OR v_cat.code IN ('sua', 'sur') OR COALESCE(v_cat.scope, '') ILIKE '%suara%' THEN
+                    v_target_field_name := 'Suara';
+                END IF;
+            END IF;
+
+            IF v_target_field_name IS NULL THEN
+                RAISE EXCEPTION 'Kategori kesalahan "%" belum terpetakan ke bidang rubrik aktif pada rubrik "%". Dilarang fallback ke bidang lain.', v_cat.name, v_rubric.name;
+            END IF;
+
+            -- Dapatkan besaran pengurangan per kejadian
+            v_unit_deduction := v_cat.default_deduction;
+            IF v_cat.deduction_rule_id IS NOT NULL THEN
+                SELECT * INTO v_rule FROM deduction_rules WHERE id = v_cat.deduction_rule_id;
+                IF FOUND AND v_rule.deduction_points IS NOT NULL THEN
+                    v_unit_deduction := v_rule.deduction_points;
+                END IF;
+            END IF;
+
+            v_raw_deduction := ROUND(v_count * v_unit_deduction, 2);
+
+            IF v_rule.id IS NOT NULL AND v_rule.max_deduction IS NOT NULL AND v_rule.max_deduction >= 0 THEN
+                v_raw_deduction := LEAST(v_raw_deduction, v_rule.max_deduction);
+            END IF;
+
+            IF v_cat.max_deduction IS NOT NULL AND v_cat.max_deduction >= 0 THEN
+                v_raw_deduction := LEAST(v_raw_deduction, v_cat.max_deduction);
+            END IF;
+
+            IF v_cat.criterion_id IS NOT NULL THEN
+                SELECT * INTO v_crit FROM rubric_criteria WHERE id = v_cat.criterion_id;
+                IF FOUND AND v_crit.max_deduction IS NOT NULL AND v_crit.max_deduction >= 0 THEN
+                    v_cur_crit_ded := COALESCE((v_crit_deductions ->> v_crit.id::text)::numeric, 0.00);
+                    v_allowed_crit := GREATEST(0.00, v_crit.max_deduction - v_cur_crit_ded);
+                    v_raw_deduction := LEAST(v_raw_deduction, v_allowed_crit);
+                    v_crit_deductions := jsonb_set(
+                        v_crit_deductions,
+                        ARRAY[v_crit.id::text],
+                        to_jsonb(ROUND(v_cur_crit_ded + v_raw_deduction, 2))
+                    );
+                END IF;
+            END IF;
+
+            v_deductions := jsonb_set(v_deductions, ARRAY[v_cat_key], to_jsonb(v_raw_deduction));
+
+            v_deduction := COALESCE((v_field_deductions ->> v_target_field_name)::numeric, 0.00) + v_raw_deduction;
+            v_field_deductions := jsonb_set(v_field_deductions, ARRAY[v_target_field_name], to_jsonb(ROUND(v_deduction, 2)));
+        END LOOP;
+    END IF;
+
+    -- Hitung nilai akhir per bidang dengan batasan min_score, max_score, dan max_deduction bidang
+    v_total_deductions := 0.00;
+    v_final_score := 0.00;
+
+    FOR v_field IN
+        SELECT * FROM rubric_fields
+        WHERE rubric_version_id = p_rubric_version_id
+          AND status = 'Aktif'
+        ORDER BY field_order ASC
+    LOOP
+        v_deduction := COALESCE((v_field_deductions ->> v_field.name)::numeric, 0.00);
+        v_field_max_deduction := COALESCE(v_field.max_deduction, (v_field.max_score - v_field.min_score));
+        v_deduction := LEAST(v_deduction, v_field_max_deduction);
+        v_deduction := ROUND(v_deduction, 2);
+
+        v_field_score := GREATEST(v_field.min_score, LEAST(v_field.max_score, v_field.max_score - v_deduction));
+        v_field_score := ROUND(v_field_score, 2);
+
+        v_field_scores := jsonb_set(v_field_scores, ARRAY[v_field.name], to_jsonb(v_field_score));
+        v_field_deductions := jsonb_set(v_field_deductions, ARRAY[v_field.name], to_jsonb(v_deduction));
+
+        v_total_deductions := v_total_deductions + v_deduction;
+        v_final_score := v_final_score + v_field_score;
+    END LOOP;
+
+    v_total_deductions := ROUND(v_total_deductions, 2);
+    v_final_score := ROUND(v_final_score, 2);
+
+    RETURN jsonb_build_object(
+        'final_score', v_final_score,
+        'total_deductions', v_total_deductions,
+        'field_scores', v_field_scores,
+        'field_deductions', v_field_deductions,
+        'deductions', v_deductions
+    );
+END;
+$$;
+
+-- RPC 1: Finalisasi & Penguncian Lembar Penilaian oleh Hakim Bertugas (Finalize Judge Assessment — P0-01 Server Authoritative)
 CREATE OR REPLACE FUNCTION finalize_judge_assessment(
     p_assessment_id UUID
 )
@@ -1099,6 +1316,7 @@ DECLARE
     v_assessment RECORD;
     v_sp RECORD;
     v_stage RECORD;
+    v_calc JSONB;
     v_required_units INT;
     v_finalized_units INT;
     v_now TIMESTAMPTZ := now();
@@ -1132,14 +1350,24 @@ BEGIN
         RAISE EXCEPTION 'Finalisasi ditolak: Babak musabaqah ini telah ditutup/disahkan.';
     END IF;
 
+    -- P0-01: Hitung ulang nilai resmi secara otoritatif dari error_counts mentah & rubrik database
+    v_calc := calculate_assessment_score_sql(
+        v_assessment.tenant_id,
+        v_assessment.rubric_version_id,
+        COALESCE(v_assessment.error_counts, '{}'::jsonb)
+    );
+
     -- Aktifkan flag transaksi lokal agar trigger imutabilitas mengizinkan finalisasi & audit resmi
     PERFORM set_config('mtq.rpc_finalize_active', 'true', true);
     PERFORM set_config('mtq.rpc_audit_active', 'true', true);
 
-    -- Kunci lembar penilaian
+    -- Kunci lembar penilaian dan simpan hasil perhitungan server resmi
     UPDATE judge_assessments
     SET status = 'finalized',
         is_locked = true,
+        final_score = (v_calc ->> 'final_score')::numeric,
+        total_deductions = (v_calc ->> 'total_deductions')::numeric,
+        field_scores = (v_calc -> 'field_scores'),
         finalized_at = v_now,
         updated_at = v_now
     WHERE id = p_assessment_id;
@@ -2217,6 +2445,196 @@ BEGIN
 END;
 $$;
 
+-- RPC 7: Transaksi Atomik Undian & Penetapan Maqra (commit_lottery_draw — P0-04)
+CREATE OR REPLACE FUNCTION public.commit_lottery_draw(
+    p_tenant_id UUID,
+    p_stage_id UUID,
+    p_stage_name VARCHAR(100),
+    p_branch_id UUID,
+    p_branch_name VARCHAR(150),
+    p_level_id UUID,
+    p_level_name VARCHAR(150),
+    p_actor_id UUID,
+    p_actor_name VARCHAR(255),
+    p_results JSONB,
+    p_questions_per_participant INT DEFAULT 1,
+    p_notes TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_stage RECORD;
+    v_res_elem JSONB;
+    v_participant_id UUID;
+    v_q_ids_json JSONB;
+    v_q_id_text TEXT;
+    v_q_id UUID;
+    v_question RECORD;
+    v_part RECORD;
+    v_sp RECORD;
+    v_now TIMESTAMPTZ := now();
+    v_draw_log_id UUID := gen_random_uuid();
+    v_assigned_maqras JSONB := '[]'::jsonb;
+    v_all_p_ids TEXT[] := ARRAY[]::TEXT[];
+    v_all_q_ids TEXT[] := ARRAY[]::TEXT[];
+    v_new_maqra_id UUID;
+    v_questions_count INT;
+BEGIN
+    IF NOT is_tenant_admin(p_tenant_id) THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Hanya Administrator yang berwenang menetapkan hasil undian maqra.';
+    END IF;
+
+    SELECT * INTO v_stage FROM stages WHERE id = p_stage_id AND tenant_id = p_tenant_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Babak musabaqah tidak ditemukan pada tenant ini.';
+    END IF;
+
+    IF v_stage.is_finalized THEN
+        RAISE EXCEPTION 'Penetapan undian ditolak: Babak "%" telah difinalisasi secara resmi.', v_stage.name;
+    END IF;
+
+    IF jsonb_array_length(p_results) = 0 THEN
+        RAISE EXCEPTION 'Hasil undian kosong.';
+    END IF;
+
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
+
+    -- 1. Validasi ketat 3D untuk seluruh hasil undian
+    FOR v_res_elem IN SELECT * FROM jsonb_array_elements(p_results)
+    LOOP
+        v_participant_id := (v_res_elem ->> 'participantId')::uuid;
+        SELECT * INTO v_part FROM participants WHERE id = v_participant_id AND tenant_id = p_tenant_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Peserta dengan ID % tidak ditemukan pada tenant ini.', v_participant_id;
+        END IF;
+
+        IF p_branch_id IS NOT NULL AND v_part.branch_id IS NOT NULL AND v_part.branch_id <> p_branch_id THEN
+            RAISE EXCEPTION 'Ketidaksesuaian cabang: Peserta "%" terdaftar pada cabang berbeda.', v_part.name;
+        END IF;
+
+        IF p_level_id IS NOT NULL AND v_part.level_id IS NOT NULL AND v_part.level_id <> p_level_id THEN
+            RAISE EXCEPTION 'Ketidaksesuaian jenjang: Peserta "%" terdaftar pada jenjang berbeda.', v_part.name;
+        END IF;
+
+        v_q_ids_json := v_res_elem -> 'questionIds';
+        v_questions_count := jsonb_array_length(v_q_ids_json);
+        IF v_questions_count = 0 THEN
+            RAISE EXCEPTION 'Tidak ada soal yang ditetapkan untuk peserta "%".', v_part.name;
+        END IF;
+
+        v_all_p_ids := array_append(v_all_p_ids, v_participant_id::text);
+
+        FOR v_q_id_text IN SELECT * FROM jsonb_array_elements_text(v_q_ids_json)
+        LOOP
+            v_q_id := v_q_id_text::uuid;
+            SELECT * INTO v_question FROM questions WHERE id = v_q_id AND tenant_id = p_tenant_id;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'Soal dengan ID % tidak ditemukan.', v_q_id;
+            END IF;
+
+            IF v_question.status <> 'Aktif' THEN
+                RAISE EXCEPTION 'Soal "%" (%) tidak berstatus Aktif.', v_question.title, v_question.code;
+            END IF;
+
+            IF p_branch_id IS NOT NULL AND v_question.branch_id IS NOT NULL AND v_question.branch_id <> p_branch_id THEN
+                RAISE EXCEPTION 'Ketidaksesuaian cabang: Soal "%" berada pada cabang berbeda.', v_question.title;
+            END IF;
+
+            IF p_level_id IS NOT NULL AND v_question.level_id IS NOT NULL AND v_question.level_id <> p_level_id THEN
+                RAISE EXCEPTION 'Ketidaksesuaian jenjang: Soal "%" berada pada jenjang berbeda.', v_question.title;
+            END IF;
+
+            v_all_q_ids := array_append(v_all_q_ids, v_q_id::text);
+        END LOOP;
+    END LOOP;
+
+    -- 2. Eksekusi atomik pembaruan database
+    FOR v_res_elem IN SELECT * FROM jsonb_array_elements(p_results)
+    LOOP
+        v_participant_id := (v_res_elem ->> 'participantId')::uuid;
+
+        SELECT * INTO v_sp FROM stage_participations
+        WHERE stage_id = p_stage_id AND participant_id = v_participant_id AND tenant_id = p_tenant_id
+        LIMIT 1;
+
+        IF NOT FOUND THEN
+            INSERT INTO stage_participations (
+                id, tenant_id, stage_id, stage_name, participant_id, lottery_number, status, created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(), p_tenant_id, p_stage_id, p_stage_name, v_participant_id,
+                (SELECT lottery_number FROM participants WHERE id = v_participant_id),
+                'Belum Dimulai', v_now, v_now
+            ) RETURNING * INTO v_sp;
+        END IF;
+
+        -- Hapus penetapan lama yang belum memiliki penilaian final (mendukung re-draw aman)
+        DELETE FROM assigned_maqras
+        WHERE stage_participation_id = v_sp.id
+          AND tenant_id = p_tenant_id
+          AND id NOT IN (
+              SELECT assigned_maqra_id FROM judge_assessments
+              WHERE stage_participation_id = v_sp.id AND status = 'finalized'
+          );
+
+        -- Sisipkan assigned_maqras baru
+        FOR v_q_id_text IN SELECT * FROM jsonb_array_elements_text(v_res_elem -> 'questionIds')
+        LOOP
+            v_q_id := v_q_id_text::uuid;
+            v_new_maqra_id := gen_random_uuid();
+
+            INSERT INTO assigned_maqras (
+                id, tenant_id, stage_participation_id, question_id, assigned_at, method, notes
+            ) VALUES (
+                v_new_maqra_id, p_tenant_id, v_sp.id, v_q_id, v_now, 'undian', p_notes
+            );
+
+            v_assigned_maqras := v_assigned_maqras || jsonb_build_object(
+                'id', v_new_maqra_id,
+                'participantId', v_participant_id,
+                'stageParticipationId', v_sp.id,
+                'questionId', v_q_id
+            );
+        END LOOP;
+
+        UPDATE stage_participations
+        SET status = CASE WHEN status = 'Maqra Belum Ditetapkan' THEN 'Belum Dimulai' ELSE status END,
+            updated_at = v_now
+        WHERE id = v_sp.id;
+    END LOOP;
+
+    -- Simpan riwayat undian di lottery_draw_logs
+    INSERT INTO lottery_draw_logs (
+        id, tenant_id, stage_id, stage_name, branch_id, branch_name, level_id, level_name,
+        actor_id, actor_name, questions_per_participant, participant_ids, question_pool_ids,
+        draw_results, notes, created_at
+    ) VALUES (
+        v_draw_log_id, p_tenant_id, p_stage_id, p_stage_name, p_branch_id, p_branch_name, p_level_id, p_level_name,
+        p_actor_id, p_actor_name, p_questions_per_participant, v_all_p_ids, v_all_q_ids,
+        p_results, p_notes, v_now
+    );
+
+    -- Simpan audit log
+    INSERT INTO audit_logs (
+        tenant_id, actor_id, actor_name, action, target, summary, outcome
+    ) VALUES (
+        p_tenant_id, p_actor_id, p_actor_name, 'LOTTERY_DRAW_COMMITTED',
+        'Stage: ' || p_stage_name || ', Branch: ' || p_branch_name,
+        'Penetapan undian maqra atomik untuk ' || jsonb_array_length(p_results)::text || ' peserta (Log ID: ' || v_draw_log_id::text || ')',
+        'Success'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'message', 'Penetapan undian maqra berhasil dicatat secara atomik di database.',
+        'drawLogId', v_draw_log_id,
+        'assignedMaqras', v_assigned_maqras
+    );
+END;
+$$;
+
 -- 16. EXPLICIT RPC & SECURITY HELPER EXECUTION PERMISSIONS
 REVOKE EXECUTE ON FUNCTION is_superadmin() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION is_superadmin() TO authenticated;
@@ -2236,11 +2654,17 @@ GRANT EXECUTE ON FUNCTION is_assigned_judge(UUID, UUID, UUID) TO authenticated;
 REVOKE EXECUTE ON FUNCTION finalize_judge_assessment(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION finalize_judge_assessment(UUID) TO authenticated;
 
+REVOKE EXECUTE ON FUNCTION calculate_assessment_score_sql(UUID, UUID, JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION calculate_assessment_score_sql(UUID, UUID, JSONB) TO authenticated;
+
 REVOKE EXECUTE ON FUNCTION reopen_judge_assessment(UUID, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION reopen_judge_assessment(UUID, TEXT) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION advance_stage_qualifiers(UUID, UUID, UUID[], JSONB, JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION advance_stage_qualifiers(UUID, UUID, UUID[], JSONB, JSONB) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION commit_lottery_draw(UUID, UUID, VARCHAR, UUID, VARCHAR, UUID, VARCHAR, UUID, VARCHAR, JSONB, INT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION commit_lottery_draw(UUID, UUID, VARCHAR, UUID, VARCHAR, UUID, VARCHAR, UUID, VARCHAR, JSONB, INT, TEXT) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION append_admin_audit_log(UUID, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION append_admin_audit_log(UUID, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
