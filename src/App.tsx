@@ -29,7 +29,7 @@ import { SuperadminDashboardView } from './components/superadmin/SuperadminDashb
 import { SuperadminTenantsView } from './components/superadmin/SuperadminTenantsView';
 import { SuperadminUsersView } from './components/superadmin/SuperadminUsersView';
 import { SuperadminAuditView } from './components/superadmin/SuperadminAuditView';
-import { ActivityLogView } from './components/logs/ActivityLogView';
+import { ActivityLogView } from './components/activityLog/ActivityLogView';
 
 const AuthenticationGateView: React.FC = () => {
   const {
