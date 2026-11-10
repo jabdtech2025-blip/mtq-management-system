@@ -177,3 +177,56 @@ export function buildPublicProvisionSuccessResponse(params: {
     message: 'Undangan atau penautan akun telah diproses.'
   };
 }
+
+export function validateProvisionRoleForCaller(
+  targetRole: string,
+  isCallerSuperadmin: boolean
+): { allowed: boolean; status: number; code?: string; error?: string } {
+  const allowedRoles = isCallerSuperadmin ? ['judge', 'admin', 'superadmin'] : ['judge', 'admin'];
+  if (!allowedRoles.includes(targetRole)) {
+    const isSuperadminAttempt = targetRole === 'superadmin';
+    return {
+      allowed: false,
+      status: isSuperadminAttempt ? 403 : 400,
+      code: isSuperadminAttempt ? 'SUPERADMIN_ESCALATION_FORBIDDEN' : 'INVALID_ROLE',
+      error: isSuperadminAttempt
+        ? 'Otorisasi ditolak: Administrator Tenant tidak diizinkan membuat atau menetapkan peran Superadmin.'
+        : `Peran pengguna (${targetRole}) tidak diizinkan. Gunakan salah satu dari: ${allowedRoles.join(', ')}.`
+    };
+  }
+  return { allowed: true, status: 200 };
+}
+
+export async function handleProvisionRpcFailureRollback(params: {
+  internalProvisioningState: 'invited' | 'linked_existing';
+  resolvedAuthUserId: string | null;
+  rpcErrorMessage: string;
+  deleteAuthUser: (userId: string) => Promise<{ error: { message: string } | null }>;
+}): Promise<{
+  status: number;
+  body: {
+    success: false;
+    code: 'MEMBERSHIP_SYNC_FAILED';
+    rolledBackAuthUser: boolean;
+    error: string;
+  };
+}> {
+  let rollbackDeleted = false;
+  if (params.internalProvisioningState === 'invited' && params.resolvedAuthUserId) {
+    const { error: deleteErr } = await params.deleteAuthUser(params.resolvedAuthUserId);
+    rollbackDeleted = !deleteErr;
+  }
+
+  return {
+    status: 422,
+    body: {
+      success: false,
+      code: 'MEMBERSHIP_SYNC_FAILED',
+      rolledBackAuthUser: rollbackDeleted,
+      error: rollbackDeleted
+        ? `Sinkronisasi profil/keanggotaan gagal (${params.rpcErrorMessage}). Akun Auth baru telah dibatalkan (dihapus kembali) secara otomatis agar tidak meninggalkan akun yatim.`
+        : `Sinkronisasi profil/keanggotaan gagal: ${params.rpcErrorMessage}.`
+    }
+  };
+}
+

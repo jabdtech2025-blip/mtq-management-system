@@ -312,13 +312,18 @@ export function calculateAssessmentScore(
     fieldDeductions[fieldName] = Math.round(((fieldDeductions[fieldName] || 0) + deductionAmount + Number.EPSILON) * 100) / 100;
   });
 
-  // Hitung nilai per bidang aktif dengan batas minScore dan maxScore dinamis
+  // Hitung nilai per bidang aktif dengan batas minScore, maxScore, dan bobot bidang (weight) dinamis
   let totalCalculatedScore = 0;
   let totalDeductions = 0;
   let totalActiveMaxScore = 0;
 
   activeFields.forEach((field) => {
-    totalActiveMaxScore += field.maxScore;
+    const fieldWeight =
+      typeof field.weight === 'number' && !isNaN(field.weight) && field.weight > 0
+        ? field.weight
+        : 1;
+
+    totalActiveMaxScore += field.maxScore * fieldWeight;
     let deduction = fieldDeductions[field.name] || 0;
 
     // Dukungan batas potongan maksimum per bidang (field.maxDeduction atau maxScore - minScore)
@@ -335,7 +340,7 @@ export function calculateAssessmentScore(
     );
 
     fieldScores[field.name] = Math.round((calculatedFieldScore + Number.EPSILON) * 100) / 100;
-    totalCalculatedScore += fieldScores[field.name];
+    totalCalculatedScore += fieldScores[field.name] * fieldWeight;
   });
 
   totalDeductions = Math.round((totalDeductions + Number.EPSILON) * 100) / 100;

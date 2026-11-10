@@ -24,7 +24,8 @@ export const Sidebar: React.FC = () => {
     currentUser,
     isSidebarOpen,
     setIsSidebarOpen,
-    setIsDemoAccountModalOpen
+    setIsDemoAccountModalOpen,
+    currentTenant
   } = useMtq();
 
   // Navigation items by role
@@ -81,7 +82,7 @@ export const Sidebar: React.FC = () => {
       },
       {
         id: 'kafilah',
-        label: 'Grup & Peserta',
+        label: `${currentTenant?.groupLabel || 'Grup'} & Peserta`,
         icon: <Users className="w-4 h-4" />
       },
       {

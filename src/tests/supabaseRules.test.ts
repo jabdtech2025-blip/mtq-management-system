@@ -12,6 +12,7 @@ import { supabaseDataService } from '../services/supabaseDataService';
 import { outboxSyncService } from '../services/outboxSyncService';
 import { DEFAULT_COMPETITION_RULES, INITIAL_RUBRIC_VERSIONS } from '../services/competitionRules';
 import { isValidUuid, generateUuid, toDeterministicUuid } from '../utils/uuid';
+import { handleProvisionRpcFailureRollback } from '../utils/provisionSecurity';
 
 /**
  * Lightweight PostgREST-compatible query builder over PGlite for testing
@@ -340,8 +341,11 @@ function createPgliteSupabaseAdapter(
               ${nextStgSql},
               ${qualSql},
               ${formatSqlVal(args.p_override_reasons || {})}::jsonb,
-              ${formatSqlVal(args.p_rankings_snapshot || [])}::jsonb
+              ${formatSqlVal(args.p_rankings_snapshot || [])}::jsonb,
+              ${formatSqlVal(args.p_tie_resolution || {})}::jsonb
             ) AS res;`;
+          } else if (fnName === 'compute_stage_rankings') {
+            sql = `SELECT compute_stage_rankings(${formatSqlVal(args.p_stage_id)}::uuid) AS res;`;
           } else if (fnName === 'append_admin_audit_log') {
             sql = `SELECT append_admin_audit_log(
               ${formatSqlVal(args.p_tenant_id)}::uuid,
@@ -373,6 +377,61 @@ function createPgliteSupabaseAdapter(
             sql = `SELECT delete_rubric_field_cascade(${formatSqlVal(args.p_rubric_version_id)}::uuid, ${formatSqlVal(
               args.p_field_id
             )}::uuid) AS res;`;
+          } else if (fnName === 'verify_participant') {
+            const noteSql = args.p_note ? `${formatSqlVal(args.p_note)}::text` : 'NULL::text';
+            sql = `SELECT verify_participant(
+              ${formatSqlVal(args.p_tenant_id)}::uuid,
+              ${formatSqlVal(args.p_participant_id)}::uuid,
+              ${formatSqlVal(args.p_status)}::varchar,
+              ${noteSql}
+            ) AS res;`;
+          } else if (fnName === 'draw_lottery_server') {
+            const partArr = Array.isArray(args.p_participant_ids) ? args.p_participant_ids : [];
+            const qArr = Array.isArray(args.p_question_pool_ids) ? args.p_question_pool_ids : [];
+            const partSql =
+              partArr.length === 0
+                ? 'NULL::uuid[]'
+                : `ARRAY[${partArr.map((id) => `${formatSqlVal(id)}::uuid`).join(', ')}]`;
+            const qSql =
+              qArr.length === 0
+                ? 'NULL::uuid[]'
+                : `ARRAY[${qArr.map((id) => `${formatSqlVal(id)}::uuid`).join(', ')}]`;
+            const bSql = args.p_branch_id ? `${formatSqlVal(args.p_branch_id)}::uuid` : 'NULL::uuid';
+            const lSql = args.p_level_id ? `${formatSqlVal(args.p_level_id)}::uuid` : 'NULL::uuid';
+            const noteSql = args.p_notes ? `${formatSqlVal(args.p_notes)}::text` : 'NULL::text';
+
+            sql = `SELECT draw_lottery_server(
+              ${formatSqlVal(args.p_tenant_id)}::uuid,
+              ${formatSqlVal(args.p_stage_id)}::uuid,
+              ${bSql},
+              ${lSql},
+              ${Number(args.p_questions_per_participant || 1)}::integer,
+              ${formatSqlVal(args.p_draw_mode || 'both')}::varchar,
+              ${noteSql},
+              ${partSql},
+              ${qSql}
+            ) AS res;`;
+          } else if (fnName === 'commit_lottery_draw') {
+            const bSql = args.p_branch_id ? `${formatSqlVal(args.p_branch_id)}::uuid` : 'NULL::uuid';
+            const bNameSql = args.p_branch_name ? `${formatSqlVal(args.p_branch_name)}::text` : 'NULL::text';
+            const lSql = args.p_level_id ? `${formatSqlVal(args.p_level_id)}::uuid` : 'NULL::uuid';
+            const lNameSql = args.p_level_name ? `${formatSqlVal(args.p_level_name)}::text` : 'NULL::text';
+            const noteSql = args.p_notes ? `${formatSqlVal(args.p_notes)}::text` : 'NULL::text';
+
+            sql = `SELECT commit_lottery_draw(
+              ${formatSqlVal(args.p_tenant_id)}::uuid,
+              ${formatSqlVal(args.p_stage_id)}::uuid,
+              ${formatSqlVal(args.p_stage_name)}::text,
+              ${bSql},
+              ${bNameSql},
+              ${lSql},
+              ${lNameSql},
+              NULL::uuid,
+              NULL::text,
+              ${formatSqlVal(args.p_results || [])}::jsonb,
+              ${Number(args.p_questions_per_participant || 1)}::integer,
+              ${noteSql}
+            ) AS res;`;
           } else {
             throw new Error(`Unsupported RPC: ${fnName}`);
           }
@@ -442,6 +501,10 @@ export async function runSupabaseTests(): Promise<{
   );
   const isolation20261113Sql = fs.readFileSync(
     path.resolve(process.cwd(), 'supabase/migrations/20261113_security_tenant_profile_isolation.sql'),
+    'utf-8'
+  );
+  const auditFixes20261114Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261114_audit_fixes.sql'),
     'utf-8'
   );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
@@ -557,6 +620,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(complete20261109Sql);
       await pg.exec(maqra20261112Sql);
       await pg.exec(isolation20261113Sql);
+      await pg.exec(auditFixes20261114Sql);
       await pg.exec(`
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
         GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
@@ -2378,6 +2442,990 @@ export async function runSupabaseTests(): Promise<{
         dkiMembershipRoleAfter === 'judge' &&
         isDkiAdminAfter === false,
       `crossTenantUpsertOk: ${crossTenantUpsertOk}, name: ${dkiProfileAfter?.name}, username: ${dkiProfileAfter?.username}, dkiRole: ${dkiMembershipRoleAfter}, isDkiAdmin: ${isDkiAdminAfter}`
+    );
+
+    // =========================================================================
+    // 64. FASE 1.1 & 1.2: OTORISASI KETAT `audit_questions_consistency` & `get_stage_completion_sql`
+    // =========================================================================
+    let anonAuditQuestionsRejected = false;
+    let crossTenantAuditQuestionsRejected = false;
+    let nullTenantAuditQuestionsRejected = false;
+    let ownTenantAuditQuestionsSuccess = false;
+
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE anon;
+        SELECT set_config('request.jwt.claim.sub', '', true);
+        SELECT audit_questions_consistency('${tenantJabarId}'::uuid);
+        COMMIT;
+      `);
+    } catch {
+      await pg.exec('ROLLBACK;');
+      anonAuditQuestionsRejected = true;
+    }
+
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        SELECT audit_questions_consistency('${tenantDkiId}'::uuid);
+        COMMIT;
+      `);
+    } catch {
+      await pg.exec('ROLLBACK;');
+      crossTenantAuditQuestionsRejected = true;
+    }
+
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        SELECT audit_questions_consistency(NULL::uuid);
+        COMMIT;
+      `);
+    } catch {
+      await pg.exec('ROLLBACK;');
+      nullTenantAuditQuestionsRejected = true;
+    }
+
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        SELECT audit_questions_consistency('${tenantJabarId}'::uuid);
+        COMMIT;
+      `);
+      ownTenantAuditQuestionsSuccess = true;
+    } catch {
+      await pg.exec('ROLLBACK;');
+      ownTenantAuditQuestionsSuccess = false;
+    }
+
+    let crossTenantStageCompletionRejected = false;
+    const dkiOnlyStageId = generateUuid();
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, name, stage_order, qualification_quota, status, is_finalized)
+      VALUES ('${dkiOnlyStageId}', '${tenantDkiId}', 'Penyisihan Khusus DKI', 1, 3, 'Aktif', false);
+    `);
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        SELECT get_stage_completion_sql('${dkiOnlyStageId}'::uuid);
+        COMMIT;
+      `);
+    } catch {
+      await pg.exec('ROLLBACK;');
+      crossTenantStageCompletionRejected = true;
+    }
+
+    assert(
+      '64. Fase 1.1 & 1.2 Otorisasi `audit_questions_consistency` & `get_stage_completion_sql`: Menolak anon, menolak admin lintas-tenant/NULL, dan menolak pembacaan kelengkapan babak lintas-tenant',
+      anonAuditQuestionsRejected &&
+        crossTenantAuditQuestionsRejected &&
+        nullTenantAuditQuestionsRejected &&
+        ownTenantAuditQuestionsSuccess &&
+        crossTenantStageCompletionRejected,
+      `anonRej: ${anonAuditQuestionsRejected}, crossAuditRej: ${crossTenantAuditQuestionsRejected}, nullRej: ${nullTenantAuditQuestionsRejected}, ownOk: ${ownTenantAuditQuestionsSuccess}, crossCompRej: ${crossTenantStageCompletionRejected}`
+    );
+
+    // =========================================================================
+    // 65. FASE 1.3: PENGERASAN SELURUH FUNGSI `SECURITY DEFINER` DI SKEMA PUBLIC
+    // =========================================================================
+    const secDefAuditQuery = await pg.query<{
+      proname: string;
+      anon_exec: boolean;
+      pub_exec: boolean;
+      has_search_path: boolean;
+    }>(`
+      SELECT
+        p.proname,
+        has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_exec,
+        has_function_privilege('public', p.oid, 'EXECUTE') AS pub_exec,
+        EXISTS (
+          SELECT 1
+          FROM unnest(COALESCE(p.proconfig, ARRAY[]::text[])) cfg
+          WHERE cfg LIKE 'search_path=%'
+        ) AS has_search_path
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.prosecdef = true
+        AND p.prorettype <> 'pg_catalog.trigger'::regtype;
+    `);
+    const insecureAnonDefs = secDefAuditQuery.rows.filter((r) => r.anon_exec || r.pub_exec);
+    const missingSearchPathDefs = secDefAuditQuery.rows.filter((r) => !r.has_search_path);
+
+    assert(
+      '65. Fase 1.3 Audit Fungsi SECURITY DEFINER: Seluruh fungsi non-trigger di public mencabut EXECUTE dari PUBLIC/anon dan memiliki search_path eksplisit',
+      secDefAuditQuery.rows.length > 0 &&
+        insecureAnonDefs.length === 0 &&
+        missingSearchPathDefs.length === 0,
+      `totalSecDef: ${secDefAuditQuery.rows.length}, insecureAnon: ${insecureAnonDefs.map((x) => x.proname).join(',')}, missingSearchPath: ${missingSearchPathDefs.map((x) => x.proname).join(',')}`
+    );
+
+    // =========================================================================
+    // 66. FASE 1.4: INTEGRITAS RELASI LINTAS-TENANT (TRIGGER `enforce_cross_tenant_reference_integrity`)
+    // =========================================================================
+    const dkiKafilahId = generateUuid();
+    await pg.exec(`
+      INSERT INTO kafilahs (id, tenant_id, code, name, region, status)
+      VALUES ('${dkiKafilahId}', '${tenantDkiId}', 'KAF-DKI-01', 'Kafilah Jakarta Pusat', 'DKI Jakarta', 'Aktif');
+    `);
+
+    let crossTenantKafilahParticipantRejected = false;
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', '${dkiKafilahId}', '${branchTilawahPutraId}', 'CROSS-01', 'Peserta Lintas Kafilah', 'Putra', '88', 'Menunggu');
+        COMMIT;
+      `);
+    } catch (err: any) {
+      await pg.exec('ROLLBACK;');
+      crossTenantKafilahParticipantRejected = String(err?.message || err).includes('Pelanggaran Isolasi Lintas-Tenant');
+    }
+
+    let crossTenantStageParticipationRejected = false;
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        INSERT INTO stage_participations (id, tenant_id, participant_id, stage_id, lottery_number, status)
+        VALUES ('${generateUuid()}', '${tenantDkiId}', '${participantUuid}', '${stagePenyisihanId}', '88', 'Menunggu');
+        COMMIT;
+      `);
+    } catch (err: any) {
+      await pg.exec('ROLLBACK;');
+      crossTenantStageParticipationRejected =
+        String(err?.message || err).includes('Pelanggaran Isolasi Lintas-Tenant') ||
+        String(err?.message || err).includes('row-level security');
+    }
+
+    assert(
+      '66. Fase 1.4 Integritas FK Lintas-Tenant: Menolak pembuatan peserta di Tenant A dengan kafilah_id milik Tenant B serta menolak stage_participations lintas-tenant',
+      crossTenantKafilahParticipantRejected && crossTenantStageParticipationRejected,
+      `crossKafilahRej: ${crossTenantKafilahParticipantRejected}, crossSpRej: ${crossTenantStageParticipationRejected}`
+    );
+
+    // =========================================================================
+    // 67. FASE 1.5: ANTI-SPOOFING PELAKU UNDIAN PADA `commit_lottery_draw`
+    // =========================================================================
+    const lotterySpoofStageId = generateUuid();
+    const lotterySpoofPartId = generateUuid();
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, status, is_finalized)
+      VALUES ('${lotterySpoofStageId}', '${tenantJabarId}', '${branchTilawahPutraId}', 'Babak Uji Undian Anti-Spoof', 20, 3, 'Aktif', false);
+      INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, level_id, participant_code, name, gender, lottery_number, status, verification_status)
+      VALUES ('${lotterySpoofPartId}', '${tenantJabarId}', '${kafilahBandungId}', '${branchTilawahPutraId}', '${levelDewasaId}', 'LOT-01', 'Peserta Undian Aman', 'Putra', '07', 'Menunggu', 'Diverifikasi');
+    `);
+
+    await pg.exec(`
+      BEGIN;
+      SET LOCAL ROLE authenticated;
+      SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+      SELECT commit_lottery_draw(
+        '${tenantJabarId}'::uuid,
+        '${lotterySpoofStageId}'::uuid,
+        'Babak Uji Undian Anti-Spoof'::varchar,
+        '${branchTilawahPutraId}'::uuid,
+        'Tilawah Dewasa Putra'::varchar,
+        '${levelDewasaId}'::uuid,
+        'Ulya (Dewasa)'::varchar,
+        '${otherTenantJudgeId}'::uuid,
+        'Actor Palsu Spoofed'::varchar,
+        '[{"participantId": "${lotterySpoofPartId}", "questionIds": ["${questionPenyisihanId}"]}]'::jsonb,
+        1,
+        'Uji anti-spoofing undian'::text
+      );
+      COMMIT;
+    `);
+
+    const spoofLogCheck = await pg.query<{ actor_id: string; actor_name: string }>(`
+      SELECT actor_id::text, actor_name
+      FROM lottery_draw_logs
+      WHERE stage_id = '${lotterySpoofStageId}'::uuid
+      ORDER BY created_at DESC
+      LIMIT 1;
+    `);
+
+    assert(
+      '67. Fase 1.5 Anti-Spoofing `commit_lottery_draw`: Mengabaikan p_actor_id/p_actor_name dari klien dan selalu mencatat auth.uid() serta nama asli dari profiles',
+      spoofLogCheck.rows[0]?.actor_id === adminUserId &&
+        spoofLogCheck.rows[0]?.actor_name === 'H. Ridwan Hakim',
+      `recordedActorId: ${spoofLogCheck.rows[0]?.actor_id}, recordedActorName: ${spoofLogCheck.rows[0]?.actor_name}`
+    );
+
+    // =========================================================================
+    // 68. FASE 1.6: ROLLBACK PENGHAPUSAN USER AUTH SAAT RPC PROVISIONING GAGAL
+    // =========================================================================
+    let deletedUserIds: string[] = [];
+    const rollbackInvitedRes = await handleProvisionRpcFailureRollback({
+      internalProvisioningState: 'invited',
+      resolvedAuthUserId: 'uid-orphan-invited-01',
+      rpcErrorMessage: 'Simulated RPC failure',
+      deleteAuthUser: async (uid) => {
+        deletedUserIds.push(uid);
+        return { error: null };
+      }
+    });
+    const rollbackExistingRes = await handleProvisionRpcFailureRollback({
+      internalProvisioningState: 'linked_existing',
+      resolvedAuthUserId: 'uid-existing-keep-02',
+      rpcErrorMessage: 'Simulated RPC failure',
+      deleteAuthUser: async (uid) => {
+        deletedUserIds.push(uid);
+        return { error: null };
+      }
+    });
+
+    assert(
+      '68. Fase 1.6 Rollback User Auth Yatim (`handleProvisionRpcFailureRollback`): Menghapus user Auth baru jika RPC gagal (status 422), dan tidak menghapus akun lama yang sudah ada',
+      rollbackInvitedRes.status === 422 &&
+        rollbackInvitedRes.body.rolledBackAuthUser === true &&
+        deletedUserIds.length === 1 &&
+        deletedUserIds[0] === 'uid-orphan-invited-01' &&
+        rollbackExistingRes.body.rolledBackAuthUser === false,
+      `rolledBackInvited: ${rollbackInvitedRes.body.rolledBackAuthUser}, deletedIds: ${deletedUserIds.join(',')}`
+    );
+
+    // =========================================================================
+    // 69. FASE 1.7: SANITASI `handle_new_auth_user` (NAMA TERCADANG & SUFIKS ANTI-BENTURAN)
+    // =========================================================================
+    const reservedUserAuthId = generateUuid();
+    const twinUser1AuthId = generateUuid();
+    const twinUser2AuthId = generateUuid();
+
+    await pg.exec(`
+      INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+        ('${reservedUserAuthId}', 'coba.admin@jabar.mtq.id', '{"name": "Coba Nama Terlarang", "username": "ADMIN"}'::jsonb),
+        ('${twinUser1AuthId}', 'kembar1@jabar.mtq.id', '{"name": "Qari Kembar Satu", "username": "Qari_Kembar!@#"}'::jsonb),
+        ('${twinUser2AuthId}', 'kembar2@jabar.mtq.id', '{"name": "Qari Kembar Dua", "username": "Qari_Kembar!@#"}'::jsonb);
+    `);
+
+    const sanitizedProfilesQ = await pg.query<{ id: string; username: string }>(`
+      SELECT id::text, username
+      FROM profiles
+      WHERE id IN ('${reservedUserAuthId}'::uuid, '${twinUser1AuthId}'::uuid, '${twinUser2AuthId}'::uuid);
+    `);
+    const reservedProf = sanitizedProfilesQ.rows.find((r) => r.id === reservedUserAuthId);
+    const twinProf1 = sanitizedProfilesQ.rows.find((r) => r.id === twinUser1AuthId);
+    const twinProf2 = sanitizedProfilesQ.rows.find((r) => r.id === twinUser2AuthId);
+    const validUsernameRegex = /^[a-z0-9_.-]{3,30}$/;
+
+    assert(
+      '69. Fase 1.7 Sanitasi Trigger `handle_new_auth_user`: Menolak username tercadang (admin/superadmin/root/support), menyanitasi ke [a-z0-9_.-] (3-30 karakter), dan menambahkan sufiks unik saat benturan',
+      Boolean(reservedProf) &&
+        reservedProf?.username !== 'admin' &&
+        validUsernameRegex.test(reservedProf?.username || '') &&
+        twinProf1?.username === 'qari_kembar' &&
+        Boolean(twinProf2?.username) &&
+        twinProf2?.username !== 'qari_kembar' &&
+        Boolean(twinProf2?.username.startsWith('qari_kembar_')) &&
+        validUsernameRegex.test(twinProf2?.username || ''),
+      `reserved: ${reservedProf?.username}, twin1: ${twinProf1?.username}, twin2: ${twinProf2?.username}`
+    );
+
+    // =========================================================================
+    // 70. FASE 2.1 & 2.2: `compute_stage_rankings` (REGRESI SKOR, TIE-BREAK KRITERIA KE-3, NULLS LAST)
+    // =========================================================================
+    const f2BranchId = generateUuid();
+    const f2StageRegId = generateUuid();
+    const f2StageTb3Id = generateUuid();
+    const f2RubricId = rubricSeniBacaId;
+    const f2RuleId = generateUuid();
+
+    await pg.exec(`
+      INSERT INTO branches (id, tenant_id, code, name, status)
+      VALUES ('${f2BranchId}', '${tenantJabarId}', 'TLW-F2', 'Tilawah Uji Fase 2', 'Aktif');
+
+      INSERT INTO competition_rule_configs (id, tenant_id, branch_id, branch_name, rubric_version_id, tie_break_order, quota_per_stage, is_verified_official, status)
+      VALUES ('${f2RuleId}', '${tenantJabarId}', '${f2BranchId}', 'Tilawah Uji Fase 2', '${f2RubricId}', ARRAY['total', 'Tajwid', 'Lagu', 'Fashahah'], '{"Penyisihan": 3, "Final": 3}'::jsonb, true, 'Aktif');
+
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, champion_count, status, is_finalized)
+      VALUES
+        ('${f2StageRegId}', '${tenantJabarId}', '${f2BranchId}', 'Penyisihan Regresi F2', 30, 3, 3, 'Aktif', false),
+        ('${f2StageTb3Id}', '${tenantJabarId}', '${f2BranchId}', 'Penyisihan TieBreak3 F2', 31, 2, 3, 'Aktif', false);
+
+      INSERT INTO judge_assignments (id, tenant_id, judge_profile_id, stage_id, branch_id, judge_field, status)
+      VALUES
+        ('${generateUuid()}', '${tenantJabarId}', '${judge1UserId}', '${f2StageRegId}', '${f2BranchId}', 'Tajwid', 'Aktif'),
+        ('${generateUuid()}', '${tenantJabarId}', '${judge1UserId}', '${f2StageTb3Id}', '${f2BranchId}', 'Tajwid', 'Aktif');
+    `);
+
+    // 4 peserta untuk regresi skor: #101 = 99.00, #103 = 95.63, #102 = 94.25, #104 = 92.63
+    const regSpecs = [
+      { code: 'P-101', lot: '101', score: 99.0, fScores: { Tajwid: 30, Lagu: 25, Fashahah: 29, Suara: 15 } },
+      { code: 'P-102', lot: '102', score: 94.25, fScores: { Tajwid: 28, Lagu: 23.25, Fashahah: 28, Suara: 15 } },
+      { code: 'P-103', lot: '103', score: 95.63, fScores: { Tajwid: 29, Lagu: 24.63, Fashahah: 27, Suara: 15 } },
+      { code: 'P-104', lot: '104', score: 92.63, fScores: { Tajwid: 27, Lagu: 22.63, Fashahah: 28, Suara: 15 } }
+    ];
+    for (const spec of regSpecs) {
+      const pId = generateUuid();
+      const spId = generateUuid();
+      const amId = generateUuid();
+      await pg.exec(`
+        INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status)
+        VALUES ('${pId}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', '${spec.code}', 'Peserta ${spec.lot}', 'Putra', '${spec.lot}', 'Berlangsung');
+        INSERT INTO stage_participations (id, tenant_id, participant_id, stage_id, lottery_number, status)
+        VALUES ('${spId}', '${tenantJabarId}', '${pId}', '${f2StageRegId}', '${spec.lot}', 'Lengkap');
+        INSERT INTO assigned_maqras (id, tenant_id, stage_participation_id, question_id)
+        VALUES ('${amId}', '${tenantJabarId}', '${spId}', '${questionPenyisihanId}');
+        INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, error_counts, field_scores, total_deductions, final_score)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', '${spId}', '${amId}', '${judge1UserId}', '${f2RubricId}', 'in_progress', false, '{}'::jsonb, '${JSON.stringify(spec.fScores)}'::jsonb, ${100 - spec.score}, ${spec.score});
+        BEGIN;
+        SELECT set_config('mtq.rpc_finalize_active', 'true', true);
+        UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${spId}'::uuid;
+        COMMIT;
+      `);
+    }
+
+    currentAuthUser = { id: adminUserId, email: 'admin@jabar.mtq.id' };
+    const regRankingRes = await supabaseDataService.computeStageRankingsRpc(f2StageRegId);
+    const regRankings = ((regRankingRes.data as any)?.rankings || []) as Array<any>;
+
+    // Uji Tie-Break Kriteria ke-3 (Fashahah) & NULLS LAST pada f2StageTb3Id
+    // Peserta A & B sama pada total (95.00), Tajwid (29), dan Lagu (24), namun Fashahah berbeda (28 vs 27).
+    // Peserta C juga 95.00, Tajwid (29), Lagu (24), namun Fashahah NULL (tidak ada di JSONB) -> wajib di urutan paling belakang (NULLS LAST).
+    const tb3Specs = [
+      { code: 'TB3-B', lot: '01', score: 95.0, fScores: { Tajwid: 29, Lagu: 24, Fashahah: 27, Suara: 15 } },
+      { code: 'TB3-A', lot: '02', score: 95.0, fScores: { Tajwid: 29, Lagu: 24, Fashahah: 28, Suara: 14 } },
+      { code: 'TB3-NULL', lot: '00', score: 95.0, fScores: { Tajwid: 29, Lagu: 24 } }
+    ];
+    for (const spec of tb3Specs) {
+      const pId = generateUuid();
+      const spId = generateUuid();
+      const amId = generateUuid();
+      await pg.exec(`
+        INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status)
+        VALUES ('${pId}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', '${spec.code}', '${spec.code}', 'Putra', '${spec.lot}', 'Berlangsung');
+        INSERT INTO stage_participations (id, tenant_id, participant_id, stage_id, lottery_number, status)
+        VALUES ('${spId}', '${tenantJabarId}', '${pId}', '${f2StageTb3Id}', '${spec.lot}', 'Lengkap');
+        INSERT INTO assigned_maqras (id, tenant_id, stage_participation_id, question_id)
+        VALUES ('${amId}', '${tenantJabarId}', '${spId}', '${questionPenyisihanId}');
+        INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, error_counts, field_scores, total_deductions, final_score)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', '${spId}', '${amId}', '${judge1UserId}', '${f2RubricId}', 'in_progress', false, '{}'::jsonb, '${JSON.stringify(spec.fScores)}'::jsonb, 5, ${spec.score});
+        BEGIN;
+        SELECT set_config('mtq.rpc_finalize_active', 'true', true);
+        UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${spId}'::uuid;
+        COMMIT;
+      `);
+    }
+
+    const tb3RankingRes = await supabaseDataService.computeStageRankingsRpc(f2StageTb3Id);
+    const tb3Rankings = ((tb3RankingRes.data as any)?.rankings || []) as Array<any>;
+
+    assert(
+      '70. Fase 2.1 & 2.2 `compute_stage_rankings`: Regresi skor (#101=99.00, #103=95.63, #102=94.25, #104=92.63), tie-break kriteria ke-3 (Fashahah), dan NULLS LAST saat skor bidang NULL',
+      regRankingRes.success === true &&
+        regRankings.length === 4 &&
+        regRankings[0]?.lottery_number === '101' &&
+        Number(regRankings[0]?.final_score) === 99.0 &&
+        regRankings[1]?.lottery_number === '103' &&
+        Number(regRankings[1]?.final_score) === 95.63 &&
+        regRankings[2]?.lottery_number === '102' &&
+        Number(regRankings[2]?.final_score) === 94.25 &&
+        regRankings[3]?.lottery_number === '104' &&
+        Number(regRankings[3]?.final_score) === 92.63 &&
+        tb3Rankings.length === 3 &&
+        tb3Rankings[0]?.participant_name === 'TB3-A' &&
+        tb3Rankings[0]?.rank === 1 &&
+        tb3Rankings[1]?.participant_name === 'TB3-B' &&
+        tb3Rankings[1]?.rank === 2 &&
+        tb3Rankings[2]?.participant_name === 'TB3-NULL' &&
+        tb3Rankings[2]?.rank === 3,
+      `regLots: ${regRankings.map((r) => `${r.lottery_number}:${r.final_score}`).join(',')}, tb3Order: ${tb3Rankings.map((r) => `${r.participant_name}:#${r.rank}`).join(',')}`
+    );
+
+    // =========================================================================
+    // 71. FASE 2.2 & 2.7: SERI IDENTIK PADA BATAS KUOTA (`UNRESOLVED_CRITICAL_TIE` vs `p_tie_resolution`) & STATUS 'Gugur'
+    // =========================================================================
+    const f2StageTieId = generateUuid();
+    const f2StageNextId = generateUuid();
+    const tiePart1Id = generateUuid();
+    const tiePart2Id = generateUuid();
+
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, champion_count, status, is_finalized)
+      VALUES
+        ('${f2StageTieId}', '${tenantJabarId}', '${f2BranchId}', 'Penyisihan Seri Identik F2', 32, 1, 3, 'Aktif', false),
+        ('${f2StageNextId}', '${tenantJabarId}', '${f2BranchId}', 'Semifinal F2', 33, 1, 3, 'Menunggu', false);
+
+      INSERT INTO judge_assignments (id, tenant_id, judge_profile_id, stage_id, branch_id, judge_field, status)
+      VALUES ('${generateUuid()}', '${tenantJabarId}', '${judge1UserId}', '${f2StageTieId}', '${f2BranchId}', 'Tajwid', 'Aktif');
+    `);
+
+    for (const [pId, lot, name] of [
+      [tiePart1Id, '21', 'Peserta Seri Satu'],
+      [tiePart2Id, '22', 'Peserta Seri Dua']
+    ]) {
+      const spId = generateUuid();
+      const amId = generateUuid();
+      await pg.exec(`
+        INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status)
+        VALUES ('${pId}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', 'TIE-${lot}', '${name}', 'Putra', '${lot}', 'Berlangsung');
+        INSERT INTO stage_participations (id, tenant_id, participant_id, stage_id, lottery_number, status)
+        VALUES ('${spId}', '${tenantJabarId}', '${pId}', '${f2StageTieId}', '${lot}', 'Lengkap');
+        INSERT INTO assigned_maqras (id, tenant_id, stage_participation_id, question_id)
+        VALUES ('${amId}', '${tenantJabarId}', '${spId}', '${questionPenyisihanId}');
+        INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, error_counts, field_scores, total_deductions, final_score)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', '${spId}', '${amId}', '${judge1UserId}', '${f2RubricId}', 'in_progress', false, '{}'::jsonb, '{"Tajwid": 29, "Lagu": 24, "Fashahah": 28, "Suara": 15}'::jsonb, 4, 96.0);
+        BEGIN;
+        SELECT set_config('mtq.rpc_finalize_active', 'true', true);
+        UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${spId}'::uuid;
+        COMMIT;
+      `);
+    }
+
+    // Percobaan 1: Tanpa p_tie_resolution -> WAJIB DITOLAK dengan UNRESOLVED_CRITICAL_TIE
+    const blockedTieAdvanceRes = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: f2StageTieId,
+      nextStageId: f2StageNextId,
+      qualifiedParticipantIds: [tiePart1Id],
+      overrideReasons: {}
+    });
+
+    // Percobaan 2: Dengan p_tie_resolution + p_override_reasons (>= 5 karakter) -> BERHASIL
+    const resolvedTieAdvanceRes = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: f2StageTieId,
+      nextStageId: f2StageNextId,
+      qualifiedParticipantIds: [tiePart1Id],
+      overrideReasons: {
+        [tiePart1Id]: 'Keputusan Sidang Pleno Dewan Hakim: Unggul Adab Tilawah',
+        [tiePart2Id]: 'Keputusan Sidang Pleno Dewan Hakim: Urutan Kedua'
+      },
+      tieResolution: {
+        [tiePart1Id]: 1,
+        [tiePart2Id]: 2
+      }
+    });
+
+    const eliminatedStatusQ = await pg.query<{ id: string; status: string }>(`
+      SELECT id::text, status FROM participants WHERE id IN ('${tiePart1Id}'::uuid, '${tiePart2Id}'::uuid);
+    `);
+    const qualPartRow = eliminatedStatusQ.rows.find((r) => r.id === tiePart1Id);
+    const elimPartRow = eliminatedStatusQ.rows.find((r) => r.id === tiePart2Id);
+
+    assert(
+      '71. Fase 2.2 & 2.7 Seri Identik Seluruh Kriteria & Status Gugur: Ditolak tanpa p_tie_resolution + alasan >= 5 karakter, diterima saat dilengkapi, dan peserta tak lolos babak non-final berstatus Gugur',
+      blockedTieAdvanceRes.success === false &&
+        Boolean(blockedTieAdvanceRes.message?.includes('UNRESOLVED_CRITICAL_TIE')) &&
+        resolvedTieAdvanceRes.success === true &&
+        qualPartRow?.status === 'Menunggu' &&
+        elimPartRow?.status === 'Gugur',
+      `blockedMsg: ${blockedTieAdvanceRes.message}, resolvedOk: ${resolvedTieAdvanceRes.success}, qualStatus: ${qualPartRow?.status}, elimStatus: ${elimPartRow?.status}`
+    );
+
+    // =========================================================================
+    // 72. FASE 2.3 & 2.5: BABAK FINAL (`champion_rank`, `champion_title = 'Juara N'`, `is_qualified = FALSE`, SNAPSHOT `branch_id IS NULL`)
+    // =========================================================================
+    const f2FinalNullBranchStageId = generateUuid();
+    const finPartIds: string[] = [];
+
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, champion_count, status, is_finalized)
+      VALUES ('${f2FinalNullBranchStageId}', '${tenantJabarId}', NULL, 'Final Umum Lintas Cabang F2', 40, 3, 3, 'Aktif', false);
+
+      INSERT INTO judge_assignments (id, tenant_id, judge_profile_id, stage_id, branch_id, judge_field, status)
+      VALUES ('${generateUuid()}', '${tenantJabarId}', '${judge1UserId}', '${f2FinalNullBranchStageId}', NULL, 'Tajwid', 'Aktif');
+    `);
+
+    const finScores = [98.5, 97.0, 95.5, 93.0];
+    for (let i = 0; i < finScores.length; i++) {
+      const pId = generateUuid();
+      finPartIds.push(pId);
+      const spId = generateUuid();
+      const amId = generateUuid();
+      const sc = finScores[i];
+      await pg.exec(`
+        INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status)
+        VALUES ('${pId}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', 'FIN-0${i + 1}', 'Finalis ${i + 1}', 'Putra', 'F0${i + 1}', 'Berlangsung');
+        INSERT INTO stage_participations (id, tenant_id, participant_id, stage_id, lottery_number, status)
+        VALUES ('${spId}', '${tenantJabarId}', '${pId}', '${f2FinalNullBranchStageId}', 'F0${i + 1}', 'Lengkap');
+        INSERT INTO assigned_maqras (id, tenant_id, stage_participation_id, question_id)
+        VALUES ('${amId}', '${tenantJabarId}', '${spId}', '${questionPenyisihanId}');
+        INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, error_counts, field_scores, total_deductions, final_score)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', '${spId}', '${amId}', '${judge1UserId}', '${f2RubricId}', 'in_progress', false, '{}'::jsonb, '{"Tajwid": 29, "Lagu": 24, "Fashahah": 28, "Suara": 15}'::jsonb, ${100 - sc}, ${sc});
+        BEGIN;
+        SELECT set_config('mtq.rpc_finalize_active', 'true', true);
+        UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${spId}'::uuid;
+        COMMIT;
+      `);
+    }
+
+    const finAdvanceRes = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: f2FinalNullBranchStageId,
+      nextStageId: null,
+      qualifiedParticipantIds: [],
+      overrideReasons: {}
+    });
+
+    const finSpCheck = await pg.query<{
+      participant_id: string;
+      rank: number;
+      champion_rank: number | null;
+      champion_title: string | null;
+      is_qualified: boolean;
+      qualification_reason: string;
+    }>(`
+      SELECT participant_id::text, rank, champion_rank, champion_title, is_qualified, qualification_reason
+      FROM stage_participations
+      WHERE stage_id = '${f2FinalNullBranchStageId}'::uuid
+      ORDER BY rank ASC;
+    `);
+
+    const finSnapCheck = await pg.query<{ id: string; branch_id: string | null; cnt: number }>(`
+      SELECT id::text, branch_id::text, jsonb_array_length(rankings_snapshot) AS cnt
+      FROM stage_result_snapshots
+      WHERE stage_id = '${f2FinalNullBranchStageId}'::uuid;
+    `);
+
+    assert(
+      '72. Fase 2.3 & 2.5 Babak Final & Snapshot `branch_id IS NULL`: Mengisi champion_rank 1..3 & champion_title Juara 1..3 (tanpa Juara Harapan), is_qualified = FALSE, dan selalu menyimpan stage_result_snapshots meski branch_id NULL',
+      finAdvanceRes.success === true &&
+        finSpCheck.rows.length === 4 &&
+        finSpCheck.rows[0]?.champion_rank === 1 &&
+        finSpCheck.rows[0]?.champion_title === 'Juara 1' &&
+        finSpCheck.rows[0]?.is_qualified === false &&
+        finSpCheck.rows[1]?.champion_rank === 2 &&
+        finSpCheck.rows[1]?.champion_title === 'Juara 2' &&
+        finSpCheck.rows[2]?.champion_rank === 3 &&
+        finSpCheck.rows[2]?.champion_title === 'Juara 3' &&
+        finSpCheck.rows[3]?.champion_rank === null &&
+        finSpCheck.rows[3]?.champion_title === null &&
+        finSpCheck.rows[3]?.qualification_reason === 'Finalis Peringkat 4' &&
+        finSnapCheck.rows.length === 1 &&
+        finSnapCheck.rows[0]?.branch_id === null &&
+        Number(finSnapCheck.rows[0]?.cnt) === 4,
+      `finAdvance: ${finAdvanceRes.success} (${finAdvanceRes.message}), rows: ${JSON.stringify(finSpCheck.rows)}, snapCnt: ${finSnapCheck.rows.length}`
+    );
+
+    // =========================================================================
+    // 73. FASE 2.4 & 2.6: HAKIM NONAKTIF DIABAIKAN & BOBOT BIDANG (`rubric_fields.weight`)
+    // =========================================================================
+    const inactiveJudgeStageId = generateUuid();
+    const inactiveJudgePartId = generateUuid();
+    const inactiveJudgeSpId = generateUuid();
+    const inactiveJudgeAmId = generateUuid();
+
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, status, is_finalized)
+      VALUES ('${inactiveJudgeStageId}', '${tenantJabarId}', '${f2BranchId}', 'Babak Uji Hakim Nonaktif', 41, 1, 'Aktif', false);
+
+      -- Hakim 1 Aktif, Hakim 2 Nonaktif pada judge_assignments
+      INSERT INTO judge_assignments (id, tenant_id, judge_profile_id, stage_id, branch_id, judge_field, status)
+      VALUES
+        ('${generateUuid()}', '${tenantJabarId}', '${judge1UserId}', '${inactiveJudgeStageId}', '${f2BranchId}', 'Tajwid', 'Aktif'),
+        ('${generateUuid()}', '${tenantJabarId}', '${judge2UserId}', '${inactiveJudgeStageId}', '${f2BranchId}', 'Lagu', 'Nonaktif');
+
+      INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status)
+      VALUES ('${inactiveJudgePartId}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', 'INJ-01', 'Peserta Uji Hakim Nonaktif', 'Putra', '51', 'Berlangsung');
+      INSERT INTO stage_participations (id, tenant_id, participant_id, stage_id, lottery_number, status)
+      VALUES ('${inactiveJudgeSpId}', '${tenantJabarId}', '${inactiveJudgePartId}', '${inactiveJudgeStageId}', '51', 'Lengkap');
+      INSERT INTO assigned_maqras (id, tenant_id, stage_participation_id, question_id)
+      VALUES ('${inactiveJudgeAmId}', '${tenantJabarId}', '${inactiveJudgeSpId}', '${questionPenyisihanId}');
+
+      -- Hanya Hakim 1 (Aktif) yang menilai; Hakim 2 (Nonaktif) tidak menilai
+      INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, error_counts, field_scores, total_deductions, final_score)
+      VALUES ('${generateUuid()}', '${tenantJabarId}', '${inactiveJudgeSpId}', '${inactiveJudgeAmId}', '${judge1UserId}', '${f2RubricId}', 'in_progress', false, '{}'::jsonb, '{"Tajwid": 29, "Lagu": 24, "Fashahah": 28, "Suara": 15}'::jsonb, 4, 96.0);
+      BEGIN;
+      SELECT set_config('mtq.rpc_finalize_active', 'true', true);
+      UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${inactiveJudgeSpId}'::uuid;
+      COMMIT;
+    `);
+
+    await pg.exec(`
+      BEGIN;
+      SET LOCAL ROLE authenticated;
+      SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+    `);
+    const inactiveCompRes = await pg.query<{ res: any }>(`
+      SELECT get_stage_completion_sql('${inactiveJudgeStageId}'::uuid) AS res;
+    `);
+    await pg.exec(`COMMIT;`);
+
+    const inactiveRankRes = await supabaseDataService.computeStageRankingsRpc(inactiveJudgeStageId);
+    const compData = inactiveCompRes.rows[0]?.res;
+    const rankData = inactiveRankRes.data as any;
+
+    assert(
+      '73. Fase 2.4 Hakim Nonaktif Diabaikan: Penugasan hakim berstatus Nonaktif tidak menghalangi kelengkapan babak pada `get_stage_completion_sql` maupun `compute_stage_rankings`',
+      Boolean(compData?.all_complete) === true &&
+        Number(compData?.required_judge_count) === 1 &&
+        Boolean(rankData?.all_finalized) === true &&
+        Boolean(rankData?.can_finalize) === true,
+      `compAllComplete: ${compData?.all_complete}, reqJudges: ${compData?.required_judge_count}, rankCanFinalize: ${rankData?.can_finalize}`
+    );
+
+    // =========================================================================
+    // 74. FASE 3.1: VERIFIKASI BERKAS PESERTA (`verify_participant`)
+    // =========================================================================
+    const vPartId = generateUuid();
+    const vStageId = generateUuid();
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, status, is_finalized)
+      VALUES ('${vStageId}', '${tenantJabarId}', '${f2BranchId}', 'Babak Uji Verifikasi Berkas', 50, 1, 'Aktif', false);
+
+      INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status, verification_status)
+      VALUES ('${vPartId}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', 'VRF-01', 'Peserta Uji Verifikasi', 'Putra', '99', 'Menunggu', 'Diajukan');
+    `);
+
+    // Coba undian saat status masih 'Diajukan' -> harus ditolak
+    const unverifiedDrawRes = await supabaseDataService.drawLotteryServerRpc({
+      tenantId: tenantJabarId,
+      stageId: vStageId,
+      branchId: f2BranchId,
+      drawMode: 'both',
+      participantIds: [vPartId],
+      questionPoolIds: [questionPenyisihanId]
+    });
+
+    // Penolakan tanpa catatan (note < 5 karakter) -> harus ditolak
+    const rejectWithoutNoteRes = await supabaseDataService.verifyParticipantRpc({
+      tenantId: tenantJabarId,
+      participantId: vPartId,
+      status: 'Ditolak',
+      note: 'kur'
+    });
+
+    // Verifikasi berkas disetujui ('Diverifikasi') oleh Admin
+    const verifySuccessRes = await supabaseDataService.verifyParticipantRpc({
+      tenantId: tenantJabarId,
+      participantId: vPartId,
+      status: 'Diverifikasi'
+    });
+
+    const checkVerifiedRow = await pg.query<{ verification_status: string; verified_by: string }>(`
+      SELECT verification_status, verified_by::text FROM participants WHERE id = '${vPartId}'::uuid;
+    `);
+
+    assert(
+      '74. Fase 3.1 Verifikasi Berkas: Undian menolak peserta belum diverifikasi, penolakan mewajibkan alasan (>= 5 karakter), dan verifikasi berhasil memperbarui status menjadi Diverifikasi',
+      unverifiedDrawRes.success === false &&
+        (unverifiedDrawRes.message?.includes('PARTICIPANT_NOT_VERIFIED') || false) &&
+        rejectWithoutNoteRes.success === false &&
+        verifySuccessRes.success === true &&
+        checkVerifiedRow.rows[0]?.verification_status === 'Diverifikasi' &&
+        Boolean(checkVerifiedRow.rows[0]?.verified_by),
+      `unverifiedMsg: ${unverifiedDrawRes.message}, rejectNoteMsg: ${rejectWithoutNoteRes.message}, status: ${checkVerifiedRow.rows[0]?.verification_status}`
+    );
+
+    // =========================================================================
+    // 75. FASE 3.2: UNDIAN NOMOR TAMPIL & MAQRA DI SERVER (`draw_lottery_server`)
+    // =========================================================================
+    const drawPart1Id = generateUuid();
+    const drawPart2Id = generateUuid();
+    const drawStageId = generateUuid();
+    const drawQ1Id = generateUuid();
+    const drawQ2Id = generateUuid();
+
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, status, is_finalized)
+      VALUES ('${drawStageId}', '${tenantJabarId}', '${f2BranchId}', 'Babak Uji Undian Server', 51, 1, 'Aktif', false);
+
+      INSERT INTO questions (id, tenant_id, branch_id, code, title, surah_name, surah_number, start_ayah, end_ayah, page_number, page_start, page_end, status)
+      VALUES
+        ('${drawQ1Id}', '${tenantJabarId}', '${f2BranchId}', 'MQ-SRV-01', 'Soal Server 1', 'Al-Baqarah', 2, 1, 10, 2, 2, 3, 'Aktif'),
+        ('${drawQ2Id}', '${tenantJabarId}', '${f2BranchId}', 'MQ-SRV-02', 'Soal Server 2', 'Al-Baqarah', 2, 11, 20, 3, 3, 4, 'Aktif');
+
+      INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status, verification_status)
+      VALUES
+        ('${drawPart1Id}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', 'SRV-01', 'Peserta Undian 1', 'Putra', 'SRV-01', 'Menunggu', 'Diverifikasi'),
+        ('${drawPart2Id}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', 'SRV-02', 'Peserta Undian 2', 'Putra', 'SRV-02', 'Menunggu', 'Diverifikasi');
+    `);
+
+    // Eksekusi drawLotteryServerRpc
+    const serverDrawRes = await supabaseDataService.drawLotteryServerRpc({
+      tenantId: tenantJabarId,
+      stageId: drawStageId,
+      branchId: f2BranchId,
+      drawMode: 'both',
+      questionsPerParticipant: 1,
+      participantIds: [drawPart1Id, drawPart2Id],
+      questionPoolIds: [drawQ1Id, drawQ2Id]
+    });
+
+    const drawLogCheck = await pg.query<{
+      seed_hex: string;
+      seed_sha256: string;
+      draw_mode: string;
+      results_count: number;
+    }>(`
+      SELECT seed_hex, seed_sha256, draw_mode, jsonb_array_length(draw_results) AS results_count
+      FROM lottery_draw_logs
+      WHERE stage_id = '${drawStageId}'::uuid
+      ORDER BY created_at DESC LIMIT 1;
+    `);
+
+    const spMaqraCheck = await pg.query<{ cnt: string }>(`
+      SELECT COUNT(*)::text AS cnt FROM assigned_maqras
+      WHERE stage_participation_id IN (
+        SELECT id FROM stage_participations WHERE stage_id = '${drawStageId}'::uuid
+      );
+    `);
+
+    // Coba undian ulang tanpa alasan jika baris sudah ada -> harus ditolak jika reason < 5 chars
+    const manualOverrideBlockedRes = await supabaseDataService.commitLotteryDrawRpc({
+      tenantId: tenantJabarId,
+      stageId: drawStageId,
+      stageName: 'Babak Uji Undian Server',
+      branchId: f2BranchId,
+      notes: 'ok', // < 5 karakter
+      results: [{ participantId: drawPart1Id, questionIds: [drawQ1Id] }]
+    });
+
+    assert(
+      '75. Fase 3.2 Undian Server CSPRNG: draw_lottery_server mencatat seed_hex, seed_sha256, draw_mode, menetapkan assigned_maqras unik, dan commit_lottery_draw mewajibkan alasan override >= 5 karakter',
+      serverDrawRes.success === true &&
+        Boolean(drawLogCheck.rows[0]?.seed_hex) &&
+        Boolean(drawLogCheck.rows[0]?.seed_sha256) &&
+        drawLogCheck.rows[0]?.draw_mode === 'both' &&
+        Number(drawLogCheck.rows[0]?.results_count) === 2 &&
+        Number(spMaqraCheck.rows[0]?.cnt) === 2 &&
+        manualOverrideBlockedRes.success === false &&
+        (manualOverrideBlockedRes.message?.includes('LOTTERY_OVERRIDE_REASON_REQUIRED') || false),
+      `drawSuccess: ${serverDrawRes.success}, seedSha: ${drawLogCheck.rows[0]?.seed_sha256}, overrideMsg: ${manualOverrideBlockedRes.message}`
+    );
+
+    // =========================================================================
+    // 76. FASE 5: UJI INTEGRASI END-TO-END (ALUR LENGKAP PENYISIHAN -> FINAL -> JUARA)
+    // =========================================================================
+    const e2eTenantId = generateUuid();
+    const e2eBranchId = generateUuid();
+    const e2eStagePenyisihanId = generateUuid();
+    const e2eStageFinalId = generateUuid();
+    const e2eKafilahId = generateUuid();
+
+    const e2ePart1Id = generateUuid();
+    const e2ePart2Id = generateUuid();
+    const e2ePart3Id = generateUuid();
+    const e2ePart4Id = generateUuid();
+
+    const e2eQ1Id = generateUuid();
+    const e2eQ2Id = generateUuid();
+    const e2eQ3Id = generateUuid();
+    const e2eQ4Id = generateUuid();
+    const e2eRubricId = generateUuid();
+
+    const e2eJudge1Id = judge1UserId;
+    const e2eJudge2Id = judge2UserId;
+
+    await pg.exec(`
+      -- 1. Setup Tenant, Branch, Stages, Rubric, Judges
+      INSERT INTO tenants (id, code, name, event_name, region, status, group_label)
+      VALUES ('${e2eTenantId}', 'E2E-TENANT', 'Tenant Uji E2E', 'MTQ E2E 2026', 'Jawa Barat', 'Aktif', 'Kafilah Kota/Kab');
+
+      INSERT INTO tenant_memberships (id, tenant_id, profile_id, role, status)
+      VALUES
+        ('${generateUuid()}', '${e2eTenantId}', '${adminUserId}', 'admin', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge1Id}', 'judge', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge2Id}', 'judge', 'Aktif');
+
+      INSERT INTO branches (id, tenant_id, code, name, status)
+      VALUES ('${e2eBranchId}', '${e2eTenantId}', 'E2E-TLW', 'Tilawah E2E', 'Aktif');
+
+      INSERT INTO rubric_versions (id, tenant_id, code, name, branch_id, version, status)
+      VALUES ('${e2eRubricId}', '${e2eTenantId}', 'RUB-E2E', 'Rubrik Tilawah E2E', '${e2eBranchId}', 1, 'Aktif');
+
+      INSERT INTO rubric_fields (id, rubric_version_id, code, name, max_score, field_order)
+      VALUES
+        ('${generateUuid()}', '${e2eRubricId}', 'F1', 'Tajwid', 30, 1),
+        ('${generateUuid()}', '${e2eRubricId}', 'F2', 'Lagu', 25, 2),
+        ('${generateUuid()}', '${e2eRubricId}', 'F3', 'Fashahah', 30, 3),
+        ('${generateUuid()}', '${e2eRubricId}', 'F4', 'Suara', 15, 4);
+
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, champion_count, status, is_finalized)
+      VALUES
+        ('${e2eStagePenyisihanId}', '${e2eTenantId}', '${e2eBranchId}', 'Penyisihan', 1, 3, 3, 'Aktif', false),
+        ('${e2eStageFinalId}', '${e2eTenantId}', '${e2eBranchId}', 'Final', 2, 3, 3, 'Aktif', false);
+
+      INSERT INTO kafilahs (id, tenant_id, code, name, region, status)
+      VALUES ('${e2eKafilahId}', '${e2eTenantId}', 'KAF-E2E', 'Kafilah E2E Juara', 'Bandung', 'Aktif');
+
+      INSERT INTO questions (id, tenant_id, branch_id, stage_id, code, title, surah_name, surah_number, start_ayah, end_ayah, page_number, page_start, page_end, status)
+      VALUES
+        ('${e2eQ1Id}', '${e2eTenantId}', '${e2eBranchId}', NULL, 'MQ-E2E-01', 'Soal 1', 'Al-Baqarah', 2, 1, 5, 2, 2, 3, 'Aktif'),
+        ('${e2eQ2Id}', '${e2eTenantId}', '${e2eBranchId}', NULL, 'MQ-E2E-02', 'Soal 2', 'Al-Baqarah', 2, 6, 10, 2, 2, 3, 'Aktif'),
+        ('${e2eQ3Id}', '${e2eTenantId}', '${e2eBranchId}', NULL, 'MQ-E2E-03', 'Soal 3', 'Al-Baqarah', 2, 11, 15, 3, 3, 4, 'Aktif'),
+        ('${e2eQ4Id}', '${e2eTenantId}', '${e2eBranchId}', NULL, 'MQ-E2E-04', 'Soal 4', 'Al-Baqarah', 2, 16, 20, 3, 3, 4, 'Aktif');
+
+      -- Kaitkan aturan kompetisi dengan rubrik
+      INSERT INTO competition_rule_configs (id, tenant_id, branch_id, rubric_version_id, tie_break_order, quota_per_stage, status)
+      VALUES ('${generateUuid()}', '${e2eTenantId}', '${e2eBranchId}', '${e2eRubricId}', ARRAY['total', 'Tajwid', 'Lagu', 'Fashahah'], '{"Penyisihan": 3, "Final": 3}'::jsonb, 'Aktif');
+
+      INSERT INTO judge_assignments (id, tenant_id, judge_profile_id, stage_id, branch_id, judge_field, status)
+      VALUES
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge1Id}', '${e2eStagePenyisihanId}', '${e2eBranchId}', 'Tajwid', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge2Id}', '${e2eStagePenyisihanId}', '${e2eBranchId}', 'Lagu', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge1Id}', '${e2eStageFinalId}', '${e2eBranchId}', 'Tajwid', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge2Id}', '${e2eStageFinalId}', '${e2eBranchId}', 'Lagu', 'Aktif');
+
+      -- 2. Pendaftaran 4 Peserta
+      INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status, verification_status)
+      VALUES
+        ('${e2ePart1Id}', '${e2eTenantId}', '${e2eKafilahId}', '${e2eBranchId}', 'E2E-P1', 'Peserta Satu', 'Putra', 'E2E-01', 'Menunggu', 'Diajukan'),
+        ('${e2ePart2Id}', '${e2eTenantId}', '${e2eKafilahId}', '${e2eBranchId}', 'E2E-P2', 'Peserta Dua', 'Putra', 'E2E-02', 'Menunggu', 'Diajukan'),
+        ('${e2ePart3Id}', '${e2eTenantId}', '${e2eKafilahId}', '${e2eBranchId}', 'E2E-P3', 'Peserta Tiga', 'Putra', 'E2E-03', 'Menunggu', 'Diajukan'),
+        ('${e2ePart4Id}', '${e2eTenantId}', '${e2eKafilahId}', '${e2eBranchId}', 'E2E-P4', 'Peserta Empat', 'Putra', 'E2E-04', 'Menunggu', 'Diajukan');
+    `);
+
+    // 3. Verifikasi Berkas 4 Peserta
+    for (const pid of [e2ePart1Id, e2ePart2Id, e2ePart3Id, e2ePart4Id]) {
+      await supabaseDataService.verifyParticipantRpc({
+        tenantId: e2eTenantId,
+        participantId: pid,
+        status: 'Diverifikasi'
+      });
+    }
+
+    // 4. Undian Babak Penyisihan di Server
+    const e2eDrawPenRes = await supabaseDataService.drawLotteryServerRpc({
+      tenantId: e2eTenantId,
+      stageId: e2eStagePenyisihanId,
+      branchId: e2eBranchId,
+      drawMode: 'both',
+      questionsPerParticipant: 1,
+      participantIds: [e2ePart1Id, e2ePart2Id, e2ePart3Id, e2ePart4Id],
+      questionPoolIds: [e2eQ1Id, e2eQ2Id, e2eQ3Id, e2eQ4Id]
+    });
+
+    // 5. Penilaian Penyisihan oleh 2 Hakim (Skor P1 > P2 > P3 > P4)
+    const e2eSpPenRows = await pg.query<{ id: string; participant_id: string }>(`
+      SELECT id::text, participant_id::text FROM stage_participations WHERE stage_id = '${e2eStagePenyisihanId}'::uuid;
+    `);
+    const e2eAmPenRows = await pg.query<{ id: string; stage_participation_id: string }>(`
+      SELECT id::text, stage_participation_id::text FROM assigned_maqras
+      WHERE stage_participation_id IN (SELECT id FROM stage_participations WHERE stage_id = '${e2eStagePenyisihanId}'::uuid);
+    `);
+
+    const spPenMap = new Map(e2eSpPenRows.rows.map((r) => [r.participant_id, r.id]));
+    const amPenMap = new Map(e2eAmPenRows.rows.map((r) => [r.stage_participation_id, r.id]));
+
+    const scoreMap: Record<string, { tajwid: number; lagu: number; total: number }> = {
+      [e2ePart1Id]: { tajwid: 30, lagu: 25, total: 98 },
+      [e2ePart2Id]: { tajwid: 28, lagu: 24, total: 92 },
+      [e2ePart3Id]: { tajwid: 26, lagu: 22, total: 86 },
+      [e2ePart4Id]: { tajwid: 20, lagu: 20, total: 75 }
+    };
+
+    for (const pid of [e2ePart1Id, e2ePart2Id, e2ePart3Id, e2ePart4Id]) {
+      const spId = spPenMap.get(pid)!;
+      const amId = amPenMap.get(spId)!;
+      const sc = scoreMap[pid];
+
+      await pg.exec(`
+        INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, field_scores, total_deductions, final_score)
+        VALUES
+          ('${generateUuid()}', '${e2eTenantId}', '${spId}', '${amId}', '${e2eJudge1Id}', '${e2eRubricId}', 'in_progress', false, '{"Tajwid": ${sc.tajwid}, "Lagu": ${sc.lagu}, "Fashahah": 28, "Suara": 15}'::jsonb, 2, ${sc.total}),
+          ('${generateUuid()}', '${e2eTenantId}', '${spId}', '${amId}', '${e2eJudge2Id}', '${e2eRubricId}', 'in_progress', false, '{"Tajwid": ${sc.tajwid}, "Lagu": ${sc.lagu}, "Fashahah": 28, "Suara": 15}'::jsonb, 2, ${sc.total});
+        BEGIN;
+        SELECT set_config('mtq.rpc_finalize_active', 'true', true);
+        UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${spId}'::uuid;
+        COMMIT;
+      `);
+    }
+
+    // 6. Hitung Peringkat & Loloskan 3 Teratas dari Penyisihan ke Final
+    const e2eRankPenRes = await supabaseDataService.computeStageRankingsRpc(e2eStagePenyisihanId);
+    const e2eAdvPenRes = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: e2eStagePenyisihanId,
+      nextStageId: e2eStageFinalId,
+      qualifiedParticipantIds: [e2ePart1Id, e2ePart2Id, e2ePart3Id],
+      overrideReasons: {},
+      rankingsSnapshot: (e2eRankPenRes.data as any)?.rankings || []
+    });
+
+    // 7. Undian Babak Final di Server
+    const e2eDrawFinRes = await supabaseDataService.drawLotteryServerRpc({
+      tenantId: e2eTenantId,
+      stageId: e2eStageFinalId,
+      branchId: e2eBranchId,
+      drawMode: 'both',
+      questionsPerParticipant: 1,
+      participantIds: [e2ePart1Id, e2ePart2Id, e2ePart3Id],
+      questionPoolIds: [e2eQ1Id, e2eQ2Id, e2eQ3Id]
+    });
+
+    // 8. Penilaian Babak Final oleh 2 Hakim (Hasil Final: P2 Juara 1 (99), P1 Juara 2 (95), P3 Juara 3 (88))
+    const e2eSpFinRows = await pg.query<{ id: string; participant_id: string }>(`
+      SELECT id::text, participant_id::text FROM stage_participations WHERE stage_id = '${e2eStageFinalId}'::uuid;
+    `);
+    const e2eAmFinRows = await pg.query<{ id: string; stage_participation_id: string }>(`
+      SELECT id::text, stage_participation_id::text FROM assigned_maqras
+      WHERE stage_participation_id IN (SELECT id FROM stage_participations WHERE stage_id = '${e2eStageFinalId}'::uuid);
+    `);
+
+    const spFinMap = new Map(e2eSpFinRows.rows.map((r) => [r.participant_id, r.id]));
+    const amFinMap = new Map(e2eAmFinRows.rows.map((r) => [r.stage_participation_id, r.id]));
+
+    const finalScoreMap: Record<string, number> = {
+      [e2ePart2Id]: 99.0, // Juara 1
+      [e2ePart1Id]: 95.0, // Juara 2
+      [e2ePart3Id]: 88.0  // Juara 3
+    };
+
+    for (const pid of [e2ePart1Id, e2ePart2Id, e2ePart3Id]) {
+      const spId = spFinMap.get(pid)!;
+      const amId = amFinMap.get(spId)!;
+      const sc = finalScoreMap[pid];
+
+      await pg.exec(`
+        INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, field_scores, total_deductions, final_score)
+        VALUES
+          ('${generateUuid()}', '${e2eTenantId}', '${spId}', '${amId}', '${e2eJudge1Id}', '${e2eRubricId}', 'in_progress', false, '{"Tajwid": 30, "Lagu": 25, "Fashahah": 28, "Suara": 15}'::jsonb, 1, ${sc}),
+          ('${generateUuid()}', '${e2eTenantId}', '${spId}', '${amId}', '${e2eJudge2Id}', '${e2eRubricId}', 'in_progress', false, '{"Tajwid": 30, "Lagu": 25, "Fashahah": 28, "Suara": 15}'::jsonb, 1, ${sc});
+        BEGIN;
+        SELECT set_config('mtq.rpc_finalize_active', 'true', true);
+        UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${spId}'::uuid;
+        COMMIT;
+      `);
+    }
+
+    // 9. Finalisasi Babak Final (p_next_stage_id = NULL) & Penentuan Juara 1, 2, 3
+    const e2eRankFinRes = await supabaseDataService.computeStageRankingsRpc(e2eStageFinalId);
+    const e2eAdvFinRes = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: e2eStageFinalId,
+      nextStageId: null,
+      qualifiedParticipantIds: [],
+      overrideReasons: {},
+      rankingsSnapshot: (e2eRankFinRes.data as any)?.rankings || []
+    });
+
+    // 10. Verifikasi Snapshot Hasil Kejuaraan di Server
+    const e2eSnapCheck = await pg.query<{ rankings_snapshot: any }>(`
+      SELECT rankings_snapshot FROM stage_result_snapshots
+      WHERE stage_id = '${e2eStageFinalId}'::uuid;
+    `);
+
+    const snapList = Array.isArray(e2eSnapCheck.rows[0]?.rankings_snapshot)
+      ? e2eSnapCheck.rows[0]?.rankings_snapshot
+      : [];
+
+    const juara1 = snapList.find((r: any) => r.champion_rank === 1);
+    const juara2 = snapList.find((r: any) => r.champion_rank === 2);
+    const juara3 = snapList.find((r: any) => r.champion_rank === 3);
+
+    assert(
+      '76. Fase 5 Integrasi End-to-End: Alur lengkap registrasi -> verifikasi -> undian server -> penilaian -> pelolosan penyisihan -> final -> pengesahan juara (Juara 1, 2, 3) 100% server-authoritative',
+      e2eDrawPenRes.success === true &&
+        e2eAdvPenRes.success === true &&
+        e2eDrawFinRes.success === true &&
+        e2eAdvFinRes.success === true &&
+        juara1?.participant_id === e2ePart2Id &&
+        juara1?.champion_title === 'Juara 1' &&
+        juara2?.participant_id === e2ePart1Id &&
+        juara2?.champion_title === 'Juara 2' &&
+        juara3?.participant_id === e2ePart3Id &&
+        juara3?.champion_title === 'Juara 3',
+      `penAdv: ${e2eAdvPenRes.success}, finAdv: ${e2eAdvFinRes.success}, J1: ${juara1?.participant_name} (${juara1?.champion_title}), J2: ${juara2?.participant_name} (${juara2?.champion_title}), J3: ${juara3?.participant_name} (${juara3?.champion_title})`
     );
   } finally {
     supabaseDataService.setTestDatabaseClient(null);

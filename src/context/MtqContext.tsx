@@ -238,6 +238,11 @@ interface MtqContextType {
   addParticipant: (part: Omit<Participant, 'id' | 'tenantId'>) => { success: boolean; message: string };
   updateParticipant: (id: string, updated: Partial<Participant>) => { success: boolean; message: string };
   deleteParticipant: (id: string) => { success: boolean; message: string };
+  verifyParticipant: (
+    participantId: string,
+    status: 'Diajukan' | 'Diverifikasi' | 'Ditolak',
+    note?: string
+  ) => Promise<{ success: boolean; message: string }>;
   importParticipantsBatch: (
     rows: ParsedParticipantImportRow[]
   ) => Promise<{ total: number; succeeded: number; failed: number; errors: string[] }>;
@@ -287,6 +292,27 @@ interface MtqContextType {
     }[];
     drawLog?: LotteryDrawLogItem;
   };
+  drawLotteryServer: (options: {
+    stageName: string;
+    branchName?: string;
+    levelName?: string;
+    participantIds: string[];
+    questionPoolIds?: string[];
+    questionsPerParticipant: number;
+    drawMode?: 'lottery_number' | 'maqra' | 'both';
+    notes?: string;
+  }) => Promise<{
+    success: boolean;
+    message: string;
+    results?: {
+      participantId: string;
+      participantName: string;
+      lotteryNumber?: string;
+      questionIds: string[];
+      questionTitles: string[];
+    }[];
+    drawLog?: LotteryDrawLogItem;
+  }>;
   commitLotteryDrawResults: (
     results: {
       participantId: string;
@@ -3843,6 +3869,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: newPartId,
       tenantId: currentTenantId,
       branchId,
+      verificationStatus: data.verificationStatus || 'Diajukan',
       questionId: hasQuestion ? data.questionId : '',
       assignedMaqra: hasQuestion ? data.assignedMaqra : 'Belum Ditetapkan',
       pageNumber: hasQuestion ? data.pageNumber : 1,
@@ -4145,6 +4172,86 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return {
       success: true,
       message: `Peserta "${existing.name}" (${existing.participantId}) berhasil dihapus.`
+    };
+  };
+
+  const verifyParticipant = async (
+    participantId: string,
+    status: 'Diajukan' | 'Diverifikasi' | 'Ditolak',
+    note?: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const existing = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
+    if (!existing) {
+      return { success: false, message: 'Peserta tidak ditemukan.' };
+    }
+
+    if (status === 'Ditolak' && (!note || note.trim().length < 5)) {
+      return {
+        success: false,
+        message: 'Alasan penolakan berkas wajib diisi minimal 5 karakter.'
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedPart: Participant = {
+      ...existing,
+      verificationStatus: status,
+      verificationNote: note?.trim() || undefined,
+      verifiedBy: currentUser.id,
+      verifiedAt: nowIso
+    };
+
+    setParticipants((prev) =>
+      prev.map((p) => (p.id === participantId && p.tenantId === currentTenantId ? updatedPart : p))
+    );
+
+    if (isLiveDbActive) {
+      setSyncStatus('Memperbarui status verifikasi berkas peserta...');
+      const res = await supabaseDataService.verifyParticipantRpc({
+        tenantId: toDeterministicUuid(currentTenantId),
+        participantId: toDeterministicUuid(participantId),
+        status,
+        note: note?.trim() || null
+      });
+      if (!res.success) {
+        setSyncStatus(`Gagal Verifikasi Peserta: ${res.message}`);
+        setParticipants((prev) =>
+          prev.map((p) => (p.id === participantId && p.tenantId === currentTenantId ? existing : p))
+        );
+        return { success: false, message: res.message || 'Gagal memverifikasi peserta di database.' };
+      }
+      setSyncStatus('Status Verifikasi Peserta Tersimpan di Database');
+      setLastSyncTime(getWibTime());
+    }
+
+    const nowTime = getWibTime();
+    const newLog: ActivityLogItem = {
+      id: generateUniqueLogId('act'),
+      tenantId: currentTenantId,
+      type: 'config',
+      title: `Verifikasi Berkas Peserta (${status})`,
+      description: `Status verifikasi berkas peserta ${existing.participantId} (${existing.name}) diubah menjadi ${status}${note ? ` — Catatan: ${note}` : ''}.`,
+      timestamp: nowTime,
+      actorName: currentUser.name
+    };
+    setActivityLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 20)]);
+
+    const auditEntry: AuditLogItem = {
+      id: generateUniqueLogId('aud'),
+      timestamp: nowTime,
+      actor: `${currentUser.name} (${currentUser.role})`,
+      action: 'PARTICIPANT_VERIFIED',
+      target: `${existing.participantId} - ${existing.name}`,
+      tenantName: currentTenant?.name || 'Tenant Aktif',
+      summary: `Status verifikasi berkas peserta diubah dari ${existing.verificationStatus || 'Diajukan'} menjadi ${status}.`,
+      reason: note?.trim() || undefined,
+      outcome: 'Success'
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    return {
+      success: true,
+      message: `Status verifikasi peserta "${existing.name}" berhasil diperbarui menjadi ${status}.`
     };
   };
 
@@ -4851,13 +4958,33 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'Tidak ada hasil undian untuk ditetapkan.' };
     }
 
-    // 1. P0-03: Strict 3D relational validation across entire batch (Active status, Stage, Branch, Level, Non-duplicate)
+    // 1. P0-03 & Fase 3: Strict validation across entire batch (Verification status, Stage lock, Active status, Branch, Level)
+    const targetIdsSet = new Set(results.map((r) => r.participantId));
+    const hasStartedAssessments = assessments.some(
+      (a) =>
+        a.tenantId === currentTenantId &&
+        a.stageName === stageName &&
+        targetIdsSet.has(a.participantId)
+    );
+    if (hasStartedAssessments) {
+      return {
+        success: false,
+        message: `STAGE_ASSESSMENTS_ALREADY_STARTED: Undian pada Babak ${stageName} telah dikunci karena penilaian dewan hakim sudah berjalan.`
+      };
+    }
+
     for (const r of results) {
       const part = participants.find((p) => p.id === r.participantId && p.tenantId === currentTenantId);
       if (!part) {
         return {
           success: false,
           message: `Transaksi dibatalkan: Peserta "${r.participantName}" tidak ditemukan di tenant aktif.`
+        };
+      }
+      if (part.verificationStatus && part.verificationStatus !== 'Diverifikasi') {
+        return {
+          success: false,
+          message: `PARTICIPANT_NOT_VERIFIED: Peserta "${part.name}" belum diverifikasi berkasnya (status: ${part.verificationStatus}).`
         };
       }
       const assignedInThisResult: string[] = [];
@@ -5312,6 +5439,424 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       results: generatedResults,
       drawLog: commitRes.drawLog
     };
+  };
+
+  const drawLotteryServer = async (options: {
+    stageName: string;
+    branchName?: string;
+    levelName?: string;
+    participantIds: string[];
+    questionPoolIds?: string[];
+    questionsPerParticipant: number;
+    drawMode?: 'lottery_number' | 'maqra' | 'both';
+    notes?: string;
+  }) => {
+    const {
+      stageName,
+      branchName,
+      levelName,
+      participantIds,
+      questionPoolIds,
+      questionsPerParticipant,
+      drawMode = 'both',
+      notes
+    } = options;
+
+    const targetParticipants = participants.filter(
+      (p) => participantIds.includes(p.id) && p.tenantId === currentTenantId
+    );
+    if (targetParticipants.length === 0) {
+      return {
+        success: false,
+        message: 'Tidak ada peserta yang dipilih untuk diundi.'
+      };
+    }
+
+    // Validasi status verifikasi berkas peserta
+    const unverifiedPart = targetParticipants.find(
+      (p) => p.verificationStatus && p.verificationStatus !== 'Diverifikasi'
+    );
+    if (unverifiedPart) {
+      return {
+        success: false,
+        message: `PARTICIPANT_NOT_VERIFIED: Peserta "${unverifiedPart.name}" (${unverifiedPart.participantId}) belum diverifikasi berkasnya (status: ${unverifiedPart.verificationStatus}).`
+      };
+    }
+
+    // Validasi penguncian undian jika penilaian sudah berjalan pada babak ini
+    const targetIdsSet = new Set(targetParticipants.map((p) => p.id));
+    const hasStartedAssessments = assessments.some(
+      (a) =>
+        a.tenantId === currentTenantId &&
+        a.stageName === stageName &&
+        targetIdsSet.has(a.participantId)
+    );
+    if (hasStartedAssessments) {
+      return {
+        success: false,
+        message: `STAGE_ASSESSMENTS_ALREADY_STARTED: Undian pada Babak ${stageName} telah dikunci karena penilaian dewan hakim sudah berjalan.`
+      };
+    }
+
+    const targetStageObj =
+      stages.find(
+        (s) =>
+          s.tenantId === currentTenantId &&
+          s.name === stageName &&
+          (!branchName || branchName === 'Semua Cabang' || s.branchName === branchName)
+      ) || stages.find((s) => s.tenantId === currentTenantId && s.name === stageName);
+    const stageId = targetStageObj?.id || toDeterministicUuid('stage-penyisihan');
+    const resolvedBranchName = branchName || targetParticipants[0]?.branchName || 'Semua Cabang';
+    const matchedBranchObj = cabangList.find((c) => c.name === resolvedBranchName);
+    const matchedLevelObj = levelName ? jenjangList.find((j) => j.name === levelName) : undefined;
+
+    if (isLiveDbActive) {
+      const rpcRes = await supabaseDataService.drawLotteryServerRpc({
+        tenantId: toDeterministicUuid(currentTenantId),
+        stageId: toDeterministicUuid(stageId),
+        branchId: matchedBranchObj ? toDeterministicUuid(matchedBranchObj.id) : null,
+        levelId: matchedLevelObj ? toDeterministicUuid(matchedLevelObj.id) : null,
+        questionsPerParticipant,
+        drawMode,
+        notes: notes || null,
+        participantIds: targetParticipants.map((p) => toDeterministicUuid(p.id)),
+        questionPoolIds: questionPoolIds?.map((qid) => toDeterministicUuid(qid))
+      });
+
+      if (!rpcRes.success) {
+        return {
+          success: false,
+          message: rpcRes.message || 'Gagal menjalankan undian server.'
+        };
+      }
+
+      const rpcData = (rpcRes.data || {}) as {
+        draw_log_id?: string;
+        draw_version?: number;
+        draw_mode?: 'lottery_number' | 'maqra' | 'both';
+        seed_hex?: string;
+        seed_sha256?: string;
+        results?: LotteryDrawResultItem[];
+      };
+
+      const serverResults = Array.isArray(rpcData.results) ? rpcData.results : [];
+      const nowTime = getWibTime();
+
+      // Sinkronkan state lokal dari hasil server
+      const resultMap = new Map<string, LotteryDrawResultItem>();
+      serverResults.forEach((r) => {
+        resultMap.set(String(r.participantId), r);
+      });
+
+      setParticipants((prev) =>
+        prev.map((p) => {
+          const r = resultMap.get(toDeterministicUuid(p.id)) || resultMap.get(p.id);
+          if (p.tenantId !== currentTenantId || !r) return p;
+
+          const nextLottery =
+            (drawMode === 'lottery_number' || drawMode === 'both') && r.lotteryNumber
+              ? r.lotteryNumber
+              : p.lotteryNumber;
+
+          if (drawMode === 'lottery_number') {
+            return { ...p, lotteryNumber: nextLottery };
+          }
+
+          const newMaqraItems: AssignedMaqraItem[] = (r.assignedQuestionIds || [])
+            .map((qid) => {
+              const q = questions.find(
+                (item) =>
+                  item.tenantId === currentTenantId &&
+                  (toDeterministicUuid(item.id) === qid || item.id === qid)
+              );
+              if (!q) return null;
+              return {
+                id: generateUuid(),
+                questionId: q.id,
+                code: q.code,
+                title: q.title,
+                surahName: q.surahName,
+                surahNumber: q.surahNumber,
+                startAyah: q.startAyah,
+                endAyah: q.endAyah,
+                pageNumber: q.pageNumber,
+                pageStart: q.pageStart || q.pageNumber,
+                pageEnd: q.pageEnd || q.pageNumber,
+                pageNumbers: q.pageNumbers || [q.pageNumber],
+                assignedAt: nowTime,
+                stageName
+              } as AssignedMaqraItem;
+            })
+            .filter(Boolean) as AssignedMaqraItem[];
+
+          const otherStageItems = (p.assignedQuestions || []).filter(
+            (item) => item.questionId !== '' && item.stageName && item.stageName !== stageName
+          );
+          const combined = [...otherStageItems, ...newMaqraItems];
+          const combinedQIds = Array.from(new Set(combined.map((n) => n.questionId)));
+          const lastItem = newMaqraItems[newMaqraItems.length - 1] || combined[combined.length - 1];
+
+          return {
+            ...p,
+            lotteryNumber: nextLottery,
+            questionId: lastItem ? lastItem.questionId : p.questionId,
+            assignedMaqra:
+              newMaqraItems.length === 1
+                ? newMaqraItems[0].title
+                : newMaqraItems.length > 1
+                ? `${newMaqraItems.length} Maqra Ditetapkan`
+                : p.assignedMaqra,
+            pageNumber: lastItem ? lastItem.pageNumber : p.pageNumber,
+            assignedQuestions: combined,
+            questionIds: combinedQIds
+          };
+        })
+      );
+
+      setStageParticipations((prev) =>
+        prev.map((sp) => {
+          const r = resultMap.get(toDeterministicUuid(sp.participantId)) || resultMap.get(sp.participantId);
+          if (sp.tenantId !== currentTenantId || sp.stageName !== stageName || !r) return sp;
+          const nextLottery =
+            (drawMode === 'lottery_number' || drawMode === 'both') && r.lotteryNumber
+              ? r.lotteryNumber
+              : sp.lotteryNumber;
+          if (drawMode === 'lottery_number') {
+            return { ...sp, lotteryNumber: nextLottery };
+          }
+          const newMaqraItems: AssignedMaqraItem[] = (r.assignedQuestionIds || [])
+            .map((qid) => {
+              const q = questions.find(
+                (item) =>
+                  item.tenantId === currentTenantId &&
+                  (toDeterministicUuid(item.id) === qid || item.id === qid)
+              );
+              if (!q) return null;
+              return {
+                id: generateUuid(),
+                questionId: q.id,
+                code: q.code,
+                title: q.title,
+                surahName: q.surahName,
+                surahNumber: q.surahNumber,
+                startAyah: q.startAyah,
+                endAyah: q.endAyah,
+                pageNumber: q.pageNumber,
+                pageStart: q.pageStart || q.pageNumber,
+                pageEnd: q.pageEnd || q.pageNumber,
+                pageNumbers: q.pageNumbers || [q.pageNumber],
+                assignedAt: nowTime,
+                stageName
+              } as AssignedMaqraItem;
+            })
+            .filter(Boolean) as AssignedMaqraItem[];
+          const lastItem = newMaqraItems[newMaqraItems.length - 1];
+          return {
+            ...sp,
+            lotteryNumber: nextLottery,
+            questionId: lastItem ? lastItem.questionId : sp.questionId,
+            assignedMaqra:
+              newMaqraItems.length === 1
+                ? newMaqraItems[0].title
+                : newMaqraItems.length > 1
+                ? `${newMaqraItems.length} Maqra Ditetapkan`
+                : sp.assignedMaqra,
+            pageNumber: lastItem ? lastItem.pageNumber : sp.pageNumber,
+            assignedQuestions: newMaqraItems.length > 0 ? newMaqraItems : sp.assignedQuestions,
+            status:
+              newMaqraItems.length > 0 && sp.status === 'Maqra Belum Ditetapkan'
+                ? 'Belum Dimulai'
+                : sp.status
+          };
+        })
+      );
+
+      const newDrawLog: LotteryDrawLogItem = {
+        id: rpcData.draw_log_id || generateUuid(),
+        tenantId: currentTenantId,
+        stageId: targetStageObj?.id,
+        stageName,
+        branchId: matchedBranchObj?.id,
+        branchName: resolvedBranchName,
+        levelId: matchedLevelObj?.id,
+        levelName,
+        actorId: currentUser.id,
+        actorName: `${currentUser.name} (${currentUser.role})`,
+        questionsPerParticipant,
+        participantIds: targetParticipants.map((p) => p.id),
+        questionPoolIds: questionPoolIds || [],
+        drawResults: serverResults,
+        drawVersion: rpcData.draw_version || 1,
+        seedHex: rpcData.seed_hex,
+        seedSha256: rpcData.seed_sha256,
+        drawMode: rpcData.draw_mode || drawMode,
+        notes,
+        createdAt: new Date().toISOString()
+      };
+
+      setLotteryDrawLogs((prev) => [newDrawLog, ...prev]);
+
+      const formattedResults = serverResults.map((r) => {
+        const qTitles = (r.assignedQuestionIds || []).map((qid) => {
+          const q = questions.find(
+            (item) =>
+              item.tenantId === currentTenantId &&
+              (toDeterministicUuid(item.id) === qid || item.id === qid)
+          );
+          return q ? `${q.code} - ${q.title}` : qid;
+        });
+        return {
+          participantId: r.participantId,
+          participantName: r.participantName,
+          lotteryNumber: r.lotteryNumber,
+          questionIds: r.assignedQuestionIds || [],
+          questionTitles: qTitles
+        };
+      });
+
+      return {
+        success: true,
+        message: rpcRes.message,
+        results: formattedResults,
+        drawLog: newDrawLog
+      };
+    }
+
+    // Mode Simulasi Lokal: Bangkitkan CSPRNG seed & SHA-256
+    const bytes = new Uint8Array(16);
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    const seedHex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    let seedSha256 = seedHex + seedHex;
+    try {
+      if (typeof crypto !== 'undefined' && crypto.subtle) {
+        const digestBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seedHex));
+        seedSha256 = Array.from(new Uint8Array(digestBuf))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+      }
+    } catch {
+      // Fallback hash
+    }
+
+    // Jika mode lottery_number atau both, acak nomor urut tampil
+    const lotteryMap = new Map<string, string>();
+    if (drawMode === 'lottery_number' || drawMode === 'both') {
+      const shuffledParts = fisherYatesShuffle(targetParticipants);
+      shuffledParts.forEach((p, idx) => {
+        const prefix = (p.branchName || 'MTQ').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase() || 'NP';
+        lotteryMap.set(p.id, `${prefix}-${String(idx + 1).padStart(2, '0')}`);
+      });
+
+      setParticipants((prev) =>
+        prev.map((p) =>
+          p.tenantId === currentTenantId && lotteryMap.has(p.id)
+            ? { ...p, lotteryNumber: lotteryMap.get(p.id)! }
+            : p
+        )
+      );
+      setStageParticipations((prev) =>
+        prev.map((sp) =>
+          sp.tenantId === currentTenantId && sp.stageName === stageName && lotteryMap.has(sp.participantId)
+            ? { ...sp, lotteryNumber: lotteryMap.get(sp.participantId)! }
+            : sp
+        )
+      );
+    }
+
+    if (drawMode === 'lottery_number') {
+      const prevDrawsCount = lotteryDrawLogs.filter(
+        (l) => l.tenantId === currentTenantId && l.stageName === stageName && l.branchName === resolvedBranchName
+      ).length;
+      const drawResultsAudit: LotteryDrawResultItem[] = targetParticipants.map((p) => ({
+        participantId: p.id,
+        participantCode: p.participantId,
+        participantName: p.name,
+        lotteryNumber: lotteryMap.get(p.id) || p.lotteryNumber,
+        assignedQuestionIds: (p.assignedQuestions || []).map((q) => q.questionId),
+        assignedQuestionCodes: (p.assignedQuestions || []).map((q) => q.code || '')
+      }));
+      const drawLogEntry: LotteryDrawLogItem = {
+        id: generateUuid(),
+        tenantId: currentTenantId,
+        stageId: targetStageObj?.id,
+        stageName,
+        branchId: matchedBranchObj?.id,
+        branchName: resolvedBranchName,
+        levelId: matchedLevelObj?.id,
+        levelName,
+        actorId: currentUser.id,
+        actorName: `${currentUser.name} (${currentUser.role})`,
+        questionsPerParticipant: 0,
+        participantIds: targetParticipants.map((p) => p.id),
+        questionPoolIds: [],
+        drawResults: drawResultsAudit,
+        drawVersion: prevDrawsCount + 1,
+        seedHex,
+        seedSha256,
+        drawMode: 'lottery_number',
+        notes,
+        createdAt: new Date().toISOString()
+      };
+      setLotteryDrawLogs((prev) => [drawLogEntry, ...prev]);
+
+      return {
+        success: true,
+        message: `Undian nomor tampil berhasil ditetapkan untuk ${targetParticipants.length} peserta pada Babak ${stageName} (Undian #${drawLogEntry.drawVersion}).`,
+        results: targetParticipants.map((p) => ({
+          participantId: p.id,
+          participantName: p.name,
+          lotteryNumber: lotteryMap.get(p.id) || p.lotteryNumber,
+          questionIds: [],
+          questionTitles: []
+        })),
+        drawLog: drawLogEntry
+      };
+    }
+
+    const drawRes = conductLotteryDraw({
+      stageName,
+      branchName,
+      levelName,
+      participantIds,
+      questionPoolIds,
+      questionsPerParticipant,
+      notes
+    });
+
+    if (drawRes.success && drawRes.drawLog) {
+      const enrichedLog: LotteryDrawLogItem = {
+        ...drawRes.drawLog,
+        seedHex,
+        seedSha256,
+        drawMode,
+        drawResults: drawRes.drawLog.drawResults.map((dr) => ({
+          ...dr,
+          lotteryNumber: lotteryMap.get(dr.participantId) || dr.lotteryNumber
+        }))
+      };
+      setLotteryDrawLogs((prev) =>
+        prev.map((l) => (l.id === enrichedLog.id ? enrichedLog : l))
+      );
+      const rawResults: any[] = 'results' in drawRes && Array.isArray((drawRes as any).results)
+        ? (drawRes as any).results
+        : [];
+      return {
+        ...drawRes,
+        results: rawResults.map((r: any) => ({
+          ...r,
+          lotteryNumber: lotteryMap.get(r.participantId)
+        })),
+        drawLog: enrichedLog
+      };
+    }
+
+    return drawRes;
   };
 
   // Jenjang & Cabang Actions (Tenant Scoped)
@@ -6473,6 +7018,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     // Buat objek snapshot hasil babak (disimpan ke state HANYA setelah transaksi RPC berhasil)
+    const maxChamp = currentStg.championCount || 3;
     const stageSnapshot = RankingService.createStageResultSnapshot({
       tenantId: currentTenantId,
       stageId: currentStg.id,
@@ -6480,6 +7026,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       branchId: effectiveBranchId,
       branchName: effectiveBranchName || 'Cabang Terpadu',
       quota: currentStg.qualificationQuota,
+      championCount: maxChamp,
+      isFinalChampionship,
       finalizedBy: `${currentUser.name} (${currentUser.role})`,
       evaluatedParticipants: evalResult.evaluatedParticipants,
       customRuleConfigs: competitionRules
@@ -6492,7 +7040,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...entry,
         participant_id: toDeterministicUuid(entry.participantId),
         final_score: entry.totalScore,
-        rank: entry.rank
+        rank: entry.rank,
+        champion_rank: entry.championRank ?? null,
+        champion_title: entry.championTitle ?? null,
+        is_qualified: entry.isQualified
       }));
 
       const rpcRes = await supabaseDataService.advanceStageQualifiersRpc({
@@ -6509,7 +7060,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setSyncStatus('Gagal Mengesahkan Babak di Database');
         const isMigrationNeeded = rpcRes.message?.includes('v_next_stage') || rpcRes.message?.includes('v_rule');
         const errMsg = isMigrationNeeded
-          ? `Pengesahan babak di database ditolak: ${rpcRes.message}. Silakan jalankan file migrasi terbaru (supabase/migrations/20261111_fix_v_rule_unassigned.sql) di SQL Editor Supabase Anda.`
+          ? `Pengesahan babak di database ditolak: ${rpcRes.message}. Silakan jalankan file migrasi terbaru (supabase/migrations/20261114_audit_fixes.sql) di SQL Editor Supabase Anda.`
           : `Pengesahan babak di database ditolak: ${rpcRes.message}`;
         addNotification({
           title: 'Pengesahan Babak Ditolak',
@@ -6559,22 +7110,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         prev.map((sp) => {
           if (stagePartIds.has(sp.id)) {
             const data = scoreMap[sp.participantId] || { score: 0, rank: 99, isQualified: false };
-            const isWinner = data.isQualified;
-            const championTitle =
-              data.rank === 1
-                ? 'Juara 1'
-                : data.rank === 2
-                ? 'Juara 2'
-                : data.rank === 3
-                ? 'Juara 3'
-                : `Finalis (Peringkat ${data.rank})`;
-            const reason = overrideReasons?.[sp.participantId] || championTitle;
+            const cRank = data.rank <= maxChamp ? data.rank : undefined;
+            const cTitle = data.rank <= maxChamp ? `Juara ${data.rank}` : undefined;
+            const reason =
+              overrideReasons?.[sp.participantId] ||
+              cTitle ||
+              `Finalis (Peringkat ${data.rank})`;
 
             return {
               ...sp,
               finalScore: data.score,
               rank: data.rank,
-              isQualified: isWinner,
+              championRank: cRank,
+              championTitle: cTitle,
+              isQualified: false,
               qualificationReason: reason,
               finalizedAt: nowTime,
               status: 'Lengkap' as ParticipantProgressStatus
@@ -6588,24 +7137,20 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         prev.map((p) => {
           if (p.tenantId === currentTenantId && stageParticipantIdSet.has(p.id) && scoreMap[p.id]) {
             const data = scoreMap[p.id];
-            const isWinner = data.isQualified;
-            const championTitle =
-              data.rank === 1
-                ? 'Juara 1'
-                : data.rank === 2
-                ? 'Juara 2'
-                : data.rank === 3
-                ? 'Juara 3'
-                : `Finalis (Peringkat ${data.rank})`;
-            const reason = overrideReasons?.[p.id] || championTitle;
+            const cRank = data.rank <= maxChamp ? data.rank : undefined;
+            const cTitle = data.rank <= maxChamp ? `Juara ${data.rank}` : undefined;
+            const statusLabel = cTitle || `Finalis (Peringkat ${data.rank})`;
+            const reason = overrideReasons?.[p.id] || statusLabel;
 
             const historyEntry = {
               stageId: currentStg.id,
               stageName: currentStageName,
-              status: championTitle,
+              status: statusLabel,
               score: data.score,
               rank: data.rank,
-              qualified: isWinner,
+              championRank: cRank,
+              championTitle: cTitle,
+              qualified: false,
               reason,
               finalizedAt: nowTime
             };
@@ -6766,7 +7311,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             };
             return {
               ...p,
-              status: 'Final',
+              status: 'Gugur',
               stageHistory: [...(p.stageHistory || []), historyEntry]
             };
           }
@@ -6974,6 +7519,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addParticipant,
         updateParticipant,
         deleteParticipant,
+        verifyParticipant,
         importParticipantsBatch,
         addQuestion,
         updateQuestion,
@@ -6983,6 +7529,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addQuestionToParticipant,
         removeQuestionFromParticipant,
         conductLotteryDraw,
+        drawLotteryServer,
         commitLotteryDrawResults,
         updateCategoryDeduction,
         addErrorCategory,

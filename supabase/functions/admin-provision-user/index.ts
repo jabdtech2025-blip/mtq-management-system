@@ -329,20 +329,26 @@ Deno.serve(async (req: Request) => {
   }
 
   const isCallerSuperadmin = callerProfile.role === 'superadmin';
+  const allowedRolesForCaller = isCallerSuperadmin
+    ? ['judge', 'admin', 'superadmin']
+    : ['judge', 'admin'];
+
+  if (!allowedRolesForCaller.includes(targetRole)) {
+    return jsonResponse(
+      {
+        success: false,
+        code: targetRole === 'superadmin' ? 'SUPERADMIN_ESCALATION_FORBIDDEN' : 'INVALID_ROLE',
+        error:
+          targetRole === 'superadmin'
+            ? 'Otorisasi ditolak: Administrator Tenant tidak diizinkan membuat atau menetapkan peran Superadmin.'
+            : `Peran pengguna (${targetRole}) tidak diizinkan. Gunakan salah satu dari: ${allowedRolesForCaller.join(', ')}.`,
+      },
+      targetRole === 'superadmin' ? 403 : 400,
+      corsHeaders
+    );
+  }
 
   if (!isCallerSuperadmin) {
-    if (targetRole === 'superadmin') {
-      return jsonResponse(
-        {
-          success: false,
-          code: 'SUPERADMIN_ESCALATION_FORBIDDEN',
-          error: 'Otorisasi ditolak: Administrator Tenant tidak diizinkan membuat atau menetapkan peran Superadmin.',
-        },
-        403,
-        corsHeaders
-      );
-    }
-
     const { data: callerMembership, error: membershipErr } = await callerClient
       .from('tenant_memberships')
       .select('id, role, status')
@@ -472,12 +478,19 @@ Deno.serve(async (req: Request) => {
   });
 
   if (rpcError) {
+    let rollbackDeleted = false;
+    if (internalProvisioningState === 'invited' && resolvedAuthUserId) {
+      const { error: deleteErr } = await adminClient.auth.admin.deleteUser(resolvedAuthUserId);
+      rollbackDeleted = !deleteErr;
+    }
     return jsonResponse(
       {
         success: false,
         code: 'MEMBERSHIP_SYNC_FAILED',
-        authUserId: resolvedAuthUserId,
-        error: `Sinkronisasi profil/keanggotaan gagal: ${rpcError.message}. Anda dapat menekan tombol Coba Ulang (Retry) tanpa membuat duplikasi akun.`,
+        rolledBackAuthUser: rollbackDeleted,
+        error: rollbackDeleted
+          ? `Sinkronisasi profil/keanggotaan gagal (${rpcError.message}). Akun Auth baru telah dibatalkan (dihapus kembali) secara otomatis agar tidak meninggalkan akun yatim.`
+          : `Sinkronisasi profil/keanggotaan gagal: ${rpcError.message}.`,
       },
       422,
       corsHeaders

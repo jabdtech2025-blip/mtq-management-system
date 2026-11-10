@@ -32,6 +32,8 @@ import {
 
 export const KafilahPesertaView: React.FC = () => {
   const {
+    currentTenant,
+    currentUser,
     kafilahs,
     participants,
     cabangList,
@@ -43,8 +45,12 @@ export const KafilahPesertaView: React.FC = () => {
     addParticipant,
     updateParticipant,
     deleteParticipant,
+    verifyParticipant,
     importParticipantsBatch
   } = useMtq();
+
+  const groupLabel = currentTenant?.groupLabel || 'Kafilah / Utusan';
+  const canVerifyParticipants = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
 
   // Dual View Mode: 'peserta' (Per Peserta - 1st option) | 'grup' (Per Grup / Kafilah - 2nd option)
   const [viewMode, setViewMode] = useState<'peserta' | 'grup'>('peserta');
@@ -59,6 +65,7 @@ export const KafilahPesertaView: React.FC = () => {
   const [filterLevel, setFilterLevel] = useState<string>('ALL');
   const [filterStage, setFilterStage] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [filterVerification, setFilterVerification] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'adminSeq' | 'lottery' | 'name' | 'kafilah'>('adminSeq');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 15;
@@ -68,6 +75,9 @@ export const KafilahPesertaView: React.FC = () => {
   const [detailParticipant, setDetailParticipant] = useState<Participant | null>(null);
   const [isAddKafilahOpen, setIsAddKafilahOpen] = useState(false);
   const [isAddParticipantOpen, setIsAddParticipantOpen] = useState(false);
+  const [rejectModalPart, setRejectModalPart] = useState<Participant | null>(null);
+  const [rejectNote, setRejectNote] = useState<string>('');
+  const [rejectError, setRejectError] = useState<string>('');
 
   // Excel Import Modal state
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -162,6 +172,8 @@ export const KafilahPesertaView: React.FC = () => {
         if (filterLevel !== 'ALL' && p.levelName !== filterLevel) return false;
         if (filterStage !== 'ALL' && p.stageName !== filterStage) return false;
         if (filterStatus !== 'ALL' && p.status !== filterStatus) return false;
+        const verStatus = p.verificationStatus || 'Diverifikasi';
+        if (filterVerification !== 'ALL' && verStatus !== filterVerification) return false;
         if (!q) return true;
         return (
           p.name.toLowerCase().includes(q) ||
@@ -192,7 +204,7 @@ export const KafilahPesertaView: React.FC = () => {
         }
         return a.name.localeCompare(b.name);
       });
-  }, [participants, searchQuery, filterKafilahId, filterBranch, filterLevel, filterStage, filterStatus, sortBy]);
+  }, [participants, searchQuery, filterKafilahId, filterBranch, filterLevel, filterStage, filterStatus, filterVerification, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(filteredParticipants.length / pageSize));
   const paginatedParticipants = useMemo(() => {
@@ -443,9 +455,11 @@ export const KafilahPesertaView: React.FC = () => {
       {/* 1. Top Header: Page Title on Left + Import & Tambah Buttons on Right */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">Grup & Peserta MTQ</h1>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+            {groupLabel} & Peserta MTQ
+          </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Kelola grup kontingen kabupaten/kota dan seluruh atribut administrasi peserta secara terpadu
+            Kelola {groupLabel.toLowerCase()}, verifikasi berkas administrasi, dan seluruh atribut peserta secara terpadu
           </p>
         </div>
 
@@ -616,6 +630,22 @@ export const KafilahPesertaView: React.FC = () => {
               ))}
             </select>
 
+            {/* 5. Filter Status Verifikasi Berkas */}
+            <select
+              value={filterVerification}
+              onChange={(e) => {
+                setFilterVerification(e.target.value);
+                setCurrentPage(1);
+              }}
+              data-testid="filter-verification-status"
+              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+            >
+              <option value="ALL">Semua Verifikasi</option>
+              <option value="Diajukan">Diajukan</option>
+              <option value="Diverifikasi">Diverifikasi</option>
+              <option value="Ditolak">Ditolak</option>
+            </select>
+
             {/* 6. No Urut (Sorting) */}
             <select
               value={sortBy}
@@ -627,7 +657,7 @@ export const KafilahPesertaView: React.FC = () => {
               <option value="adminSeq">No Urut</option>
               <option value="lottery">No Undian</option>
               <option value="name">Nama Peserta</option>
-              <option value="kafilah">Grup / Kafilah</option>
+              <option value="kafilah">{groupLabel}</option>
             </select>
           </div>
         ) : (
@@ -774,10 +804,111 @@ export const KafilahPesertaView: React.FC = () => {
         </div>
       )}
 
-      {/* MODE 2: Main Per Peserta Table */}
+      {/* MODE 2: Main Per Peserta Table + Mobile Cards */}
       {viewMode === 'peserta' && (
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Mobile Card Layout (md:hidden) */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {paginatedParticipants.length === 0 ? (
+              <div className="py-10 px-4 text-center text-xs text-slate-400">
+                Tidak ada data peserta yang sesuai dengan filter pencarian.
+              </div>
+            ) : (
+              paginatedParticipants.map((p, idx) => {
+                const verStatus = p.verificationStatus || 'Diverifikasi';
+                return (
+                  <div key={`mob-${p.id}-${idx}`} className="p-4 space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-xs text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
+                            {p.adminSequenceNumber || p.lotteryNumber || p.participantId}
+                          </span>
+                          <span className="font-bold text-slate-900 text-sm">{p.name}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                          {p.participantId} · {p.branchName}
+                        </p>
+                      </div>
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
+                          verStatus === 'Diverifikasi'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : verStatus === 'Ditolak'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                        }`}
+                      >
+                        {verStatus}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-slate-600 grid grid-cols-2 gap-1.5 bg-slate-50 p-2.5 rounded-lg">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">{groupLabel}</span>
+                        <span className="font-semibold text-slate-800">{p.kafilahName}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Instansi / Asal</span>
+                        <span className="font-medium text-slate-800">
+                          {p.originInstitution || p.originCity || '-'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setDetailParticipant(p)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-bold text-xs"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Lihat Data</span>
+                      </button>
+
+                      {canVerifyParticipants && (
+                        <div className="flex items-center gap-1.5">
+                          {verStatus !== 'Diverifikasi' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const res = await verifyParticipant(p.id, 'Diverifikasi');
+                                setFeedbackMessage({
+                                  type: res.success ? 'success' : 'error',
+                                  text: res.message
+                                });
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold"
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span>Verifikasi</span>
+                            </button>
+                          )}
+                          {verStatus !== 'Ditolak' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRejectModalPart(p);
+                                setRejectNote(p.verificationNote || '');
+                                setRejectError('');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-[11px] font-bold"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Tolak</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop Table (hidden md:block) */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-600 font-semibold">
@@ -785,54 +916,112 @@ export const KafilahPesertaView: React.FC = () => {
                   <th className="py-3.5 px-4">Nama Peserta</th>
                   <th className="py-3.5 px-4">Nama Ayah</th>
                   <th className="py-3.5 px-4">Instansi Asal</th>
-                  <th className="py-3.5 px-4">Grup (Kafilah)</th>
+                  <th className="py-3.5 px-4">{groupLabel}</th>
                   <th className="py-3.5 px-4">Cabang</th>
+                  <th className="py-3.5 px-4 text-center">Verifikasi Berkas</th>
                   <th className="py-3.5 px-4 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {paginatedParticipants.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center text-slate-400">
+                    <td colSpan={8} className="py-10 text-center text-slate-400">
                       Tidak ada data peserta yang sesuai dengan filter pencarian.
                     </td>
                   </tr>
                 ) : (
-                  paginatedParticipants.map((p, idx) => (
-                    <tr key={`${p.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
-                        {p.adminSequenceNumber || p.lotteryNumber || p.participantId || '-'}
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-900">{p.name}</div>
-                        <div className="text-[11px] text-slate-400 font-mono">{p.participantId}</div>
-                      </td>
-                      <td className="py-3 px-4 text-slate-700 font-medium">
-                        {p.fatherName || '-'}
-                      </td>
-                      <td className="py-3 px-4 text-slate-700">
-                        <p className="font-medium text-slate-800">{p.originInstitution || '-'}</p>
-                        {(p.originCity || p.originRegion) && (
-                          <p className="text-[11px] text-slate-400">
-                            {[p.originCity, p.originRegion].filter(Boolean).join(', ')}
-                          </p>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 font-semibold text-slate-800">{p.kafilahName}</td>
-                      <td className="py-3 px-4 font-medium text-slate-800">{p.branchName}</td>
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => setDetailParticipant(p)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 font-bold text-xs transition-colors cursor-pointer shadow-2xs"
-                          title="Lihat detail lengkap peserta"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-emerald-700" />
-                          <span>Lihat Data</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  paginatedParticipants.map((p, idx) => {
+                    const verStatus = p.verificationStatus || 'Diverifikasi';
+                    return (
+                      <tr key={`${p.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
+                          {p.adminSequenceNumber || p.lotteryNumber || p.participantId || '-'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-slate-900">{p.name}</div>
+                          <div className="text-[11px] text-slate-400 font-mono">{p.participantId}</div>
+                        </td>
+                        <td className="py-3 px-4 text-slate-700 font-medium">
+                          {p.fatherName || '-'}
+                        </td>
+                        <td className="py-3 px-4 text-slate-700">
+                          <p className="font-medium text-slate-800">{p.originInstitution || '-'}</p>
+                          {(p.originCity || p.originRegion) && (
+                            <p className="text-[11px] text-slate-400">
+                              {[p.originCity, p.originRegion].filter(Boolean).join(', ')}
+                            </p>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-slate-800">{p.kafilahName}</td>
+                        <td className="py-3 px-4 font-medium text-slate-800">{p.branchName}</td>
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${
+                              verStatus === 'Diverifikasi'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : verStatus === 'Ditolak'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-amber-50 text-amber-800 border-amber-200'
+                            }`}
+                            title={p.verificationNote || undefined}
+                          >
+                            {verStatus}
+                          </span>
+                          {p.verificationNote && (
+                            <div className="text-[10px] text-slate-400 max-w-[140px] truncate mx-auto mt-0.5">
+                              {p.verificationNote}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setDetailParticipant(p)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 font-bold text-xs transition-colors cursor-pointer shadow-2xs"
+                              title="Lihat detail lengkap peserta"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                              <span>Lihat Data</span>
+                            </button>
+                            {canVerifyParticipants && verStatus !== 'Diverifikasi' && (
+                              <button
+                                type="button"
+                                data-testid={`verify-approve-${p.id}`}
+                                onClick={async () => {
+                                  const res = await verifyParticipant(p.id, 'Diverifikasi');
+                                  setFeedbackMessage({
+                                    type: res.success ? 'success' : 'error',
+                                    text: res.message
+                                  });
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors cursor-pointer"
+                                title="Setujui verifikasi berkas peserta"
+                              >
+                                <UserCheck className="w-3.5 h-3.5" />
+                                <span>Verifikasi</span>
+                              </button>
+                            )}
+                            {canVerifyParticipants && verStatus !== 'Ditolak' && (
+                              <button
+                                type="button"
+                                data-testid={`verify-reject-${p.id}`}
+                                onClick={() => {
+                                  setRejectModalPart(p);
+                                  setRejectNote(p.verificationNote || '');
+                                  setRejectError('');
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 font-semibold text-xs transition-colors cursor-pointer"
+                                title="Tolak berkas peserta dengan catatan"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -1715,6 +1904,71 @@ export const KafilahPesertaView: React.FC = () => {
               </button>
             </div>
           </form>
+        </AppModal>
+      )}
+
+      {/* Modal Tolak Verifikasi Berkas Peserta */}
+      {rejectModalPart && (
+        <AppModal
+          isOpen={Boolean(rejectModalPart)}
+          onClose={() => setRejectModalPart(null)}
+          title={`Tolak Berkas Peserta: ${rejectModalPart.name}`}
+          subtitle={`ID Peserta: ${rejectModalPart.participantId} · ${rejectModalPart.branchName}`}
+          maxWidthClass="max-w-md"
+          footer={
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRejectModalPart(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                data-testid="confirm-reject-participant-btn"
+                onClick={async () => {
+                  if (!rejectNote || rejectNote.trim().length < 5) {
+                    setRejectError('Alasan penolakan berkas wajib diisi minimal 5 karakter.');
+                    return;
+                  }
+                  const res = await verifyParticipant(rejectModalPart.id, 'Ditolak', rejectNote.trim());
+                  if (!res.success) {
+                    setRejectError(res.message);
+                    return;
+                  }
+                  setRejectModalPart(null);
+                  setFeedbackMessage({ type: 'success', text: res.message });
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 rounded-lg cursor-pointer"
+              >
+                Simpan Penolakan Berkas
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            {rejectError && (
+              <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg">
+                {rejectError}
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Alasan Penolakan / Catatan Kekurangan Berkas (Min. 5 karakter) *
+              </label>
+              <textarea
+                rows={3}
+                value={rejectNote}
+                onChange={(e) => {
+                  setRejectNote(e.target.value);
+                  setRejectError('');
+                }}
+                placeholder="Contoh: Surat mandat kafilah belum ditandatangani atau fotokopi identitas belum lengkap..."
+                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-rose-600"
+              />
+            </div>
+          </div>
         </AppModal>
       )}
     </div>

@@ -25,6 +25,8 @@ import { pageOfAyah, validateMaqraRange } from '../services/quranIndex';
 import { getStageCompletion } from '../services/completion';
 import {
   validateProvisionUserPayload,
+  validateProvisionRoleForCaller,
+  handleProvisionRpcFailureRollback,
   evaluateProvisionRateLimit,
   resolveCorsHeaders,
   buildPublicProvisionSuccessResponse
@@ -1705,8 +1707,130 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     `hasXlsx: ${hasVulnerableXlsx}, hasExcelJs: ${hasSafeExcelJs}, over5Mb: ${over5MbRejected}, over5000: ${over5000RowsRejected}, formula: ${formulaCellRejected}, proto: ${protoHeaderSanitized}`
   );
 
+  // 35m. Fase 1.6 & 1.7 Validasi Role sebelum Auth di `admin-provision-user` & Penonaktifan Pendaftaran Mandiri Publik
+  const callerNonSuperTrySuper = validateProvisionRoleForCaller('superadmin', false);
+  const callerSuperTrySuper = validateProvisionRoleForCaller('superadmin', true);
+  const callerUnknownRole = validateProvisionRoleForCaller('root_owner', true);
+  const callerJudgeOk = validateProvisionRoleForCaller('judge', false);
+
+  const hasDeleteUserRollbackInEdge = edgeFnSource.includes('adminClient.auth.admin.deleteUser(resolvedAuthUserId)');
+  const configTomlRaw = fs.existsSync(path.resolve(process.cwd(), 'supabase/config.toml'))
+    ? fs.readFileSync(path.resolve(process.cwd(), 'supabase/config.toml'), 'utf-8')
+    : '';
+  const hasSignupDisabledInConfigToml = /enable_signup\s*=\s*false/.test(configTomlRaw);
+  const appTsxRaw = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf-8');
+  const hasNoPublicSignupTab = !appTsxRaw.includes('Daftar Akun Baru') && !appTsxRaw.includes("setAuthViewMode('signup')");
+
+  assert(
+    '35m. Fase 1.6 & 1.7 Validasi Role `admin-provision-user` Sebelum Auth, Rollback `deleteUser`, & Penonaktifan Pendaftaran Mandiri Publik (`enable_signup = false`)',
+    callerNonSuperTrySuper.allowed === false &&
+      callerNonSuperTrySuper.status === 403 &&
+      callerSuperTrySuper.allowed === true &&
+      callerUnknownRole.allowed === false &&
+      callerUnknownRole.status === 400 &&
+      callerJudgeOk.allowed === true &&
+      hasDeleteUserRollbackInEdge &&
+      hasSignupDisabledInConfigToml &&
+      hasNoPublicSignupTab,
+    `nonSuper403: ${callerNonSuperTrySuper.status}, unknown400: ${callerUnknownRole.status}, hasDeleteUser: ${hasDeleteUserRollbackInEdge}, configTomlSignupOff: ${hasSignupDisabledInConfigToml}, noPublicSignupTab: ${hasNoPublicSignupTab}`
+  );
+
+  // 35n. Fase 2: Bobot Bidang Rubrik (weight), Tie-Break NULLS LAST & Alias Kode/Nama, Eksklusi Hakim Nonaktif, dan Snapshot Kejuaraan Final Tanpa Juara Harapan
+  const weightedRubric: RubricVersion = {
+    id: 'rubric-weighted-2026',
+    tenantId: 'tenant-test',
+    code: 'RUBRIC-WGT-2026',
+    name: 'Rubrik Berbobot',
+    branchCode: 'TLW',
+    branchName: 'Tilawah',
+    version: '1.0',
+    description: 'Uji bobot bidang Tajwid weight=2',
+    status: 'Aktif',
+    startingScore: 100,
+    fields: [
+      { id: 'f-tjw-w', code: 'TJW', name: 'Tajwid', maxScore: 30, minScore: 0, weight: 2, order: 1, status: 'Aktif' },
+      { id: 'f-fsh-w', code: 'FSH', name: 'Fashahah', maxScore: 40, minScore: 0, weight: 1, order: 2, status: 'Aktif' }
+    ],
+    createdAt: new Date().toISOString()
+  };
+  const weightedCatList: ErrorCategory[] = [
+    {
+      id: 'cat-w-tjw',
+      tenantId: 'tenant-test',
+      fieldId: 'f-tjw-w',
+      code: 'WTJ',
+      name: 'Salah Tajwid',
+      scope: 'Tajwid',
+      defaultDeduction: 2.0,
+      methodType: 'Pengurangan tetap',
+      status: 'Aktif',
+      order: 1
+    }
+  ];
+  // 1 error * 2.0 = 2.0 deduction on Tajwid -> Tajwid score = 28.0.
+  // Total active weighted max = 30*2 + 40*1 = 100 === startingScore(100).
+  // Total weighted score = 28*2 + 40*1 = 96.0.
+  const weightedScoreRes = calculateAssessmentScore({ 'cat-w-tjw': 1 }, weightedCatList, weightedRubric);
+
+  // Test NULLS LAST & Inactive Judge Exclusion
+  const nullsLastEval = RankingService.evaluateStageParticipants({
+    tenantId: 't-tb',
+    stageId: 'stg-1',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: [
+      {
+        ...tieBreakAssessments[0],
+        // Qari A has explicit 0 on Tajwid
+        fieldScores: { Tajwid: 0, Lagu: 25, Fashahah: 25, Suara: 15 },
+        finalScore: 85.0
+      },
+      {
+        ...tieBreakAssessments[1],
+        // Qari B is missing Tajwid (NULL)
+        fieldScores: { Lagu: 25, Fashahah: 25, Suara: 15 },
+        finalScore: 85.0
+      }
+    ],
+    judgeAssignments: [
+      { id: 'ja-tb-active', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid', status: 'Aktif' },
+      { id: 'ja-tb-inactive', tenantId: 't-tb', judgeId: 'j-inactive', judgeName: 'Hakim Cuti', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Lagu', status: 'Nonaktif' }
+    ],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
+    quota: 1
+  });
+
+  const finalChampSnap = RankingService.createStageResultSnapshot({
+    tenantId: 't-tb',
+    stageId: 'stg-final',
+    stageName: 'Final',
+    branchName: 'Tilawah Dewasa Putra',
+    quota: 3,
+    finalizedBy: 'Ketua Majelis',
+    evaluatedParticipants: nullsLastEval.evaluatedParticipants,
+    isFinalChampionship: true,
+    championCount: 1
+  });
+
+  assert(
+    '35n. Fase 2 Bobot Rubrik, NULLS LAST Tie-Break, Eksklusi Hakim Nonaktif, & Snapshot Juara Final: Bobot bidang dihitung presisi (96.00), skor bidang 0 mengalahkan NULL (NULLS LAST), hakim Nonaktif diabaikan dari kuota kelengkapan, dan snapshot Final menetapkan Juara 1 tanpa Juara Harapan',
+    weightedScoreRes.finalScore === 96.0 &&
+      nullsLastEval.canFinalize === true &&
+      nullsLastEval.evaluatedParticipants[0].participant.id === 'p-tb-a' &&
+      nullsLastEval.evaluatedParticipants[0].totalAssignedJudges === 1 &&
+      finalChampSnap.rankings[0].championRank === 1 &&
+      finalChampSnap.rankings[0].championTitle === 'Juara 1' &&
+      finalChampSnap.rankings[0].isQualified === false &&
+      finalChampSnap.rankings[1].championRank === undefined &&
+      finalChampSnap.rankings[1].championTitle === undefined,
+    `weightedFinal: ${weightedScoreRes.finalScore}, rank1: ${nullsLastEval.evaluatedParticipants[0]?.participant.id}, champ1: ${finalChampSnap.rankings[0]?.championTitle}, champ2: ${finalChampSnap.rankings[1]?.championTitle}`
+  );
+
   return { passed, failed, results };
 }
+
 
 
 

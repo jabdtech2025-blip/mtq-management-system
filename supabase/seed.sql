@@ -150,7 +150,7 @@ VALUES
         false,
         'Aktif'
     )
-ON CONFLICT (tenant_id, branch_id) DO UPDATE
+ON CONFLICT (id) DO UPDATE
 SET rubric_version_id = EXCLUDED.rubric_version_id,
     tie_break_order = EXCLUDED.tie_break_order,
     official_source = EXCLUDED.official_source,

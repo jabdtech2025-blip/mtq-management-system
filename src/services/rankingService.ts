@@ -15,6 +15,40 @@ import { aggregateParticipantScores, getActiveRubricFields } from './scoringEngi
 import { StructuredBlockingReason } from './completion';
 
 
+export function getFieldScoreWithAlias(
+  fieldScores: Record<string, number | null | undefined> | undefined,
+  criterion: string
+): number | null {
+  if (!fieldScores || !criterion) return null;
+  const cleanCrit = criterion.trim();
+  if (!cleanCrit) return null;
+
+  const exactVal = fieldScores[cleanCrit];
+  if (typeof exactVal === 'number' && !isNaN(exactVal)) {
+    return exactVal;
+  }
+
+  const critLower = cleanCrit.toLowerCase();
+  const aliasGroups: string[][] = [
+    ['tjw', 'tajwid'],
+    ['fsh', 'fashahah', 'fasahah'],
+    ['lgu', 'lag', 'lagu'],
+    ['sur', 'sua', 'suara'],
+    ['thf', 'tahfizh', 'tahfidz', 'hafalan'],
+    ['itq', 'itqan']
+  ];
+  const matchedGroup = aliasGroups.find((grp) => grp.includes(critLower));
+
+  for (const [key, val] of Object.entries(fieldScores)) {
+    if (typeof val !== 'number' || isNaN(val)) continue;
+    const keyLower = key.trim().toLowerCase();
+    if (keyLower === critLower) return val;
+    if (matchedGroup && matchedGroup.includes(keyLower)) return val;
+  }
+
+  return null;
+}
+
 export interface EvaluatedParticipantStage {
   participation: StageParticipation;
   participant: Participant;
@@ -28,6 +62,8 @@ export interface EvaluatedParticipantStage {
   totalAssignedJudges: number;
   rank: number;
   isQualified: boolean;
+  championRank?: number;
+  championTitle?: string;
   autoQualified: boolean;
   isOverridden: boolean;
   hasOverrideConflict: boolean;
@@ -512,7 +548,9 @@ export class RankingService {
       return true;
     };
 
-    let relevantAssignments = judgeAssignments.filter((ja) => {
+    const activeJudgeAssignments = judgeAssignments.filter((ja) => ja.status !== 'Nonaktif');
+
+    let relevantAssignments = activeJudgeAssignments.filter((ja) => {
       if (ja.tenantId !== tenantId) return false;
 
       if (stageId && ja.stageId) {
@@ -526,7 +564,7 @@ export class RankingService {
 
     // Jika duplikat babak membuat ja.stageId berbeda dengan stageId namun ja.stageName sama pada cabang yang sama
     if (relevantAssignments.length === 0) {
-      relevantAssignments = judgeAssignments.filter((ja) => {
+      relevantAssignments = activeJudgeAssignments.filter((ja) => {
         if (ja.tenantId !== tenantId) return false;
         if (ja.stageName !== stageName) return false;
         return matchesBranchAssignment(ja, targetBranchId, targetBranch);
@@ -534,7 +572,7 @@ export class RankingService {
     }
 
     // Jika penugasan hakim pada babak ini disimpan pada nama cabang default (atau belum memiliki cabang spesifik),
-    // gunakan penugasan hakim yang ada di judgeAssignments untuk babak ini
+    // gunakan penugasan hakim yang ada di activeJudgeAssignments untuk babak ini
     const partIdsInGroup = new Set(filteredParticipations.map((fp) => fp.participantId));
     const assessedJudgeIdsInGroup = Array.from(
       new Set(
@@ -546,14 +584,14 @@ export class RankingService {
 
     if (relevantAssignments.length === 0) {
       if (assessedJudgeIdsInGroup.length > 0) {
-        relevantAssignments = judgeAssignments.filter(
+        relevantAssignments = activeJudgeAssignments.filter(
           (ja) =>
             ja.tenantId === tenantId &&
             (ja.stageName === stageName || assessedJudgeIdsInGroup.includes(ja.judgeId))
         );
       }
       if (relevantAssignments.length === 0) {
-        relevantAssignments = judgeAssignments.filter(
+        relevantAssignments = activeJudgeAssignments.filter(
           (ja) => ja.tenantId === tenantId && ja.stageName === stageName
         );
       }
@@ -663,8 +701,9 @@ export class RankingService {
     });
 
     const tieBreakOrder = ruleConfig.tieBreakOrder || [];
+    const activeRubricFields = rubricRes.rubric ? getActiveRubricFields(rubricRes.rubric) : [];
     const validRubricFieldNames = new Set<string>(
-      rubricRes.rubric ? getActiveRubricFields(rubricRes.rubric).map((f) => f.name) : []
+      activeRubricFields.flatMap((f) => [f.name, f.code].filter(Boolean))
     );
 
     const isTieBreakConfigValid =
@@ -673,7 +712,11 @@ export class RankingService {
       tieBreakOrder.every((crit) => {
         if (crit === 'total') return true;
         if (validRubricFieldNames.size > 0) {
-          return validRubricFieldNames.has(crit);
+          if (validRubricFieldNames.has(crit)) return true;
+          const lowerCrit = crit.toLowerCase();
+          return Array.from(validRubricFieldNames).some(
+            (vf) => vf.toLowerCase() === lowerCrit || vf.toLowerCase().includes(lowerCrit) || lowerCrit.includes(vf.toLowerCase())
+          );
         }
         return true;
       });
@@ -689,15 +732,25 @@ export class RankingService {
         return scoreB - scoreA;
       }
 
-      // Skor total sama -> terapkan urutan tie-break resmi dinamis jika valid
+      // Skor total sama -> terapkan urutan tie-break resmi dinamis jika valid (DESC NULLS LAST)
       if (isTieBreakConfigValid) {
         for (const criterion of tieBreakOrder) {
           if (criterion === 'total') continue;
 
-          const valA = a.fieldScores[criterion] ?? 0;
-          const valB = b.fieldScores[criterion] ?? 0;
+          const valA = getFieldScoreWithAlias(a.fieldScores, criterion);
+          const valB = getFieldScoreWithAlias(b.fieldScores, criterion);
 
-          if (valA !== valB) {
+          if (valA !== null && valB === null) {
+            tieBreakLogMap[a.participant.id] = `Diputuskan unggul melalui Bidang ${criterion} (${valA.toFixed(2)} vs N/A)`;
+            tieBreakLogMap[b.participant.id] = `Peringkat diselesaikan melalui Bidang ${criterion} (N/A vs ${valA.toFixed(2)})`;
+            return -1;
+          }
+          if (valA === null && valB !== null) {
+            tieBreakLogMap[a.participant.id] = `Peringkat diselesaikan melalui Bidang ${criterion} (N/A vs ${valB.toFixed(2)})`;
+            tieBreakLogMap[b.participant.id] = `Diputuskan unggul melalui Bidang ${criterion} (${valB.toFixed(2)} vs N/A)`;
+            return 1;
+          }
+          if (valA !== null && valB !== null && valA !== valB) {
             tieBreakLogMap[a.participant.id] = `Diputuskan unggul melalui Bidang ${criterion} (${valA.toFixed(2)} vs ${valB.toFixed(2)})`;
             tieBreakLogMap[b.participant.id] = `Peringkat diselesaikan melalui Bidang ${criterion} (${valB.toFixed(2)} vs ${valA.toFixed(2)})`;
             return valB - valA;
@@ -910,6 +963,8 @@ export class RankingService {
     branchId?: string;
     branchName: string;
     quota: number;
+    championCount?: number;
+    isFinalChampionship?: boolean;
     qualificationMethod?: 'top_n' | 'manual';
     finalizedBy: string;
     evaluatedParticipants: EvaluatedParticipantStage[];
@@ -922,6 +977,8 @@ export class RankingService {
       branchId,
       branchName,
       quota,
+      championCount = 3,
+      isFinalChampionship = false,
       qualificationMethod = 'top_n',
       finalizedBy,
       evaluatedParticipants,
@@ -930,30 +987,43 @@ export class RankingService {
 
     const ruleConfig = getBranchRuleConfig(branchName, tenantId, customRuleConfigs, branchId);
 
-    const rankings: ParticipantRankingItem[] = evaluatedParticipants.map((item) => ({
-      participantId: item.participant.id,
-      participantName: item.participant.name,
-      lotteryNumber: item.participant.lotteryNumber,
-      kafilahName: item.participant.kafilahName,
-      branchId: branchId || item.participant.branchId,
-      branchName: item.participant.branchName,
-      stageId,
-      stageName,
-      totalScore: item.displayScore || 0,
-      fieldScores: { ...item.fieldScores },
-      rank: item.rank,
-      isQualified: item.isQualified,
-      autoQualified: item.autoQualified,
-      isOverridden: item.isOverridden,
-      overrideReason: item.overrideReason || undefined,
-      hasOverrideConflict: item.hasOverrideConflict,
-      reason: item.isOverridden
-        ? `Override Dewan Hakim (${item.isQualified ? 'Lolos' : 'Tidak Lolos'}): ${item.overrideReason || 'Keputusan Pleno'}`
-        : item.isQualified
-        ? `Lolos Kuota Top ${quota}`
-        : 'Tidak memenuhi kuota kelulusan',
-      tieBreakResolvedBy: item.tieBreakResolvedBy
-    }));
+    const rankings: ParticipantRankingItem[] = evaluatedParticipants.map((item) => {
+      const champRank =
+        item.championRank ??
+        (isFinalChampionship && item.rank <= championCount ? item.rank : undefined);
+      const champTitle =
+        item.championTitle ??
+        (isFinalChampionship && item.rank <= championCount ? `Juara ${item.rank}` : undefined);
+
+      return {
+        participantId: item.participant.id,
+        participantName: item.participant.name,
+        lotteryNumber: item.participant.lotteryNumber,
+        kafilahName: item.participant.kafilahName,
+        branchId: branchId || item.participant.branchId,
+        branchName: item.participant.branchName,
+        stageId,
+        stageName,
+        totalScore: item.displayScore || 0,
+        fieldScores: { ...item.fieldScores },
+        rank: item.rank,
+        championRank: champRank,
+        championTitle: champTitle,
+        isQualified: isFinalChampionship ? false : item.isQualified,
+        autoQualified: isFinalChampionship ? false : item.autoQualified,
+        isOverridden: item.isOverridden,
+        overrideReason: item.overrideReason || undefined,
+        hasOverrideConflict: item.hasOverrideConflict,
+        reason: item.isOverridden
+          ? `Override Dewan Hakim (${item.isQualified ? 'Lolos' : 'Tidak Lolos'}): ${item.overrideReason || 'Keputusan Pleno'}`
+          : isFinalChampionship
+          ? champTitle || `Finalis (Peringkat ${item.rank})`
+          : item.isQualified
+          ? `Lolos Kuota Top ${quota}`
+          : 'Tidak memenuhi kuota kelulusan',
+        tieBreakResolvedBy: item.tieBreakResolvedBy
+      };
+    });
 
     return {
       id: `snap-${tenantId}-${stageId}-${Date.now()}`,

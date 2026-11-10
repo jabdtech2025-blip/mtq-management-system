@@ -25,6 +25,7 @@ export const HasilKelulusanView: React.FC = () => {
     stageParticipations,
     assessments,
     stages,
+    stageSnapshots,
     judgeAssignments,
     competitionRules,
     rubricVersions,
@@ -241,6 +242,13 @@ export const HasilKelulusanView: React.FC = () => {
       })[0] || null
     );
   }, [tenantStages, currentStage, effectiveBranchName]);
+
+  const currentStageSnapshot = useMemo(() => {
+    if (!currentStage) return undefined;
+    return stageSnapshots.find(
+      (s) => s.tenantId === currentTenant.id && (s.stageId === currentStage.id || s.stageName === currentStage.name)
+    );
+  }, [stageSnapshots, currentTenant.id, currentStage]);
 
   // Manual overrides state: { [participantId]: boolean } and reasons { [participantId]: string }
   const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
@@ -627,7 +635,7 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
-      {/* Championship Podium for Final Round when finalized */}
+      {/* Championship Podium for Final Round when finalized (reads official stageSnapshots when available) */}
       {!nextStage && currentStage?.isFinalized && rankedParticipants.length > 0 && (
         <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-slate-900 rounded-2xl p-6 text-white shadow-lg space-y-5 border border-emerald-700/50">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-800/80 pb-4">
@@ -644,38 +652,76 @@ export const HasilKelulusanView: React.FC = () => {
             </div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-800/80 text-emerald-200 border border-emerald-600/40 text-xs font-mono">
               <Check className="w-3.5 h-3.5 text-emerald-300" />
-              <span>Final & Mengikat</span>
+              <span>Final & Mengikat (Snapshot Resmi)</span>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-            {rankedParticipants.slice(0, 3).map((item, idx) => {
-              const titles = ['Juara 1 (Terbaik I)', 'Juara 2 (Terbaik II)', 'Juara 3 (Terbaik III)'];
+            {(() => {
+              const maxChamp = currentStage?.championCount || 3;
+              const snapRankings = currentStageSnapshot?.rankings || [];
+              const podiumItems =
+                snapRankings.length > 0
+                  ? snapRankings
+                      .slice()
+                      .sort((a, b) => a.rank - b.rank)
+                      .slice(0, maxChamp)
+                      .map((sr) => {
+                        const partMatch = participants.find((p) => p.id === sr.participantId);
+                        return {
+                          id: sr.participantId,
+                          name: sr.participantName || partMatch?.name || 'Peserta',
+                          kafilahName: sr.kafilahName || partMatch?.kafilahName || '-',
+                          lotteryNumber: sr.lotteryNumber || partMatch?.lotteryNumber || '-',
+                          participantCode: partMatch?.participantId || sr.participantId,
+                          score: sr.totalScore,
+                          rank: sr.championRank || sr.rank,
+                          title: sr.championTitle || `Juara ${sr.rank}`
+                        };
+                      })
+                  : rankedParticipants.slice(0, maxChamp).map((item, idx) => ({
+                      id: item.participant.id,
+                      name: item.participant.name,
+                      kafilahName: item.participant.kafilahName,
+                      lotteryNumber: item.participant.lotteryNumber,
+                      participantCode: item.participant.participantId,
+                      score: item.displayScore,
+                      rank: item.championRank || idx + 1,
+                      title: item.championTitle || `Juara ${idx + 1}`
+                    }));
+
+              const romanLabels = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
               const medals = ['🥇', '🥈', '🥉'];
-              const cardBg =
-                idx === 0
-                  ? 'bg-amber-500/20 border-amber-400/60 shadow-amber-500/10'
-                  : idx === 1
-                  ? 'bg-slate-500/20 border-slate-300/40'
-                  : 'bg-amber-700/20 border-amber-600/40';
-              return (
-                <div
-                  key={`${item.participant.id}-${idx}`}
-                  className={`rounded-xl border p-4 ${cardBg} backdrop-blur-xs flex flex-col items-center text-center space-y-2 shadow-sm`}
-                >
-                  <span className="text-2xl">{medals[idx]}</span>
-                  <span className="font-bold text-xs uppercase tracking-wider text-amber-300">{titles[idx]}</span>
-                  <div className="font-extrabold text-base text-white">{item.participant.name}</div>
-                  <div className="text-xs text-emerald-200">{item.participant.kafilahName}</div>
-                  <div className="text-[11px] font-mono text-emerald-300">
-                    Undian #{item.participant.lotteryNumber} · {item.participant.participantId}
+
+              return podiumItems.map((item, idx) => {
+                const roman = romanLabels[idx] || String(idx + 1);
+                const displayTitle = `${item.title} (Terbaik ${roman})`;
+                const medal = medals[idx] || '🏅';
+                const cardBg =
+                  idx === 0
+                    ? 'bg-amber-500/20 border-amber-400/60 shadow-amber-500/10'
+                    : idx === 1
+                    ? 'bg-slate-500/20 border-slate-300/40'
+                    : 'bg-amber-700/20 border-amber-600/40';
+                return (
+                  <div
+                    key={`${item.id}-${idx}`}
+                    className={`rounded-xl border p-4 ${cardBg} backdrop-blur-xs flex flex-col items-center text-center space-y-2 shadow-sm`}
+                  >
+                    <span className="text-2xl">{medal}</span>
+                    <span className="font-bold text-xs uppercase tracking-wider text-amber-300">{displayTitle}</span>
+                    <div className="font-extrabold text-base text-white">{item.name}</div>
+                    <div className="text-xs text-emerald-200">{item.kafilahName}</div>
+                    <div className="text-[11px] font-mono text-emerald-300">
+                      Undian #{item.lotteryNumber} · {item.participantCode}
+                    </div>
+                    <div className="mt-2 px-3 py-1 rounded-lg bg-emerald-950/80 border border-emerald-600/50 text-sm font-black font-mono text-amber-300">
+                      Skor Akhir: {item.score !== null && item.score !== undefined ? Number(item.score).toFixed(2) : '—'}
+                    </div>
                   </div>
-                  <div className="mt-2 px-3 py-1 rounded-lg bg-emerald-950/80 border border-emerald-600/50 text-sm font-black font-mono text-amber-300">
-                    Skor Akhir: {item.displayScore !== null ? item.displayScore.toFixed(2) : '—'}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         </div>
       )}
@@ -737,64 +783,60 @@ export const HasilKelulusanView: React.FC = () => {
             </p>
           </div>
 
-          {/* Action to confirm advancement with strict conditions OR finalize championship */}
+          {/* Unified Action Button to confirm advancement OR finalize championship */}
           <div>
             {currentStage?.isFinalized ? (
               <div className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 text-emerald-800 rounded-xl font-bold text-xs border border-emerald-300">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
                 <span>{nextStage ? 'Babak Ini Telah Difinalisasi' : 'Musabaqah & Juara Resmi Disahkan'}</span>
               </div>
-            ) : !allAssessmentsFinalized ? (
-              <div className="flex flex-col items-end gap-1">
-                <button
-                  disabled
-                  className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
-                  title={blockingReasonDetail?.message || blockingReason || 'Penilaian belum lengkap'}
-                >
-                  <Lock className="w-4 h-4" />
-                  <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
-                </button>
-                <span className="text-[10px] text-amber-700 font-medium max-w-[300px] text-right">
-                  {blockingReasonDetail?.message || blockingReason || `Belum dapat disahkan (${incompleteCount} peserta belum lengkap)`}
-                </span>
-              </div>
-            ) : !canFinalize ? (
-              <div className="flex flex-col items-end gap-1">
-                <button
-                  disabled
-                  className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
-                  title={blockingReason || 'Belum memenuhi syarat pengesahan'}
-                >
-                  <Lock className="w-4 h-4" />
-                  <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
-                </button>
-                <span className="text-[10px] text-rose-700 font-medium max-w-[280px] text-right">
-                  {blockingReason || 'Selesaikan nilai seri atau kelengkapan juri terlebih dahulu'}
-                </span>
-              </div>
-            ) : selectedBranch === 'Semua Cabang' && branchOptions.length > 2 ? (
-              <div className="flex flex-col items-end gap-1">
-                <button
-                  disabled
-                  className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
-                  title="Pilih cabang spesifik sebelum finalisasi"
-                >
-                  <Lock className="w-4 h-4" />
-                  <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
-                </button>
-                <span className="text-[10px] text-amber-700 font-medium">
-                  Pilih cabang spesifik pada dropdown sebelum pengesahan
-                </span>
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsConfirmAdvancementOpen(true)}
-                className="inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer self-start sm:self-auto"
-              >
-                {nextStage ? <FileCheck2 className="w-4 h-4" /> : <Trophy className="w-4 h-4" />}
-                <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
-              </button>
-            )}
+            ) : (() => {
+              const isMultiBranchBlocked = selectedBranch === 'Semua Cabang' && branchOptions.length > 2;
+              const isButtonDisabled = !allAssessmentsFinalized || !canFinalize || isMultiBranchBlocked;
+              const buttonLabel = nextStage
+                ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}`
+                : 'Sahkan Juara & Selesaikan Musabaqah';
+              const helperReason = isMultiBranchBlocked
+                ? 'Pilih cabang spesifik pada dropdown sebelum pengesahan'
+                : !allAssessmentsFinalized
+                ? blockingReasonDetail?.message || blockingReason || `Belum dapat disahkan (${incompleteCount} peserta belum lengkap)`
+                : !canFinalize
+                ? blockingReason || 'Selesaikan nilai seri atau kelengkapan juri terlebih dahulu'
+                : undefined;
+
+              return (
+                <div className="flex flex-col items-end gap-1">
+                  <button
+                    disabled={isButtonDisabled}
+                    onClick={() => !isButtonDisabled && setIsConfirmAdvancementOpen(true)}
+                    title={helperReason || buttonLabel}
+                    className={
+                      isButtonDisabled
+                        ? 'inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none'
+                        : 'inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer self-start sm:self-auto'
+                    }
+                  >
+                    {isButtonDisabled ? (
+                      <Lock className="w-4 h-4" />
+                    ) : nextStage ? (
+                      <FileCheck2 className="w-4 h-4" />
+                    ) : (
+                      <Trophy className="w-4 h-4" />
+                    )}
+                    <span>{buttonLabel}</span>
+                  </button>
+                  {helperReason && (
+                    <span
+                      className={`text-[10px] font-medium max-w-[300px] text-right ${
+                        !allAssessmentsFinalized || isMultiBranchBlocked ? 'text-amber-700' : 'text-rose-700'
+                      }`}
+                    >
+                      {helperReason}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -829,7 +871,7 @@ export const HasilKelulusanView: React.FC = () => {
                     >
                       {/* Rank */}
                       <td className="px-5 py-3.5 text-center font-mono font-bold text-xs text-slate-700">
-                        #{item.rank}
+                        {item.isFullyFinalized ? `#${item.rank}` : '—'}
                       </td>
 
                       {/* Lottery */}

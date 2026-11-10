@@ -112,6 +112,7 @@ export const MasterDataView: React.FC = () => {
   const [fieldCode, setFieldCode] = useState('');
   const [fieldMaxScore, setFieldMaxScore] = useState<number>(30);
   const [fieldMinScore, setFieldMinScore] = useState<number>(0);
+  const [fieldWeight, setFieldWeight] = useState<number>(1);
   const [fieldOrder, setFieldOrder] = useState<number>(1);
   const [fieldDescription, setFieldDescription] = useState('');
 
@@ -131,6 +132,7 @@ export const MasterDataView: React.FC = () => {
   const [stageName, setStageName] = useState('');
   const [stageOrder, setStageOrder] = useState<number>(stages.length + 1);
   const [stageQuota, setStageQuota] = useState<number>(3);
+  const [stageChampionCount, setStageChampionCount] = useState<number>(3);
   const [stageBranch, setStageBranch] = useState(cabangList[0]?.name || 'Semua Cabang');
 
   // Generic add state
@@ -262,6 +264,7 @@ export const MasterDataView: React.FC = () => {
     e.preventDefault();
     if (!editingRubric) return;
 
+    const effectiveWeight = Number(fieldWeight) > 0 ? Number(fieldWeight) : 1;
     let updatedFields: RubricField[];
     if (editingField) {
       updatedFields = editingRubric.fields.map((f) => {
@@ -272,6 +275,7 @@ export const MasterDataView: React.FC = () => {
             code: fieldCode.toUpperCase(),
             maxScore: Number(fieldMaxScore),
             minScore: Number(fieldMinScore),
+            weight: effectiveWeight,
             order: Number(fieldOrder) || f.order,
             description: fieldDescription
           };
@@ -285,6 +289,7 @@ export const MasterDataView: React.FC = () => {
         name: fieldName,
         maxScore: Number(fieldMaxScore),
         minScore: Number(fieldMinScore),
+        weight: effectiveWeight,
         order: Number(fieldOrder) || editingRubric.fields.length + 1,
         status: 'Aktif',
         description: fieldDescription,
@@ -301,7 +306,7 @@ export const MasterDataView: React.FC = () => {
       type: res.success ? 'success' : 'error',
       text: res.success
         ? editingField
-          ? `Bidang "${fieldName}" berhasil diperbarui (Skor: ${fieldMinScore}–${fieldMaxScore}).`
+          ? `Bidang "${fieldName}" berhasil diperbarui (Skor: ${fieldMinScore}–${fieldMaxScore}, Bobot: ${effectiveWeight}x).`
           : `Bidang baru "${fieldName}" (${fieldCode.toUpperCase()}) berhasil ditambahkan ke rubrik.`
         : res.message
     });
@@ -380,6 +385,7 @@ export const MasterDataView: React.FC = () => {
       branchName: stageBranch,
       status: 'Menunggu',
       qualificationQuota: Number(stageQuota),
+      championCount: Number(stageChampionCount) || 3,
       qualificationMethod: 'top_n',
       isFinalized: false
     });
@@ -794,6 +800,7 @@ export const MasterDataView: React.FC = () => {
                             setFieldCode('');
                             setFieldMaxScore(25);
                             setFieldMinScore(0);
+                            setFieldWeight(1);
                             setFieldOrder(rubric.fields.length + 1);
                             setFieldDescription('');
                             setIsEditFieldOpen(true);
@@ -871,7 +878,7 @@ export const MasterDataView: React.FC = () => {
                                 >
                                   <div className="flex items-center justify-between mb-1">
                                     <span className="font-mono font-bold text-[10px] text-slate-500">
-                                      #{fld.order} · {fld.code}
+                                      #{fld.order} · {fld.code} {fld.weight && fld.weight !== 1 ? `(${fld.weight}x)` : ''}
                                     </span>
                                     <div className="flex items-center gap-1.5">
                                       <button
@@ -882,6 +889,7 @@ export const MasterDataView: React.FC = () => {
                                           setFieldCode(fld.code);
                                           setFieldMaxScore(fld.maxScore);
                                           setFieldMinScore(fld.minScore || 0);
+                                          setFieldWeight(fld.weight ?? 1);
                                           setFieldOrder(fld.order || 1);
                                           setFieldDescription(fld.description || '');
                                           setIsEditFieldOpen(true);
@@ -908,7 +916,7 @@ export const MasterDataView: React.FC = () => {
                                   </div>
                                   <div className="font-extrabold text-sm text-slate-800">{fld.name}</div>
                                   <div className="mt-2 pt-2 border-t border-slate-200 text-xs flex items-center justify-between font-mono">
-                                    <span className="text-slate-500">Rentang:</span>
+                                    <span className="text-slate-500">Rentang (Bobot {fld.weight ?? 1}x):</span>
                                     <span className="font-extrabold text-slate-900">
                                       {fld.minScore ?? 0} – {fld.maxScore} pts
                                     </span>
@@ -1678,7 +1686,7 @@ export const MasterDataView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="font-bold text-slate-600 block mb-1">Kode Bidang</label>
                   <input
@@ -1687,6 +1695,19 @@ export const MasterDataView: React.FC = () => {
                     onChange={(e) => setFieldCode(e.target.value)}
                     required
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 block mb-1">Bobot (Pengali)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    max="10"
+                    value={fieldWeight}
+                    onChange={(e) => setFieldWeight(Number(e.target.value))}
+                    required
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
                 <div>
@@ -1991,9 +2012,9 @@ export const MasterDataView: React.FC = () => {
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="font-bold text-slate-600 block mb-1">Nomor Urutan</label>
+                  <label className="font-bold text-slate-600 block mb-1">Urutan</label>
                   <input
                     type="number"
                     min={1}
@@ -2009,6 +2030,17 @@ export const MasterDataView: React.FC = () => {
                     min={1}
                     value={stageQuota}
                     onChange={(e) => setStageQuota(Number(e.target.value))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 block mb-1">Juara Final</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={stageChampionCount}
+                    onChange={(e) => setStageChampionCount(Number(e.target.value))}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>

@@ -9,6 +9,7 @@ import {
   Filter
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
+import { formatDateTimeWIB } from '../../utils/dateTime';
 
 export const SuperadminAuditView: React.FC = () => {
   const { auditLogs } = useMtq();
@@ -90,8 +91,8 @@ export const SuperadminAuditView: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {filteredLogs.map((log, idx) => (
                 <tr key={`${log.id}-${idx}`} className="hover:bg-slate-50/70">
-                  <td className="px-5 py-3.5 font-mono text-slate-500 text-[11px]">
-                    {log.timestamp}
+                  <td className="px-5 py-3.5 font-mono text-slate-500 text-[11px] whitespace-nowrap">
+                    {formatDateTimeWIB(log.timestamp)}
                   </td>
                   <td className="px-4 py-3.5 font-bold text-slate-900">{log.actor}</td>
                   <td className="px-4 py-3.5">

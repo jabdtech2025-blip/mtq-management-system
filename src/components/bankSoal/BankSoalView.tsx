@@ -20,6 +20,7 @@ import {
 import { useMtq } from '../../context/MtqContext';
 import { Question } from '../../types/mtq';
 import { AppModal } from '../common/AppModal';
+import { formatDateTimeWIB } from '../../utils/dateTime';
 import { validateMaqraAssignmentForParticipant } from '../../services/scoringEngine';
 import {
   getAllSurahs,
@@ -50,6 +51,7 @@ export const BankSoalView: React.FC = () => {
     addQuestionToParticipant,
     removeQuestionFromParticipant,
     commitLotteryDrawResults,
+    drawLotteryServer,
     lotteryDrawLogs,
     importQuestionsBatch,
     stages,
@@ -95,12 +97,14 @@ export const BankSoalView: React.FC = () => {
   const [lotteryBranch, setLotteryBranch] = useState('Semua Cabang');
   const [lotteryLevel, setLotteryLevel] = useState('Semua Jenjang');
   const [lotteryQuestionsPerParticipant, setLotteryQuestionsPerParticipant] = useState<number>(1);
+  const [lotteryDrawMode, setLotteryDrawMode] = useState<'lottery_number' | 'maqra' | 'both'>('both');
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
   const [selectedQuestionPoolIds, setSelectedQuestionPoolIds] = useState<string[]>([]);
   const [isDrawingAnimation, setIsDrawingAnimation] = useState(false);
   const [lotteryDrawResults, setLotteryDrawResults] = useState<{
     participantId: string;
     participantName: string;
+    lotteryNumber?: string;
     questionIds: string[];
     questionTitles: string[];
   }[] | null>(null);
@@ -394,87 +398,54 @@ export const BankSoalView: React.FC = () => {
     );
   };
 
-  // Run draw simulation using unbiased Fisher-Yates shuffle
-  const handleExecuteDraw = () => {
+  // Run draw simulation using unbiased Fisher-Yates shuffle / server draw
+  const handleExecuteDraw = async () => {
     if (selectedParticipantIds.length === 0) {
       setLotteryFeedback('Pilih setidaknya 1 peserta untuk diundi.');
       return;
     }
-    if (selectedQuestionPoolIds.length === 0) {
+    if (lotteryDrawMode !== 'lottery_number' && selectedQuestionPoolIds.length === 0) {
       setLotteryFeedback('Pilih setidaknya 1 soal (maqra) dalam Pool Soal untuk diundi.');
       return;
     }
 
     const selectedParts = participants.filter((p) => selectedParticipantIds.includes(p.id));
-    const explicitQuestionPool = questions.filter(
-      (q) => selectedQuestionPoolIds.includes(q.id) && q.status === 'Aktif'
+    const unverifiedPart = selectedParts.find(
+      (p) => p.verificationStatus && p.verificationStatus !== 'Diverifikasi'
     );
-
-    // P0-03: Validate each participant's 3D compatibility (branch + level + stage + active status) within the selected question pool
-    for (const part of selectedParts) {
-      const partQuestions = explicitQuestionPool.filter(
-        (q) => validateMaqraAssignmentForParticipant(part, q, lotteryStage, []).valid
+    if (unverifiedPart) {
+      setLotteryFeedback(
+        `PARTICIPANT_NOT_VERIFIED: Peserta "${unverifiedPart.name}" (${unverifiedPart.participantId}) belum diverifikasi berkasnya (status: ${unverifiedPart.verificationStatus}). Verifikasi berkas terlebih dahulu di menu Grup & Peserta.`
       );
-
-      if (partQuestions.length < lotteryQuestionsPerParticipant) {
-        setLotteryFeedback(
-          `Tidak dapat melanjutkan: Peserta ${part.name} (${part.branchName}${part.levelName ? ` - ${part.levelName}` : ''}) membutuhkan ${lotteryQuestionsPerParticipant} soal unik yang sesuai cabang, jenjang, dan babak, namun hanya tersedia ${partQuestions.length} soal aktif yang cocok di Pool Soal Babak ${lotteryStage}.`
-        );
-        return;
-      }
+      return;
     }
 
     setIsDrawingAnimation(true);
     setLotteryFeedback('');
 
-    setTimeout(() => {
-      const results: {
-        participantId: string;
-        participantName: string;
-        questionIds: string[];
-        questionTitles: string[];
-      }[] = [];
-
-      const batchUsed = new Set<string>();
-
-      selectedParts.forEach((part) => {
-        const partQuestions = explicitQuestionPool.filter(
-          (q) => validateMaqraAssignmentForParticipant(part, q, lotteryStage, []).valid
-        );
-
-        // Filter out questions this participant already has in this stage
-        const existingQIds = new Set(
-          (part.assignedQuestions || [])
-            .filter((aq) => !aq.stageName || aq.stageName === lotteryStage)
-            .map((aq) => aq.questionId)
-        );
-
-        let candidatePool = partQuestions.filter((q) => !existingQIds.has(q.id));
-        if (candidatePool.length < lotteryQuestionsPerParticipant) {
-          candidatePool = partQuestions;
-        }
-
-        // Prioritize questions not yet used in this batch
-        const unusedInBatch = candidatePool.filter((q) => !batchUsed.has(q.id));
-        const pool = unusedInBatch.length >= lotteryQuestionsPerParticipant ? unusedInBatch : candidatePool;
-
-        // Unbiased Fisher-Yates shuffle
-        const shuffled = fisherYatesShuffle(pool);
-        const picked = shuffled.slice(0, lotteryQuestionsPerParticipant);
-
-        picked.forEach((q) => batchUsed.add(q.id));
-
-        results.push({
-          participantId: part.id,
-          participantName: part.name,
-          questionIds: picked.map((q) => q.id),
-          questionTitles: picked.map((q) => `${q.code} - ${q.title}`)
-        });
+    try {
+      const drawRes = await drawLotteryServer({
+        stageName: lotteryStage,
+        branchName: lotteryBranch !== 'Semua Cabang' ? lotteryBranch : undefined,
+        levelName: lotteryLevel !== 'Semua Jenjang' ? lotteryLevel : undefined,
+        participantIds: selectedParticipantIds,
+        questionPoolIds: selectedQuestionPoolIds,
+        questionsPerParticipant: lotteryQuestionsPerParticipant,
+        drawMode: lotteryDrawMode
       });
 
-      setLotteryDrawResults(results);
+      if (!drawRes.success) {
+        setLotteryFeedback(drawRes.message);
+        setIsDrawingAnimation(false);
+        return;
+      }
+
+      setLotteryDrawResults(drawRes.results || []);
       setIsDrawingAnimation(false);
-    }, 350);
+    } catch (err) {
+      setLotteryFeedback(err instanceof Error ? err.message : 'Gagal mengeksekusi undian');
+      setIsDrawingAnimation(false);
+    }
   };
 
   // Confirm and persist draw to MTQ Context — 100% IDENTICAL to preview, NO re-randomization!
@@ -1212,13 +1183,28 @@ export const BankSoalView: React.FC = () => {
                         </span>
                       )}
                       <span className="text-[11px] text-slate-500">
-                        · {log.participantIds.length} Peserta · Pool {log.questionPoolIds.length} Soal
+                        · {log.participantIds.length} Peserta · Mode:{' '}
+                        <strong>
+                          {log.drawMode === 'lottery_number'
+                            ? 'Nomor Tampil Saja'
+                            : log.drawMode === 'maqra'
+                            ? 'Maqra Saja'
+                            : 'Nomor & Maqra'}
+                        </strong>
                       </span>
+                      {log.seedSha256 && (
+                        <span
+                          className="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded truncate max-w-[200px]"
+                          title={`SHA-256 Seed: ${log.seedSha256}`}
+                        >
+                          SHA: {log.seedSha256.slice(0, 12)}...
+                        </span>
+                      )}
                     </div>
 
                     <div className="text-[11px] text-slate-500 font-mono">
                       Oleh <span className="font-semibold text-slate-800">{log.actorName}</span> ·{' '}
-                      {new Date(log.createdAt).toLocaleString('id-ID')}
+                      {formatDateTimeWIB(log.createdAt)}
                     </div>
                   </div>
 
@@ -1563,14 +1549,31 @@ export const BankSoalView: React.FC = () => {
               </div>
 
               <div>
+                <label className="font-bold text-slate-700 block mb-1">Mode Undian:</label>
+                <select
+                  value={lotteryDrawMode}
+                  onChange={(e) => {
+                    setLotteryDrawMode(e.target.value as 'lottery_number' | 'maqra' | 'both');
+                    setLotteryDrawResults(null);
+                  }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-semibold"
+                >
+                  <option value="both">Nomor Tampil & Maqra Sekaligus</option>
+                  <option value="lottery_number">Nomor Tampil Saja</option>
+                  <option value="maqra">Maqra Saja</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="font-bold text-slate-700 block mb-1">Soal per Peserta:</label>
                 <select
                   value={lotteryQuestionsPerParticipant}
+                  disabled={lotteryDrawMode === 'lottery_number'}
                   onChange={(e) => {
                     setLotteryQuestionsPerParticipant(Number(e.target.value));
                     setLotteryDrawResults(null);
                   }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono font-bold"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono font-bold disabled:opacity-50"
                 >
                   <option value={1}>1 Soal per Peserta</option>
                   <option value={2}>2 Soal per Peserta</option>

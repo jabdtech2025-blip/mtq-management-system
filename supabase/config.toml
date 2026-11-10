@@ -1,0 +1,9 @@
+project_id = "mtq-management-system"
+
+[auth]
+enabled = true
+# 1.7 Platform Admin/Dewan Hakim: Matikan pendaftaran akun mandiri publik ("Allow new users to sign up" = OFF).
+# Pembuatan akun hanya melalui undangan resmi Admin/Superadmin (Edge Function admin-provision-user).
+enable_signup = false
+enable_anonymous_sign_ins = false
+minimum_password_length = 8

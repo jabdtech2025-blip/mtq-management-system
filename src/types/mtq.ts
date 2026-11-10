@@ -7,6 +7,7 @@ export interface Tenant {
   edition?: string;
   period?: string;
   primaryAdminId?: string;
+  groupLabel?: string;
   status: 'Aktif' | 'Nonaktif';
   userCount?: number;
 }
@@ -91,6 +92,8 @@ export interface StageParticipation {
   provisionalScore?: number;
   rank?: number;
   isQualified?: boolean;
+  championRank?: number;
+  championTitle?: string;
   qualificationReason?: string;
   finalizedAt?: string;
 }
@@ -121,6 +124,10 @@ export interface Participant {
   assignedQuestions?: AssignedMaqraItem[]; // Multiple questions support
   questionIds?: string[]; // Array of assigned question IDs
   status: 'Menunggu' | 'Berlangsung' | 'Lolos' | 'Gugur' | 'Final';
+  verificationStatus?: 'Diajukan' | 'Diverifikasi' | 'Ditolak';
+  verificationNote?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
   stageHistory?: {
     stageId?: string;
     stageName: string;
@@ -128,6 +135,8 @@ export interface Participant {
     score?: number;
     rank?: number;
     qualified?: boolean;
+    championRank?: number;
+    championTitle?: string;
     reason?: string;
     finalizedAt?: string;
   }[];
@@ -190,6 +199,9 @@ export interface LotteryDrawLogItem {
   drawResults: LotteryDrawResultItem[];
   drawVersion: number;
   notes?: string;
+  seedHex?: string;
+  seedSha256?: string;
+  drawMode?: 'lottery_number' | 'maqra' | 'both';
   createdAt: string;
 }
 
@@ -295,14 +307,17 @@ export interface CompetitionRuleConfig {
   branchName: string;
   branchCode?: string;
   branchId?: string;
+  levelId?: string;
   rubricVersionId: string;
   tieBreakOrder: string[]; // e.g. ['total', 'Tajwid', 'Lagu', 'Fashahah']
+  /** @deprecated Gunakan stages.qualificationQuota sebagai sumber kebenaran tunggal */
   quotaPerStage: Record<string, number>; // e.g. { 'Penyisihan': 3, 'Final': 3 }
   qualificationMethod?: 'top_n' | 'manual';
   maqraTiming?: string; // e.g. 'sebelum_mimbar', '1_jam_sebelum'
   officialSource?: string;
   isVerifiedOfficial?: boolean;
   status?: 'Draft' | 'Validasi' | 'Aktif' | 'Arsip';
+  updatedAt?: string;
 }
 
 export interface JudgeAssignment {
@@ -320,6 +335,7 @@ export interface JudgeAssignment {
   judgeFieldId?: string;
   rubricFieldId?: string;
   rubricFieldName?: string;
+  status?: 'Aktif' | 'Nonaktif';
 }
 
 export interface CompetitionStage {
@@ -331,6 +347,7 @@ export interface CompetitionStage {
   branchName: string;
   status: 'Menunggu' | 'Aktif' | 'Selesai';
   qualificationQuota: number;
+  championCount?: number;
   qualificationMethod: 'top_n' | 'manual';
   isFinalized?: boolean;
   finalizedAt?: string;
@@ -381,6 +398,8 @@ export interface ParticipantRankingItem {
   fieldScores: Record<string, number>;
   rank: number;
   isQualified: boolean;
+  championRank?: number;
+  championTitle?: string;
   autoQualified?: boolean;
   isOverridden?: boolean;
   overrideReason?: string;

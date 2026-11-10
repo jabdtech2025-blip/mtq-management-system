@@ -88,6 +88,7 @@ export interface WorkspaceHydrationResult {
 export interface DatabaseReferenceCheckInput {
   tenantId?: string | null;
   branchId?: string | null;
+  levelId?: string | null;
   stageId?: string | null;
   kafilahId?: string | null;
   participantId?: string | null;
@@ -870,6 +871,7 @@ export const supabaseDataService = {
         edition: String(t.edition || '2025'),
         period: String(t.period || '2025 - 2026'),
         primaryAdminId: '',
+        groupLabel: t.group_label ? String(t.group_label) : 'Kafilah / Utusan',
         status: (t.status as 'Aktif' | 'Nonaktif') || 'Aktif',
         userCount: userCountByTenant.get(tId) || 0
       };
@@ -1007,6 +1009,7 @@ export const supabaseDataService = {
         branchName: bName,
         status: (s.status as 'Menunggu' | 'Aktif' | 'Selesai') || 'Menunggu',
         qualificationQuota: Number(s.qualification_quota || 3),
+        championCount: Number(s.champion_count || 3),
         qualificationMethod: (s.qualification_method as 'top_n' | 'manual') || 'top_n',
         isFinalized: Boolean(s.is_finalized),
         finalizedAt: s.finalized_at ? String(s.finalized_at) : undefined,
@@ -1129,6 +1132,8 @@ export const supabaseDataService = {
         provisionalScore: sp.provisional_score !== null && sp.provisional_score !== undefined ? Number(sp.provisional_score) : undefined,
         finalScore: sp.final_score !== null && sp.final_score !== undefined ? Number(sp.final_score) : undefined,
         rank: sp.rank !== null && sp.rank !== undefined ? Number(sp.rank) : undefined,
+        championRank: sp.champion_rank !== null && sp.champion_rank !== undefined ? Number(sp.champion_rank) : undefined,
+        championTitle: sp.champion_title ? String(sp.champion_title) : undefined,
         isQualified: Boolean(sp.is_qualified),
         qualificationReason: sp.qualification_reason ? String(sp.qualification_reason) : undefined,
         finalizedAt: sp.finalized_at ? String(sp.finalized_at) : undefined
@@ -1225,7 +1230,12 @@ export const supabaseDataService = {
         pageNumber: latestSp?.pageNumber || 1,
         assignedQuestions: latestSp?.assignedQuestions || [],
         questionIds: (latestSp?.assignedQuestions || []).map((q) => q.questionId),
-        status: normalizedStatus
+        status: normalizedStatus,
+        verificationStatus:
+          (p.verification_status as 'Diajukan' | 'Diverifikasi' | 'Ditolak') || 'Diverifikasi',
+        verificationNote: p.verification_note ? String(p.verification_note) : undefined,
+        verifiedBy: p.verified_by ? String(p.verified_by) : undefined,
+        verifiedAt: p.verified_at ? String(p.verified_at) : undefined
       };
     });
 
@@ -1355,10 +1365,12 @@ export const supabaseDataService = {
 
     const competitionRules: CompetitionRuleConfig[] = (rulesRes.data || []).map((r: Record<string, unknown>) => {
       const bId = r.branch_id ? String(r.branch_id) : undefined;
+      const lId = r.level_id ? String(r.level_id) : undefined;
       return {
         id: String(r.id),
         tenantId: String(r.tenant_id),
         branchId: bId,
+        levelId: lId,
         branchName: String(r.branch_name || (bId && branchMap.get(bId)) || 'Tilawah Dewasa Putra'),
         rubricVersionId: String(r.rubric_version_id),
         tieBreakOrder: Array.isArray(r.tie_break_order)
@@ -1367,7 +1379,8 @@ export const supabaseDataService = {
         quotaPerStage: (r.quota_per_stage as Record<string, number>) || { Penyisihan: 3, Final: 3 },
         officialSource: r.official_source ? String(r.official_source) : undefined,
         isVerifiedOfficial: Boolean(r.is_verified_official),
-        status: (r.status as CompetitionRuleConfig['status']) || 'Aktif'
+        status: (r.status as CompetitionRuleConfig['status']) || 'Aktif',
+        updatedAt: r.updated_at ? String(r.updated_at) : undefined
       };
     });
 
@@ -1397,7 +1410,8 @@ export const supabaseDataService = {
         judgeField: jField,
         rubricFieldId: ja.rubric_field_id ? String(ja.rubric_field_id) : undefined,
         levelId: ja.level_id ? String(ja.level_id) : undefined,
-        levelName: ja.level_name ? String(ja.level_name) : undefined
+        levelName: ja.level_name ? String(ja.level_name) : undefined,
+        status: (ja.status as 'Aktif' | 'Nonaktif') || 'Aktif'
       };
     });
 
@@ -1499,6 +1513,9 @@ export const supabaseDataService = {
           questionPoolIds: Array.isArray(row.question_pool_ids) ? (row.question_pool_ids as string[]) : [],
           drawResults: Array.isArray(row.draw_results) ? (row.draw_results as LotteryDrawResultItem[]) : [],
           drawVersion: Number(row.draw_version || 1),
+          seedHex: row.seed_hex ? String(row.seed_hex) : undefined,
+          seedSha256: row.seed_sha256 ? String(row.seed_sha256) : undefined,
+          drawMode: (row.draw_mode as 'lottery_number' | 'maqra' | 'both') || 'both',
           notes: row.notes ? String(row.notes) : undefined,
           createdAt: String(row.created_at || new Date().toISOString())
         }));
@@ -1759,6 +1776,49 @@ export const supabaseDataService = {
   },
 
   /**
+   * RPC 2b: Perhitungan Peringkat & Deteksi Seri Resmi di Server (compute_stage_rankings).
+   */
+  async computeStageRankingsRpc(stageId: string): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({ p_stage_id: stageId });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!,
+        validationErrors: uuidCheck.invalidFields
+      };
+    }
+
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: false,
+        mode: 'local_offline_fallback',
+        message: 'Supabase belum dikonfigurasi. Perhitungan peringkat dieksekusi pada penyimpanan lokal.'
+      };
+    }
+
+    const { data, error } = await client.rpc('compute_stage_rankings', {
+      p_stage_id: stageId
+    });
+
+    if (error) {
+      return {
+        success: false,
+        mode: 'supabase_live',
+        message: error.message || 'Gagal mengeksekusi RPC compute_stage_rankings.'
+      };
+    }
+
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message: 'Peringkat babak berhasil dihitung di server.',
+      data
+    };
+  },
+
+  /**
    * RPC 3: Pengesahan Babak & Pelolosan Kualifikasi Atomik di Server (Termasuk Babak Final dengan nextStageId = null).
    */
   async advanceStageQualifiersRpc(params: {
@@ -1767,6 +1827,7 @@ export const supabaseDataService = {
     qualifiedParticipantIds: string[];
     overrideReasons: Record<string, string>;
     rankingsSnapshot?: unknown;
+    tieResolution?: Record<string, number>;
   }): Promise<RpcServiceResult> {
     const refMap: Record<string, string | undefined | null> = {
       p_stage_id: params.stageId
@@ -1836,7 +1897,8 @@ export const supabaseDataService = {
       p_next_stage_id: params.nextStageId,
       p_qualified_participant_ids: params.qualifiedParticipantIds,
       p_override_reasons: params.overrideReasons,
-      p_rankings_snapshot: params.rankingsSnapshot ?? []
+      p_rankings_snapshot: params.rankingsSnapshot ?? [],
+      p_tie_resolution: params.tieResolution ?? {}
     });
 
     if (error) {
@@ -1882,6 +1944,8 @@ export const supabaseDataService = {
       return { success: false, message: 'Koneksi database tidak tersedia.' };
     }
 
+    // 1.5 Keamanan Audit Undian: Server mengabaikan p_actor_id & p_actor_name dari klien
+    // dan selalu menggunakan auth.uid() serta profiles.name yang terverifikasi di PostgreSQL.
     const { data, error } = await client.rpc('commit_lottery_draw', {
       p_tenant_id: params.tenantId,
       p_stage_id: params.stageId,
@@ -1890,8 +1954,8 @@ export const supabaseDataService = {
       p_branch_name: params.branchName || null,
       p_level_id: params.levelId || null,
       p_level_name: params.levelName || null,
-      p_actor_id: params.actorId || null,
-      p_actor_name: params.actorName || 'Administrator MTQ',
+      p_actor_id: null,
+      p_actor_name: null,
       p_results: params.results,
       p_questions_per_participant: params.questionsPerParticipant || 1,
       p_notes: params.notes || null
@@ -1907,6 +1971,113 @@ export const supabaseDataService = {
     return {
       success: true,
       message: (data as { message?: string })?.message || 'Hasil undian maqra berhasil ditetapkan secara atomik.',
+      data
+    };
+  },
+
+  /**
+   * 3.1 Verifikasi Berkas Peserta via verify_participant RPC.
+   */
+  async verifyParticipantRpc(params: {
+    tenantId: string;
+    participantId: string;
+    status: 'Diajukan' | 'Diverifikasi' | 'Ditolak';
+    note?: string | null;
+  }): Promise<RpcServiceResult> {
+    const uuidCheck = this.validateReferences({
+      p_tenant_id: params.tenantId,
+      p_participant_id: params.participantId
+    });
+    if (!uuidCheck.valid) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: uuidCheck.message!,
+        validationErrors: uuidCheck.invalidFields
+      };
+    }
+
+    if (params.status === 'Ditolak' && (!params.note || params.note.trim().length < 5)) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: 'Alasan penolakan berkas wajib diisi minimal 5 karakter.'
+      };
+    }
+
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: false,
+        mode: 'local_offline_fallback',
+        message: 'Mode lokal aktif.'
+      };
+    }
+
+    const { data, error } = await client.rpc('verify_participant', {
+      p_tenant_id: params.tenantId,
+      p_participant_id: params.participantId,
+      p_status: params.status,
+      p_note: params.note || null
+    });
+
+    if (error) {
+      return {
+        success: false,
+        mode: 'supabase_live',
+        message: error.message || 'Gagal memverifikasi berkas peserta.'
+      };
+    }
+
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message: (data as { message?: string })?.message || `Status verifikasi peserta diperbarui menjadi ${params.status}.`,
+      data
+    };
+  },
+
+  /**
+   * 3.2 & 3.3 Undian Nomor Tampil & Maqra di Server via draw_lottery_server RPC.
+   */
+  async drawLotteryServerRpc(params: {
+    tenantId: string;
+    stageId: string;
+    branchId?: string | null;
+    levelId?: string | null;
+    questionsPerParticipant?: number;
+    drawMode?: 'lottery_number' | 'maqra' | 'both';
+    notes?: string | null;
+    participantIds?: string[];
+    questionPoolIds?: string[];
+  }): Promise<{ success: boolean; message: string; data?: any }> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, message: 'Koneksi database tidak tersedia.' };
+    }
+
+    const { data, error } = await client.rpc('draw_lottery_server', {
+      p_tenant_id: params.tenantId,
+      p_stage_id: params.stageId,
+      p_branch_id: params.branchId && isValidUuid(params.branchId) ? params.branchId : null,
+      p_level_id: params.levelId && isValidUuid(params.levelId) ? params.levelId : null,
+      p_questions_per_participant: params.questionsPerParticipant || 1,
+      p_draw_mode: params.drawMode || 'both',
+      p_notes: params.notes || null,
+      p_participant_ids: params.participantIds && params.participantIds.length > 0 ? params.participantIds : null,
+      p_question_pool_ids: params.questionPoolIds && params.questionPoolIds.length > 0 ? params.questionPoolIds : null
+    });
+
+    if (error) {
+      return {
+        success: false,
+        message: error.message || 'Gagal mengeksekusi RPC draw_lottery_server.'
+      };
+    }
+
+    return {
+      success: true,
+      message: (data as { message?: string })?.message || 'Undian server berhasil dieksekusi secara atomik.',
       data
     };
   },
@@ -2263,7 +2434,9 @@ export const supabaseDataService = {
       origin_city: participant.originCity || null,
       origin_region: participant.originRegion || null,
       origin_institution: participant.originInstitution || null,
-      stage_id: stageParticipation.stageId && isValidUuid(stageParticipation.stageId) ? stageParticipation.stageId : null
+      stage_id: stageParticipation.stageId && isValidUuid(stageParticipation.stageId) ? stageParticipation.stageId : null,
+      verification_status: participant.verificationStatus || 'Diajukan',
+      verification_note: participant.verificationNote || null
     };
 
     let { error: partErr } = await client.from('participants').upsert(extendedParticipantPayload);
@@ -2560,6 +2733,9 @@ export const supabaseDataService = {
       question_pool_ids: log.questionPoolIds,
       draw_results: log.drawResults,
       draw_version: log.drawVersion,
+      seed_hex: log.seedHex || null,
+      seed_sha256: log.seedSha256 || null,
+      draw_mode: log.drawMode || 'both',
       notes: log.notes || null,
       created_at: log.createdAt
     });
@@ -2819,7 +2995,9 @@ export const supabaseDataService = {
       origin_city: participant.originCity || null,
       origin_region: participant.originRegion || null,
       origin_institution: participant.originInstitution || null,
-      stage_id: participant.stageId && isValidUuid(participant.stageId) ? participant.stageId : null
+      stage_id: participant.stageId && isValidUuid(participant.stageId) ? participant.stageId : null,
+      ...(participant.verificationStatus ? { verification_status: participant.verificationStatus } : {}),
+      ...(participant.verificationNote !== undefined ? { verification_note: participant.verificationNote || null } : {})
     };
 
     let { error } = await client
@@ -2985,6 +3163,7 @@ export const supabaseDataService = {
       region: tenant.region.trim(),
       edition: tenant.edition?.trim() || null,
       period: tenant.period?.trim() || null,
+      group_label: (tenant.groupLabel || 'Kafilah / Utusan').trim(),
       status: tenant.status,
       updated_at: new Date().toISOString()
     };
@@ -3146,6 +3325,7 @@ export const supabaseDataService = {
       name: stage.name,
       stage_order: stage.order,
       qualification_quota: stage.qualificationQuota,
+      champion_count: stage.championCount ?? 3,
       qualification_method: stage.qualificationMethod || 'top_n',
       status: stage.status === 'Selesai' ? 'Aktif' : stage.status,
       is_finalized: false
@@ -3347,6 +3527,7 @@ export const supabaseDataService = {
         max_score: f.maxScore,
         min_score: f.minScore ?? 0,
         max_deduction: f.maxDeduction ?? null,
+        weight: f.weight ?? 1,
         field_order: f.order ?? idx + 1,
         status: f.status || 'Aktif',
         description: f.description || null
@@ -3520,6 +3701,7 @@ export const supabaseDataService = {
       id: rule.id,
       tenant_id: rule.tenantId,
       ...(rule.branchId ? { branch_id: rule.branchId } : {}),
+      ...(rule.levelId ? { level_id: rule.levelId } : {}),
       rubric_version_id: rule.rubricVersionId
     });
     if (!uuidCheck.valid) {
@@ -3536,6 +3718,7 @@ export const supabaseDataService = {
     const fkCheck = await this.verifyDatabaseReferencesExist({
       tenantId: rule.tenantId,
       branchId: rule.branchId && isValidUuid(rule.branchId) ? rule.branchId : undefined,
+      levelId: rule.levelId && isValidUuid(rule.levelId) ? rule.levelId : undefined,
       rubricVersionId: rule.rubricVersionId
     });
     if (!fkCheck.valid) {
@@ -3545,13 +3728,15 @@ export const supabaseDataService = {
       id: rule.id,
       tenant_id: rule.tenantId,
       branch_id: rule.branchId && isValidUuid(rule.branchId) ? rule.branchId : null,
+      level_id: rule.levelId && isValidUuid(rule.levelId) ? rule.levelId : null,
       branch_name: rule.branchName || null,
       rubric_version_id: rule.rubricVersionId,
       tie_break_order: rule.tieBreakOrder || ['total', 'Tajwid', 'Lagu', 'Fashahah'],
       quota_per_stage: rule.quotaPerStage || { Penyisihan: 3, Final: 3 },
       official_source: rule.officialSource || null,
       is_verified_official: Boolean(rule.isVerifiedOfficial),
-      status: rule.status || 'Aktif'
+      status: rule.status || 'Aktif',
+      updated_at: new Date().toISOString()
     });
     if (error) return { success: false, mode: 'supabase_live', message: error.message };
     return { success: true, mode: 'supabase_live', message: 'Konfigurasi aturan kompetisi tersimpan di Supabase.' };

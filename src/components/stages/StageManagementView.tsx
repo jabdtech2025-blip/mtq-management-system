@@ -39,6 +39,7 @@ export const StageManagementView: React.FC = () => {
   const [formOrder, setFormOrder] = useState<number>(stages.length + 1);
   const [formBranch, setFormBranch] = useState(cabangList[0]?.name || 'Tilawah Dewasa Putra');
   const [formQuota, setFormQuota] = useState<number>(3);
+  const [formChampionCount, setFormChampionCount] = useState<number>(3);
   const [formStatus, setFormStatus] = useState<'Menunggu' | 'Aktif' | 'Selesai'>('Menunggu');
 
   const handleOpenAdd = () => {
@@ -47,6 +48,7 @@ export const StageManagementView: React.FC = () => {
     setFormOrder(stages.length + 1);
     setFormBranch(cabangList[0]?.name || 'Tilawah Dewasa Putra');
     setFormQuota(3);
+    setFormChampionCount(3);
     setFormStatus('Menunggu');
     setIsModalOpen(true);
   };
@@ -57,6 +59,7 @@ export const StageManagementView: React.FC = () => {
     setFormOrder(s.order);
     setFormBranch(s.branchName);
     setFormQuota(s.qualificationQuota);
+    setFormChampionCount(s.championCount ?? 3);
     setFormStatus(s.status);
     setIsModalOpen(true);
   };
@@ -71,6 +74,7 @@ export const StageManagementView: React.FC = () => {
         order: Number(formOrder),
         branchName: formBranch,
         qualificationQuota: Number(formQuota),
+        championCount: Number(formChampionCount) || 3,
         status: formStatus
       });
       setFeedback({ type: 'success', message: `Konfigurasi Babak "${formName}" berhasil diperbarui.` });
@@ -81,6 +85,7 @@ export const StageManagementView: React.FC = () => {
         branchName: formBranch,
         status: formStatus,
         qualificationQuota: Number(formQuota),
+        championCount: Number(formChampionCount) || 3,
         qualificationMethod: 'top_n',
         isFinalized: false
       });
@@ -219,6 +224,12 @@ export const StageManagementView: React.FC = () => {
                         Top {stg.qualificationQuota} Peserta
                       </span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Jumlah Juara Final:</span>
+                      <span className="font-mono font-bold text-slate-800">
+                        Juara 1 – {stg.championCount ?? 3}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -265,9 +276,9 @@ export const StageManagementView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="font-bold text-slate-600 block mb-1">Nomor Urutan Babak</label>
+                  <label className="font-bold text-slate-600 block mb-1">Urutan Babak</label>
                   <input
                     type="number"
                     min={1}
@@ -285,6 +296,19 @@ export const StageManagementView: React.FC = () => {
                     min={1}
                     value={formQuota}
                     onChange={(e) => setFormQuota(Number(e.target.value))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 block mb-1">
+                    Jumlah Juara Final
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={formChampionCount}
+                    onChange={(e) => setFormChampionCount(Number(e.target.value))}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
