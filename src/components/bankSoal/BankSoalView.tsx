@@ -22,6 +22,14 @@ import { Question } from '../../types/mtq';
 import { AppModal } from '../common/AppModal';
 import { validateMaqraAssignmentForParticipant } from '../../services/scoringEngine';
 import {
+  getAllSurahs,
+  getSurah,
+  findSurahByName,
+  pagesForRange,
+  validateMaqraRange,
+  getPageVerseRangeSummary
+} from '../../services/quranIndex';
+import {
   fisherYatesShuffle,
   downloadQuestionExcelTemplate,
   parseWorkbookToRows,
@@ -30,6 +38,7 @@ import {
   ImportValidationResult,
   ValidatedQuestionRow
 } from '../../utils/excelHelper';
+
 
 export const BankSoalView: React.FC = () => {
   const {
@@ -119,7 +128,8 @@ export const BankSoalView: React.FC = () => {
     };
   }, [isImportDropdownOpen]);
 
-  // Add / Edit Form Modal (Separated Cabang, Jenjang, Babak)
+  // Add / Edit Form Modal (Separated Cabang, Jenjang, Babak + 114 Surah Index)
+  const allSurahs = useMemo(() => getAllSurahs(), []);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [formCode, setFormCode] = useState('');
@@ -129,12 +139,32 @@ export const BankSoalView: React.FC = () => {
   const [formStartAyah, setFormStartAyah] = useState(1);
   const [formEndAyah, setFormEndAyah] = useState(15);
   const [formPageStart, setFormPageStart] = useState(305);
-  const [formPageEnd, setFormPageEnd] = useState(305);
+  const [formPageEnd, setFormPageEnd] = useState(306);
+  const [allowManualPageOverride, setAllowManualPageOverride] = useState(false);
   const [formBranchName, setFormBranchName] = useState('');
   const [formLevelName, setFormLevelName] = useState('');
   const [formStage, setFormStage] = useState('Penyisihan');
   const [formDesc, setFormDesc] = useState('');
   const [formError, setFormError] = useState('');
+
+  const selectedSurahInfo = useMemo(
+    () => getSurah(Number(formSurahNum)) || findSurahByName(formSurah) || allSurahs[18],
+    [formSurahNum, formSurah, allSurahs]
+  );
+
+  const liveMaqraValidation = useMemo(
+    () =>
+      validateMaqraRange({
+        surahNumber: Number(formSurahNum),
+        surahName: formSurah,
+        startAyah: Number(formStartAyah),
+        endAyah: Number(formEndAyah),
+        pageStart: Number(formPageStart),
+        pageEnd: Number(formPageEnd),
+        allowManualPageOverride
+      }),
+    [formSurahNum, formSurah, formStartAyah, formEndAyah, formPageStart, formPageEnd, allowManualPageOverride]
+  );
 
   // Filtered Questions
   const filteredQuestions = useMemo(() => {
@@ -255,9 +285,21 @@ export const BankSoalView: React.FC = () => {
     });
   }, [participants, questions, searchQuery, selectedBranch, selectedLevel, selectedStage]);
 
-  // Pages list for active preview question
+  // Pages list for active preview question — derived from 114-surah 604-page Mushaf index when valid
   const previewPages = useMemo(() => {
     if (!previewQuestion) return [];
+    try {
+      const computed = pagesForRange(
+        previewQuestion.surahNumber,
+        previewQuestion.startAyah,
+        previewQuestion.endAyah
+      );
+      if (computed.pages.length > 0) {
+        return computed.pages;
+      }
+    } catch {
+      // Fallback to stored pageStart..pageEnd only if surah/ayah is out of bounds
+    }
     if (previewQuestion.pageNumbers && previewQuestion.pageNumbers.length > 0) {
       return previewQuestion.pageNumbers;
     }
@@ -468,7 +510,8 @@ export const BankSoalView: React.FC = () => {
     setFormStartAyah(1);
     setFormEndAyah(15);
     setFormPageStart(305);
-    setFormPageEnd(305);
+    setFormPageEnd(306);
+    setAllowManualPageOverride(false);
     setFormBranchName(defaultCabang);
     setFormLevelName(defaultJenjang);
     setFormStage(defaultStage);
@@ -491,21 +534,44 @@ export const BankSoalView: React.FC = () => {
       activeJenjangList[0]?.name ||
       'Dewasa';
 
+    const resolvedSurah = getSurah(q.surahNumber) || findSurahByName(q.surahName);
+    const check = validateMaqraRange({
+      surahNumber: resolvedSurah?.number || q.surahNumber,
+      surahName: resolvedSurah?.nameLatin || q.surahName,
+      startAyah: q.startAyah,
+      endAyah: q.endAyah,
+      pageStart: q.pageStart || q.pageNumber,
+      pageEnd: q.pageEnd || q.pageNumber,
+      allowManualPageOverride: true
+    });
+
     setEditingQuestion(q);
     setFormCode(q.code);
     setFormTitle(q.title);
-    setFormSurah(q.surahName);
-    setFormSurahNum(q.surahNumber);
+    setFormSurah(resolvedSurah?.nameLatin || q.surahName);
+    setFormSurahNum(resolvedSurah?.number || q.surahNumber);
     setFormStartAyah(q.startAyah);
     setFormEndAyah(q.endAyah);
     setFormPageStart(q.pageStart || q.pageNumber);
     setFormPageEnd(q.pageEnd || q.pageNumber);
+    setAllowManualPageOverride(check.warnings.length > 0);
     setFormBranchName(matchedCabang);
     setFormLevelName(matchedJenjang);
     setFormStage(q.stageName);
     setFormDesc(q.description || '');
     setFormError('');
     setIsAddModalOpen(true);
+  };
+
+  const syncCalculatedPages = (nextSurahNum: number, nextStartAyah: number, nextEndAyah: number) => {
+    if (allowManualPageOverride) return;
+    try {
+      const range = pagesForRange(nextSurahNum, nextStartAyah, nextEndAyah);
+      setFormPageStart(range.pageStart);
+      setFormPageEnd(range.pageEnd);
+    } catch {
+      // Keep current page inputs if ayah is temporarily out of range while typing
+    }
   };
 
   // Save Add / Edit
@@ -517,21 +583,24 @@ export const BankSoalView: React.FC = () => {
       setFormError('Kode dan Judul Maqra wajib diisi.');
       return;
     }
-    if (Number(formStartAyah) > Number(formEndAyah)) {
-      setFormError('Ayat awal tidak boleh lebih besar dari ayat akhir.');
-      return;
-    }
-    if (Number(formPageStart) < 1 || Number(formPageStart) > 604) {
-      setFormError('Nomor halaman awal mushaf harus di antara 1 dan 604.');
-      return;
-    }
-    if (Number(formPageEnd) < Number(formPageStart) || Number(formPageEnd) > 604) {
-      setFormError('Halaman akhir mushaf harus >= halaman awal dan <= 604.');
+
+    const validation = validateMaqraRange({
+      surahNumber: Number(formSurahNum),
+      surahName: formSurah,
+      startAyah: Number(formStartAyah),
+      endAyah: Number(formEndAyah),
+      pageStart: Number(formPageStart),
+      pageEnd: Number(formPageEnd),
+      allowManualPageOverride
+    });
+
+    if (!validation.valid) {
+      setFormError(validation.errors.join(' '));
       return;
     }
 
-    const startP = Number(formPageStart);
-    const endP = Number(formPageEnd);
+    const startP = allowManualPageOverride ? Number(formPageStart) : validation.computedPageStart;
+    const endP = allowManualPageOverride ? Number(formPageEnd) : validation.computedPageEnd;
     const pageNums: number[] = [];
     for (let p = startP; p <= endP; p++) {
       pageNums.push(p);
@@ -545,8 +614,8 @@ export const BankSoalView: React.FC = () => {
       updateQuestion(editingQuestion.id, {
         code: formCode.toUpperCase(),
         title: formTitle,
-        surahName: formSurah,
-        surahNumber: Number(formSurahNum),
+        surahName: validation.surahNameLatin || formSurah,
+        surahNumber: validation.surahNumber || Number(formSurahNum),
         startAyah: Number(formStartAyah),
         endAyah: Number(formEndAyah),
         pageNumber: startP,
@@ -559,6 +628,7 @@ export const BankSoalView: React.FC = () => {
         levelName: formLevelName,
         branchAndLevel: combinedBranchAndLevel,
         stageName: formStage,
+        status: 'Aktif',
         description: formDesc
       });
       setFeedbackMessage({ type: 'success', text: `Soal ${formCode.toUpperCase()} berhasil diperbarui.` });
@@ -566,8 +636,8 @@ export const BankSoalView: React.FC = () => {
       addQuestion({
         code: formCode.toUpperCase(),
         title: formTitle,
-        surahName: formSurah,
-        surahNumber: Number(formSurahNum),
+        surahName: validation.surahNameLatin || formSurah,
+        surahNumber: validation.surahNumber || Number(formSurahNum),
         startAyah: Number(formStartAyah),
         endAyah: Number(formEndAyah),
         pageNumber: startP,
@@ -596,7 +666,7 @@ export const BankSoalView: React.FC = () => {
     setImportFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
-      const rows = parseWorkbookToRows(buffer);
+      const rows = await parseWorkbookToRows(buffer);
       const validation = validateQuestionImportRows(rows, {
         cabangList,
         jenjangList,
@@ -931,15 +1001,22 @@ export const BankSoalView: React.FC = () => {
                           </div>
                         </td>
                         <td className="px-4 py-3.5">
-                          {assignedParts.length > 0 ? (
-                            <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
-                              Sudah ({assignedParts.length})
-                            </span>
-                          ) : (
-                            <span className="inline-block bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
-                              Belum Ditetapkan
-                            </span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {q.status === 'Perlu Verifikasi' && (
+                              <span className="inline-block bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-[11px] font-semibold">
+                                Perlu Verifikasi
+                              </span>
+                            )}
+                            {assignedParts.length > 0 ? (
+                              <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
+                                Sudah ({assignedParts.length})
+                              </span>
+                            ) : (
+                              <span className="inline-block bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                                Belum Ditetapkan
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-5 py-3.5 text-right space-x-1.5">
                           <button
@@ -1220,17 +1297,30 @@ export const BankSoalView: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-0 m-0 bg-white flex flex-col items-stretch">
-              {previewPages.map((pageNum) => (
-                <div key={pageNum} className="w-full p-0 m-0 bg-white">
-                  <img
-                    src={`https://android.quran.com/data/width_1260/page${String(
-                      pageNum
-                    ).padStart(3, '0')}.png`}
-                    alt={`Mushaf Halaman ${pageNum}`}
-                    className="w-full h-auto block select-none m-0 p-0"
-                  />
-                </div>
-              ))}
+              {previewPages.map((pageNum) => {
+                const pageSummary = getPageVerseRangeSummary(pageNum);
+                return (
+                  <div key={pageNum} className="w-full p-0 m-0 bg-white border-b border-slate-100 last:border-b-0">
+                    <div className="px-4 py-1.5 bg-slate-50/90 border-b border-slate-200/70 flex items-center justify-between text-[11px] font-mono text-slate-600">
+                      <span className="font-semibold text-emerald-800">
+                        Mushaf Madinah Hal. {pageNum}
+                      </span>
+                      {pageSummary && (
+                        <span className="text-slate-500 truncate ml-2">
+                          Cakupan Halaman: {pageSummary.label}
+                        </span>
+                      )}
+                    </div>
+                    <img
+                      src={`https://android.quran.com/data/width_1260/page${String(
+                        pageNum
+                      ).padStart(3, '0')}.png`}
+                      alt={`Mushaf Halaman ${pageNum}`}
+                      className="w-full h-auto block select-none m-0 p-0"
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1729,38 +1819,78 @@ export const BankSoalView: React.FC = () => {
 
               <div>
                 <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Hal. Awal (1-604) *
+                  Hal. Awal (1-604) {allowManualPageOverride ? '*' : '(Otomatis)'}
                 </label>
                 <input
                   type="number"
                   min={1}
                   max={604}
                   value={formPageStart}
+                  readOnly={!allowManualPageOverride}
                   onChange={(e) => {
                     const v = Number(e.target.value);
                     setFormPageStart(v);
                     if (formPageEnd < v) setFormPageEnd(v);
                   }}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                  className={`w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono ${
+                    !allowManualPageOverride ? 'bg-slate-100 text-slate-700 cursor-not-allowed' : 'bg-white'
+                  }`}
                 />
               </div>
 
               <div>
                 <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Hal. Akhir (1-604) *
+                  Hal. Akhir (1-604) {allowManualPageOverride ? '*' : '(Otomatis)'}
                 </label>
                 <input
                   type="number"
                   min={1}
                   max={604}
                   value={formPageEnd}
+                  readOnly={!allowManualPageOverride}
                   onChange={(e) => setFormPageEnd(Number(e.target.value))}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                  className={`w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono ${
+                    !allowManualPageOverride ? 'bg-slate-100 text-slate-700 cursor-not-allowed' : 'bg-white'
+                  }`}
                 />
               </div>
             </div>
+
+            <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[11px]">
+              <label className="flex items-center gap-2 text-slate-700 font-medium cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allowManualPageOverride}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAllowManualPageOverride(checked);
+                    if (!checked) {
+                      try {
+                        const range = pagesForRange(Number(formSurahNum), Number(formStartAyah), Number(formEndAyah));
+                        setFormPageStart(range.pageStart);
+                        setFormPageEnd(range.pageEnd);
+                      } catch {
+                        // Ignore
+                      }
+                    }
+                  }}
+                  className="rounded text-emerald-700 focus:ring-emerald-600 cursor-pointer"
+                />
+                <span>Override halaman manual (di luar indeks otomatis Mushaf Madinah 604 halaman)</span>
+              </label>
+              <span className="font-mono text-emerald-800 font-semibold">
+                Standar: Hal. {liveMaqraValidation.computedPageStart}–{liveMaqraValidation.computedPageEnd}
+              </span>
+            </div>
+
+            {liveMaqraValidation.warnings.length > 0 && (
+              <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{liveMaqraValidation.warnings.join(' ')}</span>
+              </div>
+            )}
 
             <div>
               <label className="text-[11px] font-bold text-slate-600 block mb-1">
@@ -1779,40 +1909,69 @@ export const BankSoalView: React.FC = () => {
             <div className="grid grid-cols-4 gap-3">
               <div className="col-span-2">
                 <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Nama Surah *
+                  Surah (1–114) *
                 </label>
-                <input
-                  type="text"
-                  value={formSurah}
-                  onChange={(e) => setFormSurah(e.target.value)}
+                <select
+                  value={formSurahNum}
+                  onChange={(e) => {
+                    const num = Number(e.target.value);
+                    const sInfo = getSurah(num);
+                    if (sInfo) {
+                      const clampedStart = Math.min(Math.max(1, formStartAyah), sInfo.verseCount);
+                      const clampedEnd = Math.min(Math.max(clampedStart, formEndAyah), sInfo.verseCount);
+                      setFormSurahNum(sInfo.number);
+                      setFormSurah(sInfo.nameLatin);
+                      setFormStartAyah(clampedStart);
+                      setFormEndAyah(clampedEnd);
+                      syncCalculatedPages(sInfo.number, clampedStart, clampedEnd);
+                    }
+                  }}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                />
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  {allSurahs.map((s) => (
+                    <option key={s.number} value={s.number}>
+                      {s.number}. {s.nameLatin} ({s.verseCount} Ayat · Hal. {s.pageStart}–{s.pageEnd})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Ayat Awal *
+                  Ayat Awal (1–{selectedSurahInfo.verseCount}) *
                 </label>
                 <input
                   type="number"
                   min={1}
+                  max={selectedSurahInfo.verseCount}
                   value={formStartAyah}
-                  onChange={(e) => setFormStartAyah(Number(e.target.value))}
+                  onChange={(e) => {
+                    const nextStart = Number(e.target.value);
+                    const nextEnd = formEndAyah < nextStart ? nextStart : formEndAyah;
+                    setFormStartAyah(nextStart);
+                    if (formEndAyah < nextStart) setFormEndAyah(nextStart);
+                    syncCalculatedPages(Number(formSurahNum), nextStart, nextEnd);
+                  }}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
                 />
               </div>
               <div>
                 <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Ayat Akhir *
+                  Ayat Akhir (1–{selectedSurahInfo.verseCount}) *
                 </label>
                 <input
                   type="number"
                   min={1}
+                  max={selectedSurahInfo.verseCount}
                   value={formEndAyah}
-                  onChange={(e) => setFormEndAyah(Number(e.target.value))}
+                  onChange={(e) => {
+                    const nextEnd = Number(e.target.value);
+                    setFormEndAyah(nextEnd);
+                    syncCalculatedPages(Number(formSurahNum), Number(formStartAyah), nextEnd);
+                  }}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
                 />
               </div>
             </div>

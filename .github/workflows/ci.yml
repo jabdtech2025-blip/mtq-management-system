@@ -21,13 +21,16 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Dependencies
-        run: npm install
+      - name: Install Dependencies (Clean Lockfile)
+        run: npm ci
+
+      - name: Production Dependency Security Audit
+        run: npm audit --omit=dev --audit-level=high
 
       - name: TypeScript Static Typecheck (Lint)
         run: npm run lint
 
-      - name: Unit, Integration & Supabase RLS Security Tests (Vitest)
+      - name: Unit, Integration & Supabase RLS Security Tests (tsx)
         run: npm run test
 
       - name: Production Bundle Build (Vite)

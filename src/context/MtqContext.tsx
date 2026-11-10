@@ -45,6 +45,7 @@ import {
   validateMaqraAssignmentForParticipant
 } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
+import { getParticipantStageCompletion, resolveRequiredJudgeIdsForStage } from '../services/completion';
 import { supabaseDataService, AuthenticatedSupabaseProfile } from '../services/supabaseDataService';
 import {
   SupabaseConnectionInfo,
@@ -1789,97 +1790,29 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const part = participants.find((p) => p.id === participantId && p.tenantId === currentTenantId);
     if (!part) return 'Belum Dimulai';
     const targetStage = stageName || part.stageName || selectedStageName;
-
-    const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
-    if (stageQuestions.length === 0) {
-      return 'Maqra Belum Ditetapkan';
-    }
-
     const sp = getStageParticipation(participantId, targetStage);
-
-    const matchesBranch = (ja: JudgeAssignment): boolean => {
-      if (ja.branchName === 'Semua Cabang' || (!ja.branchId && !ja.branchName)) return true;
-      if (part.branchId && ja.branchId) return ja.branchId === part.branchId;
-      if (ja.branchName && part.branchName) {
-        const jaBr = ja.branchName.toLowerCase();
-        const pBr = part.branchName.toLowerCase();
-        return jaBr === pBr || pBr.includes(jaBr) || jaBr.includes(pBr);
-      }
-      return true;
-    };
-
-    // Find required judge assignments in current tenant for this stage and branch
-    let requiredAssignments = judgeAssignments.filter((ja) => {
-      if (ja.tenantId !== currentTenantId) return false;
-      const matchesStage = sp?.stageId && ja.stageId
-        ? ja.stageId === sp.stageId
-        : ja.stageName === targetStage;
-      if (!matchesStage) return false;
-      return matchesBranch(ja);
+    const stageQuestions = getParticipantStageQuestions(participantId, targetStage);
+    const requiredJudgeIds = resolveRequiredJudgeIdsForStage({
+      tenantId: currentTenantId,
+      stageId: sp?.stageId,
+      stageName: targetStage,
+      branchId: part.branchId,
+      branchName: part.branchName,
+      judgeAssignments
     });
 
-    if (requiredAssignments.length === 0) {
-      requiredAssignments = judgeAssignments.filter((ja) => {
-        if (ja.tenantId !== currentTenantId) return false;
-        if (ja.stageName !== targetStage) return false;
-        return matchesBranch(ja);
-      });
-    }
+    const completion = getParticipantStageCompletion({
+      tenantId: currentTenantId,
+      participant: part,
+      participation: sp,
+      stageId: sp?.stageId,
+      stageName: targetStage,
+      assignedMaqras: stageQuestions,
+      requiredJudgeIds,
+      assessments
+    });
 
-    if (requiredAssignments.length === 0) {
-      // Fallback to stage-level assignments if assignments were created under a default branch label
-      requiredAssignments = judgeAssignments.filter((ja) => {
-        if (ja.tenantId !== currentTenantId) return false;
-        return ja.stageName === targetStage;
-      });
-    }
-
-    let requiredJudgeIds = Array.from(new Set(requiredAssignments.map((ja) => ja.judgeId)));
-    if (requiredJudgeIds.length === 0) {
-      // If assessments already exist for this participant on targetStage, include those judges
-      requiredJudgeIds = Array.from(
-        new Set(
-          assessments
-            .filter(
-              (a) =>
-                a.tenantId === currentTenantId &&
-                a.participantId === participantId &&
-                a.stageName === targetStage
-            )
-            .map((a) => a.judgeId)
-        )
-      );
-    }
-
-    if (requiredJudgeIds.length === 0) {
-      return 'Belum Dimulai';
-    }
-
-    const totalRequiredUnits = requiredJudgeIds.length * stageQuestions.length;
-    let finalizedUnits = 0;
-    let inProgressUnits = 0;
-
-    for (const q of stageQuestions) {
-      for (const jId of requiredJudgeIds) {
-        const asm = getJudgeAssessment(participantId, jId, targetStage, q.questionId);
-        if (asm?.status === 'finalized') {
-          finalizedUnits++;
-        } else if (asm?.status === 'in_progress') {
-          inProgressUnits++;
-        }
-      }
-    }
-
-    if (finalizedUnits === totalRequiredUnits && totalRequiredUnits > 0) {
-      return 'Lengkap';
-    }
-    if (finalizedUnits > 0) {
-      return 'Menunggu Hakim Lain';
-    }
-    if (inProgressUnits > 0) {
-      return 'Berlangsung';
-    }
-    return 'Belum Dimulai';
+    return completion.progressStatus;
   };
 
   // Dynamic Rubric & Competition Rule Resolvers (P0 Dynamic Architecture)

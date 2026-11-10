@@ -297,7 +297,8 @@ export const HasilKelulusanView: React.FC = () => {
     boundaryTie: hasBoundaryTie,
     unresolvedTiesCount,
     canFinalize,
-    blockingReason
+    blockingReason,
+    blockingReasonDetail
   } = useMemo(() => {
     return RankingService.evaluateStageParticipants({
       tenantId: currentTenant.id,
@@ -353,7 +354,10 @@ export const HasilKelulusanView: React.FC = () => {
       return {
         label: 'Penilaian Belum Lengkap (Peringkat Sementara)',
         variant: 'amber',
-        description: `Terdapat ${incompleteParticipants.length} peserta yang penilaiannya belum difinalisasi seluruh juri.`
+        description:
+          blockingReasonDetail?.message ||
+          blockingReason ||
+          `Terdapat ${incompleteCount} peserta yang penilaiannya belum difinalisasi seluruh juri.`
       };
     }
     if (hasBoundaryTie) {
@@ -368,7 +372,15 @@ export const HasilKelulusanView: React.FC = () => {
       variant: 'blue',
       description: 'Seluruh peserta telah dinilai lengkap oleh dewan hakim dan siap diverifikasi.'
     };
-  }, [currentStage?.isFinalized, allAssessmentsFinalized, incompleteParticipants.length, hasBoundaryTie, quota]);
+  }, [
+    currentStage?.isFinalized,
+    allAssessmentsFinalized,
+    blockingReasonDetail,
+    blockingReason,
+    incompleteCount,
+    hasBoundaryTie,
+    quota
+  ]);
 
   const qualifiedParticipants = evaluatedParticipants.filter((p) => p.isQualified);
 
@@ -511,8 +523,8 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
-      {/* Stage Overall Status Banner (Shown ONLY when incomplete participants exist or boundary tie exists) */}
-      {((!allAssessmentsFinalized && incompleteParticipants.length > 0) || hasBoundaryTie) && (
+      {/* Stage Overall Status Banner (Shown ONLY when incomplete participants exist, blocking reason exists, or boundary tie exists) */}
+      {(!allAssessmentsFinalized || hasBoundaryTie) && (
         <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -549,9 +561,15 @@ export const HasilKelulusanView: React.FC = () => {
           <p className="text-[11px] text-slate-500 mt-1">
             {allAssessmentsFinalized ? (
               <span className="text-slate-500">Seluruh penilaian dewan juri lengkap</span>
+            ) : blockingReasonDetail?.code === 'NO_JUDGES' ? (
+              <span className="text-amber-700 font-medium">{blockingReasonDetail.message}</span>
+            ) : blockingReasonDetail?.code === 'NO_MAQRA' ? (
+              <span className="text-amber-700 font-medium">{blockingReasonDetail.message}</span>
+            ) : blockingReasonDetail?.code === 'NO_PARTICIPANTS' ? (
+              <span className="text-slate-500">{blockingReasonDetail.message}</span>
             ) : (
               <span className="text-slate-500">
-                {incompleteParticipants.length} peserta belum lengkap dinilai
+                {incompleteCount} peserta belum lengkap dinilai
               </span>
             )}
           </p>
@@ -731,13 +749,13 @@ export const HasilKelulusanView: React.FC = () => {
                 <button
                   disabled
                   className="inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none"
-                  title="Penilaian belum lengkap"
+                  title={blockingReasonDetail?.message || blockingReason || 'Penilaian belum lengkap'}
                 >
                   <Lock className="w-4 h-4" />
                   <span>{nextStage ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}` : 'Sahkan Juara & Selesaikan Musabaqah'}</span>
                 </button>
-                <span className="text-[10px] text-amber-700 font-medium">
-                  Belum dapat disahkan ({incompleteParticipants.length} peserta belum lengkap)
+                <span className="text-[10px] text-amber-700 font-medium max-w-[300px] text-right">
+                  {blockingReasonDetail?.message || blockingReason || `Belum dapat disahkan (${incompleteCount} peserta belum lengkap)`}
                 </span>
               </div>
             ) : !canFinalize ? (

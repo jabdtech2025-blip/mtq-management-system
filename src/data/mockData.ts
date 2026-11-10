@@ -234,7 +234,7 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageNumbers: [140, 141],
     branchAndLevel: 'Tilawah Dewasa Putra Ulya',
     stageName: 'Penyisihan',
-    status: 'Aktif',
+    status: 'Perlu Verifikasi',
     description: "Dibaca dengan tartil dan riwayat Hafs. Diawali Bayyati..."
   },
   {
@@ -252,7 +252,7 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageNumbers: [260, 261],
     branchAndLevel: 'Tilawah Dewasa Putra Ulya',
     stageName: 'Penyisihan',
-    status: 'Aktif',
+    status: 'Perlu Verifikasi',
     description: 'Penekanan pada hukum waqf dan ibtida pada doa Nabi Ibrahim...'
   },
   {
@@ -270,7 +270,7 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageNumbers: [303, 304],
     branchAndLevel: 'Tilawah Dewasa Putri Ulya',
     stageName: 'Penyisihan',
-    status: 'Aktif',
+    status: 'Perlu Verifikasi',
     description: 'Khatam surat Al-Kahf dengan nada penutup Bayyati/Sika.'
   },
   {

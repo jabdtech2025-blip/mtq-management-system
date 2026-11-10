@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import {
   CabangItem,
   JenjangItem,
@@ -7,6 +7,12 @@ import {
   Participant,
   Question,
 } from '../types/mtq';
+import { validateMaqraRange } from '../services/quranIndex';
+
+export const MAX_EXCEL_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+export const MAX_EXCEL_ROWS = 5000;
+
+const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
  * Algoritma Pengacakan Fisher-Yates (Knuth Shuffle) Tanpa Bias.
@@ -17,7 +23,11 @@ export function fisherYatesShuffle<T>(items: readonly T[]): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
     let randomIndex: number;
-    if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+    if (
+      typeof globalThis !== 'undefined' &&
+      globalThis.crypto &&
+      typeof globalThis.crypto.getRandomValues === 'function'
+    ) {
       const array = new Uint32Array(1);
       globalThis.crypto.getRandomValues(array);
       randomIndex = array[0] % (i + 1);
@@ -113,6 +123,7 @@ function normalizeHeaderKey(header: string): string {
 function findCellValue(row: Record<string, unknown>, aliases: string[]): string {
   const normalizedAliases = aliases.map(normalizeHeaderKey);
   for (const [key, value] of Object.entries(row)) {
+    if (FORBIDDEN_OBJECT_KEYS.has(key)) continue;
     if (normalizedAliases.includes(normalizeHeaderKey(key))) {
       return value === null || value === undefined ? '' : String(value).trim();
     }
@@ -120,16 +131,146 @@ function findCellValue(row: Record<string, unknown>, aliases: string[]): string 
   return '';
 }
 
+export function assertWorkbookBufferSize(buffer: ArrayBuffer | Uint8Array): void {
+  const byteLength = buffer instanceof Uint8Array ? buffer.byteLength : buffer.byteLength;
+  if (byteLength > MAX_EXCEL_FILE_BYTES) {
+    throw new Error(
+      `Ukuran file Excel (${(byteLength / (1024 * 1024)).toFixed(2)} MB) melebihi batas keamanan maksimum 5 MB.`
+    );
+  }
+}
+
+function isFormulaCellValue(val: unknown): boolean {
+  if (val && typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    if ('formula' in obj || 'sharedFormula' in obj) {
+      return true;
+    }
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed.startsWith('=')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function extractSafeCellPrimitive(val: unknown, rowNumber: number): string | number | boolean {
+  if (isFormulaCellValue(val)) {
+    throw new Error(
+      `Sel bertipe formula tidak diizinkan demi keamanan (terdeteksi pada baris ${rowNumber}). Gunakan nilai teks atau angka murni.`
+    );
+  }
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+    return val;
+  }
+  if (val instanceof Date) {
+    return val.toISOString();
+  }
+  if (typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    if (Array.isArray(obj.richText)) {
+      return obj.richText.map((part: { text?: string }) => String(part?.text || '')).join('');
+    }
+    if ('text' in obj && typeof obj.text === 'string') {
+      return obj.text;
+    }
+  }
+  return String(val);
+}
+
 /**
- * Membaca file Excel (.xlsx, .xls, .csv) dari ArrayBuffer atau Uint8Array
- * dan mengembalikan array objek baris mentah.
+ * Memvalidasi matriks baris mentah (baris 0 = header, baris 1..N = data):
+ * - Menolak > 5.000 baris data
+ * - Menolak sel bertipe formula
+ * - Membuang kunci berbahaya (__proto__, constructor, prototype) untuk mencegah Prototype Pollution
  */
-export function parseWorkbookToRows(buffer: ArrayBuffer | Uint8Array): Record<string, unknown>[] {
-  const workbook = XLSX.read(buffer, { type: 'array' });
-  const firstSheetName = workbook.SheetNames[0];
-  if (!firstSheetName) return [];
-  const worksheet = workbook.Sheets[firstSheetName];
-  return XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
+export function validateAndSanitizeRawSheetMatrix(matrix: unknown[][]): Record<string, unknown>[] {
+  if (!Array.isArray(matrix) || matrix.length <= 1) {
+    return [];
+  }
+
+  const dataRowCount = matrix.length - 1;
+  if (dataRowCount > MAX_EXCEL_ROWS) {
+    throw new Error(
+      `Jumlah baris dalam file Excel (${dataRowCount} baris) melebihi batas maksimum ${MAX_EXCEL_ROWS} baris per unggahan.`
+    );
+  }
+
+  const rawHeaders = Array.isArray(matrix[0]) ? matrix[0] : [];
+  const sanitizedHeaders: Array<string | null> = rawHeaders.map((h) => {
+    const clean = String(extractSafeCellPrimitive(h, 1)).trim();
+    if (!clean || FORBIDDEN_OBJECT_KEYS.has(clean) || FORBIDDEN_OBJECT_KEYS.has(clean.toLowerCase())) {
+      return null;
+    }
+    return clean;
+  });
+
+  const rows: Record<string, unknown>[] = [];
+  for (let rIdx = 1; rIdx < matrix.length; rIdx++) {
+    const rawCells = Array.isArray(matrix[rIdx]) ? matrix[rIdx] : [];
+    const rowObj: Record<string, unknown> = {};
+    let hasNonEmptyValue = false;
+
+    for (let cIdx = 0; cIdx < sanitizedHeaders.length; cIdx++) {
+      const headerKey = sanitizedHeaders[cIdx];
+      if (!headerKey) continue;
+      const cellVal = extractSafeCellPrimitive(rawCells[cIdx], rIdx + 1);
+      if (cellVal !== '') {
+        hasNonEmptyValue = true;
+      }
+      Object.defineProperty(rowObj, headerKey, {
+        value: cellVal,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+
+    if (hasNonEmptyValue) {
+      rows.push(rowObj);
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Membaca file Excel (.xlsx) dari ArrayBuffer atau Uint8Array menggunakan ExcelJS
+ * dengan perlindungan ukuran file <= 5 MB, <= 5.000 baris, penolakan formula, & sanitasi prototype.
+ */
+export async function parseWorkbookToRows(
+  buffer: ArrayBuffer | Uint8Array
+): Promise<Record<string, unknown>[]> {
+  assertWorkbookBufferSize(buffer);
+
+  const uint8 = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const exactArrayBuffer = uint8.buffer.slice(
+    uint8.byteOffset,
+    uint8.byteOffset + uint8.byteLength
+  ) as ArrayBuffer;
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(exactArrayBuffer);
+
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) return [];
+
+  if (worksheet.rowCount - 1 > MAX_EXCEL_ROWS) {
+    throw new Error(
+      `Jumlah baris dalam file Excel (${worksheet.rowCount - 1} baris) melebihi batas maksimum ${MAX_EXCEL_ROWS} baris.`
+    );
+  }
+
+  const matrix: unknown[][] = [];
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+    matrix.push(values);
+  });
+
+  return validateAndSanitizeRawSheetMatrix(matrix);
 }
 
 /**
@@ -158,16 +299,17 @@ export function validateParticipantImportRows(
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    const adminSequenceNumber = findCellValue(raw, [
-      'no_urut',
-      'nomor_urut',
-      'nomor_urut_administratif',
-      'no_urut_administratif',
-      'no_urut_administrasi',
-      'nomor_urut_administrasi',
-      'no',
-      'admin_sequence_number',
-    ]) || String(idx + 1);
+    const adminSequenceNumber =
+      findCellValue(raw, [
+        'no_urut',
+        'nomor_urut',
+        'nomor_urut_administratif',
+        'no_urut_administratif',
+        'no_urut_administrasi',
+        'nomor_urut_administrasi',
+        'no',
+        'admin_sequence_number',
+      ]) || String(idx + 1);
 
     const participantId = findCellValue(raw, [
       'id_peserta',
@@ -187,13 +329,57 @@ export function validateParticipantImportRows(
     const name = findCellValue(raw, ['nama_lengkap', 'nama_peserta', 'nama', 'name']);
     const fatherName = findCellValue(raw, ['nama_ayah', 'bin_binti', 'ayah', 'father_name']);
     const genderRaw = findCellValue(raw, ['jenis_kelamin', 'gender', 'jk', 'putra_putri']);
-    const originCity = findCellValue(raw, ['asal_kota', 'kota_asal', 'kota_kabupaten', 'asal_kota_kabupaten', 'origin_city']);
-    const originRegion = findCellValue(raw, ['asal_wilayah', 'daerah_asal', 'asal_daerah', 'asal_wilayah_provinsi', 'provinsi', 'asal_provinsi', 'origin_region']);
-    const originInstitution = findCellValue(raw, ['lembaga_asal', 'asal_lembaga', 'asal_pesantren_sekolah', 'pesantren_sekolah', 'instansi', 'origin_institution']);
-    const kafilahRef = findCellValue(raw, ['kafilah', 'grup', 'grup_kafilah', 'kafilah_grup', 'nama_kafilah', 'kode_kafilah', 'kafilah_name']);
-    const branchRef = findCellValue(raw, ['cabang', 'cabang_lomba', 'nama_cabang', 'kode_cabang', 'branch']);
-    const levelRef = findCellValue(raw, ['jenjang', 'jenjang_lomba', 'golongan', 'marhalah', 'nama_jenjang', 'kode_jenjang', 'level']);
-    const stageRef = findCellValue(raw, ['babak', 'babak_aktif', 'babak_musabaqah', 'stage']) || 'Penyisihan';
+    const originCity = findCellValue(raw, [
+      'asal_kota',
+      'kota_asal',
+      'kota_kabupaten',
+      'asal_kota_kabupaten',
+      'origin_city',
+    ]);
+    const originRegion = findCellValue(raw, [
+      'asal_wilayah',
+      'daerah_asal',
+      'asal_daerah',
+      'asal_wilayah_provinsi',
+      'provinsi',
+      'asal_provinsi',
+      'origin_region',
+    ]);
+    const originInstitution = findCellValue(raw, [
+      'lembaga_asal',
+      'asal_lembaga',
+      'asal_pesantren_sekolah',
+      'pesantren_sekolah',
+      'instansi',
+      'origin_institution',
+    ]);
+    const kafilahRef = findCellValue(raw, [
+      'kafilah',
+      'grup',
+      'grup_kafilah',
+      'kafilah_grup',
+      'nama_kafilah',
+      'kode_kafilah',
+      'kafilah_name',
+    ]);
+    const branchRef = findCellValue(raw, [
+      'cabang',
+      'cabang_lomba',
+      'nama_cabang',
+      'kode_cabang',
+      'branch',
+    ]);
+    const levelRef = findCellValue(raw, [
+      'jenjang',
+      'jenjang_lomba',
+      'golongan',
+      'marhalah',
+      'nama_jenjang',
+      'kode_jenjang',
+      'level',
+    ]);
+    const stageRef =
+      findCellValue(raw, ['babak', 'babak_aktif', 'babak_musabaqah', 'stage']) || 'Penyisihan';
     const statusRaw = findCellValue(raw, ['status']) || 'Menunggu';
 
     if (!name) errors.push('Nama lengkap peserta wajib diisi.');
@@ -202,9 +388,17 @@ export function validateParticipantImportRows(
 
     const normalizedGender = genderRaw.toLowerCase();
     let gender: 'Putra' | 'Putri' = 'Putra';
-    if (normalizedGender === 'putra' || normalizedGender === 'l' || normalizedGender === 'laki-laki') {
+    if (
+      normalizedGender === 'putra' ||
+      normalizedGender === 'l' ||
+      normalizedGender === 'laki-laki'
+    ) {
       gender = 'Putra';
-    } else if (normalizedGender === 'putri' || normalizedGender === 'p' || normalizedGender === 'perempuan') {
+    } else if (
+      normalizedGender === 'putri' ||
+      normalizedGender === 'p' ||
+      normalizedGender === 'perempuan'
+    ) {
       gender = 'Putri';
     } else {
       errors.push(`Jenis kelamin "${genderRaw || '-'}" tidak valid (gunakan Putra atau Putri).`);
@@ -218,7 +412,9 @@ export function validateParticipantImportRows(
           k.id === kafilahRef)
     );
     if (!matchedKafilah) {
-      errors.push(`Kafilah/Grup "${kafilahRef || '-'}" tidak ditemukan pada Master Data Kafilah Aktif.`);
+      errors.push(
+        `Kafilah/Grup "${kafilahRef || '-'}" tidak ditemukan pada Master Data Kafilah Aktif.`
+      );
     }
 
     const matchedBranch = context.cabangList.find(
@@ -229,7 +425,9 @@ export function validateParticipantImportRows(
           c.id === branchRef)
     );
     if (!matchedBranch) {
-      errors.push(`Cabang lomba "${branchRef || '-'}" tidak ditemukan pada Master Data Cabang Aktif.`);
+      errors.push(
+        `Cabang lomba "${branchRef || '-'}" tidak ditemukan pada Master Data Cabang Aktif.`
+      );
     }
 
     const fallbackLevel: JenjangItem =
@@ -251,11 +449,15 @@ export function validateParticipantImportRows(
         ) || fallbackLevel
       : fallbackLevel;
 
-    const matchedStage = context.stages.find(
-      (s) =>
-        s.name.toLowerCase() === stageRef.toLowerCase() &&
-        (!matchedBranch || !s.branchId || s.branchId === matchedBranch.id || s.branchName === matchedBranch.name)
-    ) || context.stages.find((s) => s.name.toLowerCase() === stageRef.toLowerCase());
+    const matchedStage =
+      context.stages.find(
+        (s) =>
+          s.name.toLowerCase() === stageRef.toLowerCase() &&
+          (!matchedBranch ||
+            !s.branchId ||
+            s.branchId === matchedBranch.id ||
+            s.branchName === matchedBranch.name)
+      ) || context.stages.find((s) => s.name.toLowerCase() === stageRef.toLowerCase());
 
     if (!matchedStage) {
       errors.push(`Babak "${stageRef}" tidak ditemukan pada konfigurasi Babak Musabaqah.`);
@@ -267,14 +469,18 @@ export function validateParticipantImportRows(
       }
       seenParticipantCodes.add(participantId);
       if (existingCodes.has(participantId)) {
-        warnings.push(`ID Peserta "${participantId}" sudah ada dan akan diperbarui (idempotent upsert).`);
+        warnings.push(
+          `ID Peserta "${participantId}" sudah ada dan akan diperbarui (idempotent upsert).`
+        );
       }
     }
 
     if (matchedBranch && lotteryNumber) {
       const branchLotteryKey = `${matchedBranch.id}::${lotteryNumber}`;
       if (seenBranchLottery.has(branchLotteryKey)) {
-        errors.push(`Duplikasi Nomor Undian "${lotteryNumber}" pada cabang "${matchedBranch.name}" di dalam file.`);
+        errors.push(
+          `Duplikasi Nomor Undian "${lotteryNumber}" pada cabang "${matchedBranch.name}" di dalam file.`
+        );
       }
       seenBranchLottery.add(branchLotteryKey);
     }
@@ -285,7 +491,9 @@ export function validateParticipantImportRows(
 
     const rawRowStringified: Record<string, string> = {};
     Object.entries(raw).forEach(([k, v]) => {
-      rawRowStringified[k] = v === null || v === undefined ? '' : String(v);
+      if (!FORBIDDEN_OBJECT_KEYS.has(k)) {
+        rawRowStringified[k] = v === null || v === undefined ? '' : String(v);
+      }
     });
 
     const isValid = errors.length === 0 && Boolean(matchedKafilah && matchedBranch && matchedLevel);
@@ -296,28 +504,29 @@ export function validateParticipantImportRows(
       isValid,
       errors,
       warnings,
-      data: isValid && matchedKafilah && matchedBranch && matchedLevel
-        ? {
-            adminSequenceNumber,
-            participantId,
-            lotteryNumber,
-            name,
-            fatherName,
-            gender,
-            originCity: originCity || matchedKafilah.region,
-            originRegion: originRegion || matchedKafilah.region,
-            originInstitution,
-            kafilahId: matchedKafilah.id,
-            kafilahName: matchedKafilah.name,
-            branchId: matchedBranch.id,
-            branchName: matchedBranch.name,
-            levelId: matchedLevel.id,
-            levelName: matchedLevel.name,
-            stageId: matchedStage?.id,
-            stageName: matchedStage?.name || stageRef || 'Penyisihan',
-            status: matchedStatus,
-          }
-        : undefined,
+      data:
+        isValid && matchedKafilah && matchedBranch && matchedLevel
+          ? {
+              adminSequenceNumber,
+              participantId,
+              lotteryNumber,
+              name,
+              fatherName,
+              gender,
+              originCity: originCity || matchedKafilah.region,
+              originRegion: originRegion || matchedKafilah.region,
+              originInstitution,
+              kafilahId: matchedKafilah.id,
+              kafilahName: matchedKafilah.name,
+              branchId: matchedBranch.id,
+              branchName: matchedBranch.name,
+              levelId: matchedLevel.id,
+              levelName: matchedLevel.name,
+              stageId: matchedStage?.id,
+              stageName: matchedStage?.name || stageRef || 'Penyisihan',
+              status: matchedStatus,
+            }
+          : undefined,
     };
   });
 
@@ -333,7 +542,7 @@ export function validateParticipantImportRows(
         r.rawRow['Nama_Lengkap'] ||
         `Baris ${r.rowNumber}`,
       reasons: r.errors,
-      rawRow: r.rawRow
+      rawRow: r.rawRow,
     }));
 
   return {
@@ -369,33 +578,64 @@ export function validateQuestionImportRows(
     const code = findCellValue(raw, ['kode_maqra', 'kode_soal', 'kode', 'code']).toUpperCase();
     const title = findCellValue(raw, ['judul_paket', 'judul_maqra', 'judul', 'title']);
     const surahName = findCellValue(raw, ['nama_surah', 'surah', 'surah_name']);
-    const surahNumber = Number(findCellValue(raw, ['nomor_surah', 'no_surah', 'surah_number']) || '0');
-    const startAyah = Number(findCellValue(raw, ['ayat_mulai', 'start_ayah', 'ayat_awal']) || '0');
-    const endAyah = Number(findCellValue(raw, ['ayat_selesai', 'end_ayah', 'ayat_akhir']) || '0');
-    const pageStart = Number(findCellValue(raw, ['halaman_mulai', 'halaman_awal', 'page_start', 'halaman']) || '0');
-    const pageEnd = Number(findCellValue(raw, ['halaman_selesai', 'halaman_akhir', 'page_end']) || String(pageStart));
-    const branchRef = findCellValue(raw, ['cabang', 'cabang_lomba', 'nama_cabang', 'kode_cabang', 'branch']);
-    const levelRef = findCellValue(raw, ['jenjang', 'jenjang_lomba', 'golongan', 'marhalah', 'nama_jenjang', 'kode_jenjang', 'level']);
-    const stageRef = findCellValue(raw, ['babak', 'babak_aktif', 'babak_musabaqah', 'stage']) || 'Penyisihan';
+    const surahNumber = Number(
+      findCellValue(raw, ['nomor_surah', 'no_surah', 'surah_number']) || '0'
+    );
+    const startAyah = Number(
+      findCellValue(raw, ['ayat_mulai', 'start_ayah', 'ayat_awal']) || '0'
+    );
+    const endAyah = Number(
+      findCellValue(raw, ['ayat_selesai', 'end_ayah', 'ayat_akhir']) || '0'
+    );
+    const pageStart = Number(
+      findCellValue(raw, ['halaman_mulai', 'halaman_awal', 'page_start', 'halaman']) || '0'
+    );
+    const pageEnd = Number(
+      findCellValue(raw, ['halaman_selesai', 'halaman_akhir', 'page_end']) || String(pageStart)
+    );
+    const branchRef = findCellValue(raw, [
+      'cabang',
+      'cabang_lomba',
+      'nama_cabang',
+      'kode_cabang',
+      'branch',
+    ]);
+    const levelRef = findCellValue(raw, [
+      'jenjang',
+      'jenjang_lomba',
+      'golongan',
+      'marhalah',
+      'nama_jenjang',
+      'kode_jenjang',
+      'level',
+    ]);
+    const stageRef =
+      findCellValue(raw, ['babak', 'babak_aktif', 'babak_musabaqah', 'stage']) || 'Penyisihan';
     const statusRaw = findCellValue(raw, ['status']) || 'Aktif';
     const description = findCellValue(raw, ['deskripsi', 'catatan', 'keterangan', 'description']);
 
     if (!code) errors.push('Kode Maqra wajib diisi.');
     if (!surahName) errors.push('Nama Surah wajib diisi.');
-    if (!Number.isInteger(surahNumber) || surahNumber < 1 || surahNumber > 114) {
-      errors.push(`Nomor Surah "${surahNumber}" harus bernilai 1 s.d. 114.`);
-    }
-    if (!Number.isInteger(startAyah) || startAyah < 1) {
-      errors.push('Ayat mulai harus berupa angka bulat >= 1.');
-    }
-    if (!Number.isInteger(endAyah) || endAyah < startAyah) {
-      errors.push('Ayat selesai harus >= Ayat mulai.');
-    }
-    if (!Number.isInteger(pageStart) || pageStart < 1 || pageStart > 604) {
-      errors.push('Halaman mulai harus berada pada rentang Mushaf Madinah (1 - 604).');
-    }
-    if (!Number.isInteger(pageEnd) || pageEnd < pageStart || pageEnd > 604) {
-      errors.push('Halaman selesai harus >= Halaman mulai dan <= 604.');
+
+    const maqraCheck = validateMaqraRange({
+      surahNumber: surahNumber > 0 ? surahNumber : undefined,
+      surahName,
+      startAyah,
+      endAyah,
+      pageStart: pageStart > 0 ? pageStart : undefined,
+      pageEnd: pageEnd > 0 ? pageEnd : undefined,
+      allowManualPageOverride: false,
+    });
+
+    if (!maqraCheck.valid) {
+      errors.push(...maqraCheck.errors);
+    } else {
+      if (!Number.isInteger(pageStart) || pageStart < 1 || pageStart > 604) {
+        errors.push('Halaman mulai harus berada pada rentang Mushaf Madinah (1 - 604).');
+      }
+      if (!Number.isInteger(pageEnd) || pageEnd < pageStart || pageEnd > 604) {
+        errors.push('Halaman selesai harus >= Halaman mulai dan <= 604.');
+      }
     }
 
     const matchedBranch = context.cabangList.find(
@@ -406,7 +646,9 @@ export function validateQuestionImportRows(
           c.id === branchRef)
     );
     if (!matchedBranch) {
-      errors.push(`Cabang lomba "${branchRef || '-'}" tidak ditemukan pada Master Data Cabang Aktif.`);
+      errors.push(
+        `Cabang lomba "${branchRef || '-'}" tidak ditemukan pada Master Data Cabang Aktif.`
+      );
     }
 
     const fallbackLevel: JenjangItem =
@@ -432,7 +674,10 @@ export function validateQuestionImportRows(
       context.stages.find(
         (s) =>
           s.name.toLowerCase() === stageRef.toLowerCase() &&
-          (!matchedBranch || !s.branchId || s.branchId === matchedBranch.id || s.branchName === matchedBranch.name)
+          (!matchedBranch ||
+            !s.branchId ||
+            s.branchId === matchedBranch.id ||
+            s.branchName === matchedBranch.name)
       ) || context.stages.find((s) => s.name.toLowerCase() === stageRef.toLowerCase());
 
     if (!matchedStage) {
@@ -454,7 +699,9 @@ export function validateQuestionImportRows(
 
     const rawRowStringified: Record<string, string> = {};
     Object.entries(raw).forEach(([k, v]) => {
-      rawRowStringified[k] = v === null || v === undefined ? '' : String(v);
+      if (!FORBIDDEN_OBJECT_KEYS.has(k)) {
+        rawRowStringified[k] = v === null || v === undefined ? '' : String(v);
+      }
     });
 
     const isValid = errors.length === 0 && Boolean(matchedBranch && matchedLevel);
@@ -504,7 +751,7 @@ export function validateQuestionImportRows(
         r.rawRow['Judul_Paket'] ||
         `Baris ${r.rowNumber}`,
       reasons: r.errors,
-      rawRow: r.rawRow
+      rawRow: r.rawRow,
     }));
 
   return {
@@ -517,6 +764,43 @@ export function validateQuestionImportRows(
   };
 }
 
+function appendObjectsToWorksheet(
+  workbook: ExcelJS.Workbook,
+  sheetName: string,
+  rows: Record<string, unknown>[]
+): void {
+  const sheet = workbook.addWorksheet(sheetName);
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  sheet.columns = headers.map((h) => ({
+    header: h,
+    key: h,
+    width: Math.max(h.length + 4, 18),
+  }));
+  rows.forEach((row) => {
+    sheet.addRow(row);
+  });
+}
+
+async function triggerWorkbookDownload(
+  workbook: ExcelJS.Workbook,
+  filename: string
+): Promise<void> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Mengunduh Template Excel (.xlsx) untuk Import Peserta.
  */
@@ -526,8 +810,10 @@ export function downloadParticipantExcelTemplate(context: {
   jenjangList: JenjangItem[];
   stages: StageItem[];
 }): void {
-  const sampleKafilah = context.kafilahs.find((k) => k.status === 'Aktif')?.name || 'Kafilah Kota Surabaya';
-  const sampleBranch = context.cabangList.find((c) => c.status === 'Aktif')?.name || 'Tilawah Dewasa Putra';
+  const sampleKafilah =
+    context.kafilahs.find((k) => k.status === 'Aktif')?.name || 'Kafilah Kota Surabaya';
+  const sampleBranch =
+    context.cabangList.find((c) => c.status === 'Aktif')?.name || 'Tilawah Dewasa Putra';
   const sampleStage = context.stages[0]?.name || 'Penyisihan';
 
   const templateData = [
@@ -548,9 +834,8 @@ export function downloadParticipantExcelTemplate(context: {
     },
   ];
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(templateData);
-  XLSX.utils.book_append_sheet(wb, ws, 'Template_Peserta');
+  const wb = new ExcelJS.Workbook();
+  appendObjectsToWorksheet(wb, 'Template_Peserta', templateData);
 
   const masterRefRows = [
     ...context.cabangList
@@ -566,11 +851,10 @@ export function downloadParticipantExcelTemplate(context: {
     })),
   ];
   if (masterRefRows.length > 0) {
-    const wsRef = XLSX.utils.json_to_sheet(masterRefRows);
-    XLSX.utils.book_append_sheet(wb, wsRef, 'Referensi_Master_Data');
+    appendObjectsToWorksheet(wb, 'Referensi_Master_Data', masterRefRows);
   }
 
-  XLSX.writeFile(wb, 'Template_Import_Peserta_MTQ.xlsx');
+  void triggerWorkbookDownload(wb, 'Template_Import_Peserta_MTQ.xlsx');
 }
 
 /**
@@ -581,7 +865,8 @@ export function downloadQuestionExcelTemplate(context: {
   jenjangList: JenjangItem[];
   stages: StageItem[];
 }): void {
-  const sampleBranch = context.cabangList.find((c) => c.status === 'Aktif')?.name || 'Tilawah Dewasa Putra';
+  const sampleBranch =
+    context.cabangList.find((c) => c.status === 'Aktif')?.name || 'Tilawah Dewasa Putra';
   const sampleStage = context.stages[0]?.name || 'Penyisihan';
 
   const templateData = [
@@ -597,13 +882,12 @@ export function downloadQuestionExcelTemplate(context: {
       Cabang: sampleBranch,
       Babak: sampleStage,
       Status: 'Aktif',
-      Deskripsi: 'Fokus mad thabi\'i dan waqaf tam',
+      Deskripsi: "Fokus mad thabi'i dan waqaf tam",
     },
   ];
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(templateData);
-  XLSX.utils.book_append_sheet(wb, ws, 'Template_Bank_Soal');
+  const wb = new ExcelJS.Workbook();
+  appendObjectsToWorksheet(wb, 'Template_Bank_Soal', templateData);
 
   const masterRefRows = [
     ...context.cabangList
@@ -616,11 +900,10 @@ export function downloadQuestionExcelTemplate(context: {
     })),
   ];
   if (masterRefRows.length > 0) {
-    const wsRef = XLSX.utils.json_to_sheet(masterRefRows);
-    XLSX.utils.book_append_sheet(wb, wsRef, 'Referensi_Master_Data');
+    appendObjectsToWorksheet(wb, 'Referensi_Master_Data', masterRefRows);
   }
 
-  XLSX.writeFile(wb, 'Template_Import_Bank_Soal_MTQ.xlsx');
+  void triggerWorkbookDownload(wb, 'Template_Import_Bank_Soal_MTQ.xlsx');
 }
 
 /**
@@ -651,12 +934,13 @@ export function downloadImportErrorReport<TData>(
       };
     });
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(
+  const wb = new ExcelJS.Workbook();
+  appendObjectsToWorksheet(
+    wb,
+    'Laporan_Error',
     reportData.length > 0
       ? reportData
       : [{ Baris_Excel: '-', Status_Validasi: 'OK', Alasan_Penolakan: 'Tidak ada baris error' }]
   );
-  XLSX.utils.book_append_sheet(wb, ws, 'Laporan_Error');
-  XLSX.writeFile(wb, filename);
+  void triggerWorkbookDownload(wb, filename);
 }

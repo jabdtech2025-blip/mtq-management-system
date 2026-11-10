@@ -12,6 +12,8 @@ import {
 } from '../types/mtq';
 import { getBranchRuleConfig, resolveActiveRubricForBranch, INITIAL_RUBRIC_VERSIONS } from './competitionRules';
 import { aggregateParticipantScores, getActiveRubricFields } from './scoringEngine';
+import { StructuredBlockingReason } from './completion';
+
 
 export interface EvaluatedParticipantStage {
   participation: StageParticipation;
@@ -45,6 +47,7 @@ export interface StageEvaluationResult {
   isTieBreakConfigValid: boolean;
   canFinalize: boolean;
   blockingReason?: string;
+  blockingReasonDetail?: StructuredBlockingReason | null;
 }
 
 export interface BranchStageEvaluationGroup {
@@ -404,6 +407,7 @@ export class RankingService {
     const filteredParticipations = Array.from(dedupedParticipationMap.values());
 
     if (filteredParticipations.length === 0) {
+      const msg = 'Tidak ada peserta terdaftar pada babak dan cabang ini.';
       return {
         evaluatedParticipants: [],
         allFinalized: false,
@@ -413,7 +417,8 @@ export class RankingService {
         unresolvedTiesCount: 0,
         isTieBreakConfigValid: true,
         canFinalize: false,
-        blockingReason: 'Tidak ada peserta terdaftar pada babak dan cabang ini.'
+        blockingReason: msg,
+        blockingReasonDetail: { code: 'NO_PARTICIPANTS', message: msg }
       };
     }
 
@@ -460,6 +465,8 @@ export class RankingService {
           if (!branchRes.isTieBreakConfigValid) allTieBreakConfigsValid = false;
         });
 
+        const multiMsg =
+          'Terdapat beberapa cabang lomba pada babak ini. Pengesahan dan pelolosan babak wajib dilakukan per cabang.';
         return {
           evaluatedParticipants: combinedEvaluated,
           allFinalized: allBranchesFinalized,
@@ -469,8 +476,8 @@ export class RankingService {
           unresolvedTiesCount: totalUnresolvedTies,
           isTieBreakConfigValid: allTieBreakConfigsValid,
           canFinalize: false,
-          blockingReason:
-            'Terdapat beberapa cabang lomba pada babak ini. Pengesahan dan pelolosan babak wajib dilakukan per cabang.'
+          blockingReason: multiMsg,
+          blockingReasonDetail: { code: 'MULTI_BRANCH_SELECTION', message: multiMsg }
         };
       }
     }
@@ -630,9 +637,9 @@ export class RankingService {
         provisionalScore: agg.provisionalScore,
         displayScore: agg.averageFinalScore !== null ? agg.averageFinalScore : agg.provisionalScore,
         fieldScores: agg.fieldAverages,
-        isFullyFinalized: agg.isFullyFinalized,
-        finalizedJudgeCount: agg.finalizedCount,
-        totalAssignedJudges: agg.totalRequiredUnits
+        isFullyFinalized: requiredJudgeIds.length > 0 && stageQuestions.length > 0 && agg.isFullyFinalized,
+        finalizedJudgeCount: requiredJudgeIds.length > 0 ? agg.finalizedCount : 0,
+        totalAssignedJudges: requiredJudgeIds.length * stageQuestions.length
       };
     });
 
@@ -809,42 +816,73 @@ export class RankingService {
 
     const unresolvedTiesCount = Object.keys(unresolvedMap).length;
 
-    // 7. Evaluasi Kelayakan Finalisasi (canFinalize)
+    // 7. Evaluasi Kelayakan Finalisasi (canFinalize) & Structured Blocking Reason (T1.2)
+    const missingMaqraCount = evaluatedItems.filter((item) => item.stageQuestions.length === 0).length;
     let canFinalize = allFinalized;
     let blockingReason: string | undefined;
+    let blockingReasonDetail: StructuredBlockingReason | null = null;
+
+    const setBlock = (code: StructuredBlockingReason['code'], message: string) => {
+      canFinalize = false;
+      blockingReason = message;
+      blockingReasonDetail = { code, message };
+    };
 
     if (!isQuotaValid) {
-      canFinalize = false;
-      blockingReason = `Kuota kelulusan babak tidak valid (${quota}). Harus berupa bilangan bulat positif.`;
+      setBlock(
+        'QUOTA_INVALID',
+        `Kuota kelulusan babak tidak valid (${quota}). Harus berupa bilangan bulat positif.`
+      );
     } else if (requiredJudgeIds.length === 0) {
-      canFinalize = false;
-      blockingReason = `Belum ada penugasan dewan hakim resmi untuk cabang "${targetBranch}" pada babak "${stageName}".`;
+      setBlock(
+        'NO_JUDGES',
+        `Belum ada penugasan dewan hakim resmi untuk cabang "${targetBranch}" pada babak "${stageName}".`
+      );
     } else if (!ruleConfig || !ruleConfig.rubricVersionId || ruleConfig.status === 'Draft') {
-      canFinalize = false;
-      blockingReason = `Cabang "${targetBranch}" belum memiliki konfigurasi aturan kompetisi resmi atau rubrik aktif yang valid.`;
+      setBlock(
+        'INVALID_RULE_CONFIG',
+        `Cabang "${targetBranch}" belum memiliki konfigurasi aturan kompetisi resmi atau rubrik aktif yang valid.`
+      );
     } else if (!isTieBreakConfigValid) {
-      canFinalize = false;
-      blockingReason = `Konfigurasi urutan kriteria tie-break pada cabang "${targetBranch}" tidak valid atau memuat bidang di luar rubrik aktif.`;
+      setBlock(
+        'INVALID_TIE_BREAK_CONFIG',
+        `Konfigurasi urutan kriteria tie-break pada cabang "${targetBranch}" tidak valid atau memuat bidang di luar rubrik aktif.`
+      );
+    } else if (missingMaqraCount > 0) {
+      setBlock(
+        'NO_MAQRA',
+        `Terdapat ${missingMaqraCount} peserta yang belum memiliki penetapan soal/maqra pada babak "${stageName}".`
+      );
     } else if (!allFinalized) {
-      canFinalize = false;
-      blockingReason = `Terdapat ${incompleteCount} peserta yang penilaiannya belum lengkap dari seluruh dewan hakim.`;
+      setBlock(
+        'INCOMPLETE_ASSESSMENTS',
+        `Terdapat ${incompleteCount} peserta yang penilaiannya belum lengkap dari seluruh dewan hakim.`
+      );
     } else if (missingOverrideReasonParticipant) {
-      canFinalize = false;
-      blockingReason = `Keputusan override manual untuk peserta "${missingOverrideReasonParticipant}" wajib mencantumkan alasan tertulis minimal 5 karakter.`;
+      setBlock(
+        'MISSING_OVERRIDE_REASON',
+        `Keputusan override manual untuk peserta "${missingOverrideReasonParticipant}" wajib mencantumkan alasan tertulis minimal 5 karakter.`
+      );
     } else if (qualifiedCount > quota) {
       // P1-04: Cegah jumlah peserta lolos melebihi kuota babak akibat override manual
-      canFinalize = false;
-      blockingReason = `Jumlah peserta yang diloloskan (${qualifiedCount}) melebihi kuota kelulusan babak (${quota}). Sesuaikan kembali override manual.`;
+      setBlock(
+        'QUOTA_EXCEEDED',
+        `Jumlah peserta yang diloloskan (${qualifiedCount}) melebihi kuota kelulusan babak (${quota}). Sesuaikan kembali override manual.`
+      );
     } else if (boundaryTie) {
-      canFinalize = false;
-      blockingReason = 'Terdapat nilai seri identik tak terpecahkan pada batas kuota kelulusan. Wajib diselesaikan melalui sidang pleno atau override manual berizin sebelum babak disahkan.';
+      setBlock(
+        'UNRESOLVED_TIE',
+        'Terdapat nilai seri identik tak terpecahkan pada batas kuota kelulusan. Wajib diselesaikan melalui sidang pleno atau override manual berizin sebelum babak disahkan.'
+      );
     } else {
       const podiumUnresolved = evaluatedParticipants.some(
         (ep) => ep.rank <= 3 && ep.hasUnresolvedTie && !ep.isOverridden
       );
       if (podiumUnresolved) {
-        canFinalize = false;
-        blockingReason = 'Terdapat nilai seri identik pada posisi Podium Juara (1/2/3). Wajib diputuskan dalam sidang pleno dewan hakim atau melalui override manual.';
+        setBlock(
+          'UNRESOLVED_TIE',
+          'Terdapat nilai seri identik pada posisi Podium Juara (1/2/3). Wajib diputuskan dalam sidang pleno dewan hakim atau melalui override manual.'
+        );
       }
     }
 
@@ -857,7 +895,8 @@ export class RankingService {
       unresolvedTiesCount,
       isTieBreakConfigValid,
       canFinalize,
-      blockingReason
+      blockingReason,
+      blockingReasonDetail
     };
   }
 

@@ -204,20 +204,93 @@ CREATE TABLE IF NOT EXISTS questions (
     code VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
     surah_name VARCHAR(100) NOT NULL,
-    surah_number INT NOT NULL,
-    start_ayah INT NOT NULL,
-    end_ayah INT NOT NULL,
-    page_number INT NOT NULL,
-    page_start INT NOT NULL,
-    page_end INT NOT NULL,
+    surah_number INT NOT NULL CHECK (surah_number BETWEEN 1 AND 114),
+    start_ayah INT NOT NULL CHECK (start_ayah >= 1),
+    end_ayah INT NOT NULL CHECK (end_ayah >= start_ayah),
+    page_number INT NOT NULL CHECK (page_number BETWEEN 1 AND 604),
+    page_start INT NOT NULL CHECK (page_start BETWEEN 1 AND 604),
+    page_end INT NOT NULL CHECK (page_end BETWEEN 1 AND 604 AND page_start <= page_end),
     branch_id UUID REFERENCES branches(id) ON DELETE CASCADE,
     level_id UUID REFERENCES levels(id) ON DELETE SET NULL,
     stage_id UUID REFERENCES stages(id) ON DELETE CASCADE,
-    status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif', 'Nonaktif')),
+    status VARCHAR(20) NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif', 'Nonaktif', 'Perlu Verifikasi')),
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, code)
 );
+
+CREATE OR REPLACE FUNCTION public.get_surah_max_ayah(p_surah_number INT)
+RETURNS INT
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+    v_verse_counts INT[] := ARRAY[
+        7, 286, 200, 176, 120, 165, 206, 75, 129, 109,
+        123, 111, 43, 52, 99, 128, 111, 110, 98, 135,
+        112, 78, 118, 64, 77, 227, 93, 88, 69, 60,
+        34, 30, 73, 54, 45, 83, 182, 88, 75, 85,
+        54, 53, 89, 59, 37, 35, 38, 29, 18, 45,
+        60, 49, 62, 55, 78, 96, 29, 22, 24, 13,
+        14, 11, 11, 18, 12, 12, 30, 52, 52, 44,
+        28, 28, 20, 56, 40, 31, 50, 40, 46, 42,
+        29, 19, 36, 25, 22, 17, 19, 26, 30, 20,
+        15, 21, 11, 8, 8, 19, 5, 8, 8, 11,
+        11, 8, 3, 9, 5, 4, 7, 3, 6, 3,
+        5, 4, 5, 6
+    ];
+BEGIN
+    IF p_surah_number IS NULL OR p_surah_number < 1 OR p_surah_number > 114 THEN
+        RETURN NULL;
+    END IF;
+    RETURN v_verse_counts[p_surah_number];
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.validate_question_maqra_bounds()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_max_ayah INT;
+BEGIN
+    IF NEW.surah_number IS NULL OR NEW.surah_number < 1 OR NEW.surah_number > 114 THEN
+        RAISE EXCEPTION 'Nomor surah tidak valid: % (harus antara 1 s.d. 114).', NEW.surah_number;
+    END IF;
+
+    v_max_ayah := public.get_surah_max_ayah(NEW.surah_number);
+    IF v_max_ayah IS NULL THEN
+        RAISE EXCEPTION 'Nomor surah % tidak ditemukan dalam indeks 114 surah.', NEW.surah_number;
+    END IF;
+
+    IF NEW.start_ayah IS NULL OR NEW.start_ayah < 1 OR NEW.start_ayah > v_max_ayah THEN
+        RAISE EXCEPTION 'Ayat mulai (%) berada di luar batas surah ke-% (1..%).', NEW.start_ayah, NEW.surah_number, v_max_ayah;
+    END IF;
+
+    IF NEW.end_ayah IS NULL OR NEW.end_ayah < NEW.start_ayah OR NEW.end_ayah > v_max_ayah THEN
+        RAISE EXCEPTION 'Ayat selesai (%) tidak valid untuk surah ke-% (harus antara %..%).', NEW.end_ayah, NEW.surah_number, NEW.start_ayah, v_max_ayah;
+    END IF;
+
+    IF NEW.page_start IS NULL OR NEW.page_start < 1 OR NEW.page_start > 604 THEN
+        RAISE EXCEPTION 'Halaman mulai (%) harus berada di antara 1..604.', NEW.page_start;
+    END IF;
+
+    IF NEW.page_end IS NULL OR NEW.page_end < NEW.page_start OR NEW.page_end > 604 THEN
+        RAISE EXCEPTION 'Halaman selesai (%) harus berada di antara %..604.', NEW.page_end, NEW.page_start;
+    END IF;
+
+    IF NEW.page_number IS NULL OR NEW.page_number < 1 OR NEW.page_number > 604 THEN
+        NEW.page_number := NEW.page_start;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_validate_question_maqra ON public.questions;
+CREATE TRIGGER trg_validate_question_maqra
+    BEFORE INSERT OR UPDATE ON public.questions
+    FOR EACH ROW EXECUTE FUNCTION public.validate_question_maqra_bounds();
 
 CREATE TABLE IF NOT EXISTS assigned_maqras (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2693,6 +2766,496 @@ GRANT EXECUTE ON FUNCTION upsert_tenant_member_profile(UUID, UUID, TEXT, TEXT, T
 
 REVOKE EXECUTE ON FUNCTION public.bootstrap_first_superadmin(TEXT, UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.bootstrap_first_superadmin(TEXT, UUID) TO authenticated;
+
+-- 17. T1.1 & T1.2: MAQRA INTEGRITY & CENTRALIZED STAGE COMPLETION
+CREATE OR REPLACE FUNCTION public.get_surah_max_ayah(p_surah_number INT)
+RETURNS INT
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+    v_verse_counts INT[] := ARRAY[
+        7, 286, 200, 176, 120, 165, 206, 75, 129, 109,
+        123, 111, 43, 52, 99, 128, 111, 110, 98, 135,
+        112, 78, 118, 64, 77, 227, 93, 88, 69, 60,
+        34, 30, 73, 54, 45, 83, 182, 88, 75, 85,
+        54, 53, 89, 59, 37, 35, 38, 29, 18, 45,
+        60, 49, 62, 55, 78, 96, 29, 22, 24, 13,
+        14, 11, 11, 18, 12, 12, 30, 52, 52, 44,
+        28, 28, 20, 56, 40, 31, 50, 40, 46, 42,
+        29, 19, 36, 25, 22, 17, 19, 26, 30, 20,
+        15, 21, 11, 8, 8, 19, 5, 8, 8, 11,
+        11, 8, 3, 9, 5, 4, 7, 3, 6, 3,
+        5, 4, 5, 6
+    ];
+BEGIN
+    IF p_surah_number IS NULL OR p_surah_number < 1 OR p_surah_number > 114 THEN
+        RETURN NULL;
+    END IF;
+    RETURN v_verse_counts[p_surah_number];
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.validate_question_maqra_bounds()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_max_ayah INT;
+BEGIN
+    IF NEW.surah_number IS NULL OR NEW.surah_number < 1 OR NEW.surah_number > 114 THEN
+        RAISE EXCEPTION 'Nomor surah tidak valid: % (harus antara 1 s.d. 114).', NEW.surah_number;
+    END IF;
+
+    v_max_ayah := public.get_surah_max_ayah(NEW.surah_number);
+    IF v_max_ayah IS NULL THEN
+        RAISE EXCEPTION 'Nomor surah % tidak ditemukan dalam indeks 114 surah.', NEW.surah_number;
+    END IF;
+
+    IF NEW.start_ayah IS NULL OR NEW.start_ayah < 1 OR NEW.start_ayah > v_max_ayah THEN
+        RAISE EXCEPTION 'Ayat mulai (%) berada di luar batas surah ke-% (1..%).', NEW.start_ayah, NEW.surah_number, v_max_ayah;
+    END IF;
+
+    IF NEW.end_ayah IS NULL OR NEW.end_ayah < NEW.start_ayah OR NEW.end_ayah > v_max_ayah THEN
+        RAISE EXCEPTION 'Ayat selesai (%) tidak valid untuk surah ke-% (harus antara %..%).', NEW.end_ayah, NEW.surah_number, NEW.start_ayah, v_max_ayah;
+    END IF;
+
+    IF NEW.page_start IS NULL OR NEW.page_start < 1 OR NEW.page_start > 604 THEN
+        RAISE EXCEPTION 'Halaman mulai (%) harus berada di antara 1..604.', NEW.page_start;
+    END IF;
+
+    IF NEW.page_end IS NULL OR NEW.page_end < NEW.page_start OR NEW.page_end > 604 THEN
+        RAISE EXCEPTION 'Halaman selesai (%) harus berada di antara %..604.', NEW.page_end, NEW.page_start;
+    END IF;
+
+    IF NEW.page_number IS NULL OR NEW.page_number < 1 OR NEW.page_number > 604 THEN
+        NEW.page_number := NEW.page_start;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_validate_question_maqra ON public.questions;
+CREATE TRIGGER trg_validate_question_maqra
+    BEFORE INSERT OR UPDATE ON public.questions
+    FOR EACH ROW EXECUTE FUNCTION public.validate_question_maqra_bounds();
+
+CREATE OR REPLACE FUNCTION public.audit_questions_consistency(p_tenant_id UUID DEFAULT NULL)
+RETURNS INT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_flagged_count INT := 0;
+BEGIN
+    UPDATE public.questions q
+    SET status = 'Perlu Verifikasi'
+    WHERE (p_tenant_id IS NULL OR q.tenant_id = p_tenant_id)
+      AND q.status = 'Aktif'
+      AND (
+          q.surah_number < 1
+          OR q.surah_number > 114
+          OR q.start_ayah < 1
+          OR q.end_ayah < q.start_ayah
+          OR q.end_ayah > COALESCE(public.get_surah_max_ayah(q.surah_number), 0)
+          OR q.page_start < 1
+          OR q.page_end > 604
+          OR q.page_end < q.page_start
+      );
+
+    GET DIAGNOSTICS v_flagged_count = ROW_COUNT;
+    RETURN v_flagged_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_stage_completion_sql(p_stage_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_stage RECORD;
+    v_required_judge_count INT := 0;
+    v_total_participants INT := 0;
+    v_completed_participants INT := 0;
+    v_missing_maqra_participants INT := 0;
+    v_total_required_units INT := 0;
+    v_finalized_units INT := 0;
+    v_sp RECORD;
+    v_sp_maqra_count INT;
+    v_sp_finalized_units INT;
+    v_all_complete BOOLEAN := false;
+    v_blocking_code TEXT := NULL;
+BEGIN
+    SELECT id, tenant_id, branch_id, name
+    INTO v_stage
+    FROM public.stages
+    WHERE id = p_stage_id;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object(
+            'stage_id', p_stage_id,
+            'total_participants_count', 0,
+            'completed_participants_count', 0,
+            'incomplete_participants_count', 0,
+            'missing_maqra_participants_count', 0,
+            'required_judge_count', 0,
+            'total_required_units', 0,
+            'finalized_units_count', 0,
+            'all_complete', false,
+            'blocking_code', 'NO_PARTICIPANTS'
+        );
+    END IF;
+
+    SELECT COUNT(DISTINCT ja.judge_profile_id)
+    INTO v_required_judge_count
+    FROM public.judge_assignments ja
+    WHERE ja.tenant_id = v_stage.tenant_id
+      AND ja.stage_id = v_stage.id
+      AND ja.status = 'Aktif'
+      AND (v_stage.branch_id IS NULL OR ja.branch_id IS NULL OR ja.branch_id = v_stage.branch_id);
+
+    FOR v_sp IN
+        SELECT sp.id, sp.participant_id
+        FROM public.stage_participations sp
+        WHERE sp.tenant_id = v_stage.tenant_id
+          AND sp.stage_id = v_stage.id
+    LOOP
+        v_total_participants := v_total_participants + 1;
+
+        SELECT COUNT(*)
+        INTO v_sp_maqra_count
+        FROM public.assigned_maqras am
+        WHERE am.stage_participation_id = v_sp.id;
+
+        IF v_sp_maqra_count = 0 THEN
+            v_missing_maqra_participants := v_missing_maqra_participants + 1;
+        END IF;
+
+        v_total_required_units := v_total_required_units + (v_sp_maqra_count * v_required_judge_count);
+
+        SELECT COUNT(*)
+        INTO v_sp_finalized_units
+        FROM public.assigned_maqras am
+        JOIN public.judge_assignments ja
+          ON ja.tenant_id = v_stage.tenant_id
+         AND ja.stage_id = v_stage.id
+         AND ja.status = 'Aktif'
+         AND (v_stage.branch_id IS NULL OR ja.branch_id IS NULL OR ja.branch_id = v_stage.branch_id)
+        JOIN public.judge_assessments asm
+          ON asm.stage_participation_id = v_sp.id
+         AND asm.assigned_maqra_id = am.id
+         AND asm.judge_profile_id = ja.judge_profile_id
+         AND asm.status = 'finalized'
+         AND asm.is_locked = true
+        WHERE am.stage_participation_id = v_sp.id;
+
+        v_finalized_units := v_finalized_units + v_sp_finalized_units;
+
+        IF v_sp_maqra_count >= 1
+           AND v_required_judge_count >= 1
+           AND v_sp_finalized_units = (v_sp_maqra_count * v_required_judge_count)
+        THEN
+            v_completed_participants := v_completed_participants + 1;
+        END IF;
+    END LOOP;
+
+    v_all_complete := (
+        v_total_participants > 0
+        AND v_required_judge_count > 0
+        AND v_missing_maqra_participants = 0
+        AND v_completed_participants = v_total_participants
+    );
+
+    IF v_total_participants = 0 THEN
+        v_blocking_code := 'NO_PARTICIPANTS';
+    ELSIF v_required_judge_count = 0 THEN
+        v_blocking_code := 'NO_JUDGES';
+    ELSIF v_missing_maqra_participants > 0 THEN
+        v_blocking_code := 'NO_MAQRA';
+    ELSIF v_completed_participants < v_total_participants THEN
+        v_blocking_code := 'INCOMPLETE_ASSESSMENTS';
+    END IF;
+
+    RETURN jsonb_build_object(
+        'stage_id', v_stage.id,
+        'total_participants_count', v_total_participants,
+        'completed_participants_count', v_completed_participants,
+        'incomplete_participants_count', (v_total_participants - v_completed_participants),
+        'missing_maqra_participants_count', v_missing_maqra_participants,
+        'required_judge_count', v_required_judge_count,
+        'total_required_units', v_total_required_units,
+        'finalized_units_count', v_finalized_units,
+        'all_complete', v_all_complete,
+        'blocking_code', v_blocking_code
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_rubric_field_cascade(
+    p_rubric_version_id UUID,
+    p_field_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_rf RECORD;
+    v_rv RECORD;
+    v_is_used BOOLEAN;
+BEGIN
+    SELECT * INTO v_rf FROM public.rubric_fields WHERE id = p_field_id AND rubric_version_id = p_rubric_version_id;
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Bidang rubrik tidak ditemukan.');
+    END IF;
+
+    SELECT * INTO v_rv FROM public.rubric_versions WHERE id = p_rubric_version_id;
+    SELECT EXISTS (
+        SELECT 1 FROM public.judge_assessments ja
+        WHERE (ja.rubric_version_id = p_rubric_version_id OR ja.rubric_version = v_rv.code)
+          AND ja.status = 'finalized'
+    ) INTO v_is_used;
+
+    IF v_is_used THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'message', 'Bidang tidak dapat dihapus permanen karena versi rubrik ini telah digunakan pada lembar penilaian yang sudah difinalisasi. Nonaktifkan bidang sebagai gantinya.'
+        );
+    END IF;
+
+    UPDATE public.error_categories
+    SET rubric_field_id = NULL
+    WHERE rubric_field_id = p_field_id;
+
+    UPDATE public.judge_assignments
+    SET rubric_field_id = NULL
+    WHERE rubric_field_id = p_field_id;
+
+    DELETE FROM public.deduction_rules
+    WHERE criterion_id IN (SELECT id FROM public.rubric_criteria WHERE rubric_field_id = p_field_id);
+
+    DELETE FROM public.rubric_criteria
+    WHERE rubric_field_id = p_field_id;
+
+    DELETE FROM public.rubric_fields WHERE id = p_field_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'message', format('Bidang "%s" berhasil dihapus permanen dari versi rubrik.', v_rf.name)
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.delete_rubric_field_cascade(UUID, UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_rubric_field_cascade(UUID, UUID) TO authenticated;
+
+-- 18. T2.1: ISOLASI PROFIL LINTAS-TENANT PADA upsert_tenant_member_profile
+CREATE OR REPLACE FUNCTION public.upsert_tenant_member_profile(
+    p_tenant_id UUID,
+    p_profile_id UUID,
+    p_username TEXT,
+    p_name TEXT,
+    p_email TEXT,
+    p_role TEXT,
+    p_judge_category TEXT DEFAULT NULL,
+    p_judge_field TEXT DEFAULT NULL,
+    p_status TEXT DEFAULT 'Aktif'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, pg_temp
+AS $$
+DECLARE
+    v_actor_id UUID;
+    v_actor RECORD;
+    v_target_id UUID;
+    v_auth_email TEXT;
+    v_existing_profile RECORD;
+    v_has_other_tenant_membership BOOLEAN := false;
+    v_preserve_global_profile BOOLEAN := false;
+    v_clean_role TEXT;
+    v_clean_status TEXT;
+    v_clean_username TEXT;
+    v_audit_summary TEXT;
+BEGIN
+    v_actor_id := auth.uid();
+    IF v_actor_id IS NULL THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Sesi tidak terautentikasi.';
+    END IF;
+
+    IF p_tenant_id IS NULL OR NOT EXISTS (SELECT 1 FROM public.tenants WHERE id = p_tenant_id) THEN
+        RAISE EXCEPTION 'Tenant tujuan tidak ditemukan atau tidak valid.';
+    END IF;
+
+    IF NOT public.is_tenant_admin(p_tenant_id) THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Hanya Administrator Tenant atau Superadmin yang dapat mengelola keanggotaan pengguna.';
+    END IF;
+
+    v_clean_role := LOWER(TRIM(COALESCE(p_role, 'judge')));
+    IF v_clean_role NOT IN ('judge', 'admin', 'superadmin') THEN
+        RAISE EXCEPTION 'Peran pengguna tidak valid: %', v_clean_role;
+    END IF;
+
+    IF v_clean_role = 'superadmin' AND NOT public.is_superadmin() THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Hanya Superadmin yang dapat menetapkan peran superadmin.';
+    END IF;
+
+    v_clean_status := CASE WHEN p_status = 'Nonaktif' THEN 'Nonaktif' ELSE 'Aktif' END;
+
+    IF p_profile_id IS NOT NULL THEN
+        SELECT u.id, u.email INTO v_target_id, v_auth_email
+        FROM auth.users u
+        WHERE u.id = p_profile_id
+        LIMIT 1;
+    END IF;
+
+    IF v_target_id IS NULL AND NULLIF(TRIM(p_email), '') IS NOT NULL THEN
+        SELECT u.id, u.email INTO v_target_id, v_auth_email
+        FROM auth.users u
+        WHERE LOWER(u.email) = LOWER(TRIM(p_email))
+        LIMIT 1;
+    END IF;
+
+    IF v_target_id IS NULL THEN
+        SELECT p.id, p.email INTO v_target_id, v_auth_email
+        FROM public.profiles p
+        WHERE (p_profile_id IS NOT NULL AND p.id = p_profile_id)
+           OR (NULLIF(TRIM(p_email), '') IS NOT NULL AND LOWER(p.email) = LOWER(TRIM(p_email)))
+           OR (NULLIF(TRIM(p_username), '') IS NOT NULL AND LOWER(p.username) = LOWER(TRIM(p_username)))
+        LIMIT 1;
+    END IF;
+
+    IF v_target_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_USER_NOT_FOUND: Pengguna (%) belum terdaftar di Supabase Auth (auth.users). Gunakan layanan undangan akun (Edge Function admin-provision-user) atau daftarkan email di Supabase Authentication terlebih dahulu.', COALESCE(NULLIF(TRIM(p_email), ''), NULLIF(TRIM(p_username), ''), 'tanpa-identitas');
+    END IF;
+
+    SELECT * INTO v_existing_profile FROM public.profiles WHERE id = v_target_id;
+    IF FOUND AND v_existing_profile.role = 'superadmin' AND NOT public.is_superadmin() THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Administrator Tenant tidak memiliki wewenang untuk mengubah profil atau keanggotaan Superadmin.';
+    END IF;
+
+    SELECT EXISTS (
+        SELECT 1 FROM public.tenant_memberships tm
+        WHERE tm.profile_id = v_target_id
+          AND tm.tenant_id <> p_tenant_id
+    ) INTO v_has_other_tenant_membership;
+
+    IF v_existing_profile.id IS NOT NULL
+       AND NOT public.is_superadmin()
+       AND v_has_other_tenant_membership
+    THEN
+        v_preserve_global_profile := true;
+    END IF;
+
+    PERFORM set_config('mtq.rpc_role_admin_active', 'true', true);
+    PERFORM set_config('mtq.rpc_audit_active', 'true', true);
+
+    IF NOT v_preserve_global_profile THEN
+        v_clean_username := COALESCE(
+            NULLIF(TRIM(p_username), ''),
+            v_existing_profile.username,
+            'user_' || SUBSTRING(v_target_id::text FROM 1 FOR 8)
+        );
+
+        IF EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE LOWER(p.username) = LOWER(v_clean_username)
+              AND p.id <> v_target_id
+        ) THEN
+            v_clean_username := v_clean_username || '_' || SUBSTRING(v_target_id::text FROM 1 FOR 4);
+        END IF;
+
+        INSERT INTO public.profiles (id, username, name, email, role, updated_at)
+        VALUES (
+            v_target_id,
+            v_clean_username,
+            COALESCE(NULLIF(TRIM(p_name), ''), 'Pengguna MTQ'),
+            COALESCE(NULLIF(TRIM(p_email), ''), v_auth_email),
+            CASE
+                WHEN public.is_superadmin() AND v_clean_role = 'superadmin' THEN 'superadmin'
+                WHEN v_clean_role = 'admin' THEN 'admin'
+                ELSE 'judge'
+            END,
+            now()
+        )
+        ON CONFLICT (id) DO UPDATE
+        SET username = COALESCE(NULLIF(TRIM(EXCLUDED.username), ''), public.profiles.username),
+            name = COALESCE(NULLIF(TRIM(EXCLUDED.name), ''), public.profiles.name),
+            email = COALESCE(NULLIF(TRIM(EXCLUDED.email), ''), public.profiles.email),
+            role = CASE
+                WHEN public.profiles.role = 'superadmin' AND NOT public.is_superadmin() THEN 'superadmin'
+                WHEN public.is_superadmin() AND v_clean_role = 'superadmin' THEN 'superadmin'
+                ELSE EXCLUDED.role
+            END,
+            updated_at = now();
+    END IF;
+
+    INSERT INTO public.tenant_memberships (
+        tenant_id,
+        profile_id,
+        role,
+        judge_category,
+        judge_field,
+        status
+    )
+    VALUES (
+        p_tenant_id,
+        v_target_id,
+        v_clean_role,
+        NULLIF(TRIM(p_judge_category), ''),
+        NULLIF(TRIM(p_judge_field), ''),
+        v_clean_status
+    )
+    ON CONFLICT (tenant_id, profile_id) DO UPDATE
+    SET role = EXCLUDED.role,
+        judge_category = EXCLUDED.judge_category,
+        judge_field = EXCLUDED.judge_field,
+        status = EXCLUDED.status;
+
+    SELECT * INTO v_actor FROM public.profiles WHERE id = v_actor_id;
+
+    IF v_preserve_global_profile THEN
+        v_audit_summary := 'Penautan keanggotaan lintas-tenant untuk ' || COALESCE(v_existing_profile.email, '') ||
+                           ' sebagai ' || v_clean_role || ' (' || v_clean_status ||
+                           '); profil global (nama/username/role) dipertahankan demi isolasi lintas-tenant.';
+    ELSE
+        v_audit_summary := 'Pemetaan profil & keanggotaan ' || COALESCE(p_name, '') ||
+                           ' dengan peran ' || v_clean_role || ' (' || v_clean_status || ')';
+    END IF;
+
+    INSERT INTO public.audit_logs (tenant_id, actor_id, actor_name, action, target, summary, outcome)
+    VALUES (
+        p_tenant_id,
+        v_actor_id,
+        COALESCE(v_actor.name, 'Admin') || ' (' || COALESCE(v_actor.role, 'admin') || ')',
+        'USER_MEMBERSHIP_UPSERTED',
+        'Profile ID: ' || v_target_id::text,
+        v_audit_summary,
+        'Success'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'profile_id', v_target_id,
+        'email', COALESCE(v_existing_profile.email, NULLIF(TRIM(p_email), ''), v_auth_email),
+        'role', v_clean_role,
+        'status', v_clean_status,
+        'global_profile_preserved', v_preserve_global_profile
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.upsert_tenant_member_profile(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.upsert_tenant_member_profile(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+
+
+
 
 
 

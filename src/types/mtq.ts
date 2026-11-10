@@ -154,7 +154,7 @@ export interface Question {
   branchAndLevel: string; // "Tilawah Dewasa Putra Ulya"
   stage?: string;         // Alias for stageName
   stageName: string;      // "Penyisihan"
-  status: 'Aktif' | 'Nonaktif';
+  status: 'Aktif' | 'Nonaktif' | 'Perlu Verifikasi';
   description?: string;
   assignedToParticipantId?: string;
   assignedToParticipantIds?: string[];

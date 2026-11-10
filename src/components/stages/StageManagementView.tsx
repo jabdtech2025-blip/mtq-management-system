@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { CompetitionStage } from '../../types/mtq';
+import { getStageCompletion } from '../../services/completion';
 
 export const StageManagementView: React.FC = () => {
   const {
@@ -21,7 +22,10 @@ export const StageManagementView: React.FC = () => {
     deleteStage,
     cabangList,
     participants,
+    stageParticipations,
+    judgeAssignments,
     assessments,
+    getParticipantStageQuestions,
     setCurrentView,
     currentTenant
   } = useMtq();
@@ -147,12 +151,24 @@ export const StageManagementView: React.FC = () => {
       {/* Stage Progression Flow Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {stages
+          .filter((stg) => !currentTenant.id || stg.tenantId === currentTenant.id)
           .slice()
           .sort((a, b) => a.order - b.order)
           .map((stg, idx) => {
-            const stageParticipants = participants.filter((p) => p.stageName === stg.name);
-            const totalStage = stageParticipants.length;
-            const finalizedStage = stageParticipants.filter((p) => p.status === 'Final').length;
+            const stageCompletion = getStageCompletion({
+              tenantId: currentTenant.id,
+              stageId: stg.id,
+              stageName: stg.name,
+              branchId: stg.branchId,
+              branchName: stg.branchName && stg.branchName !== 'Semua Cabang' ? stg.branchName : undefined,
+              participations: stageParticipations,
+              participants,
+              assessments,
+              judgeAssignments,
+              stageQuestionsGetter: getParticipantStageQuestions
+            });
+            const totalStage = stageCompletion.totalParticipantsCount;
+            const finalizedStage = stageCompletion.completedParticipantsCount;
 
             return (
               <div

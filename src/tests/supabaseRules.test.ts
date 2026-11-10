@@ -369,6 +369,10 @@ function createPgliteSupabaseAdapter(
               ? `${formatSqlVal(args.p_initial_tenant_id)}::uuid`
               : 'NULL::uuid';
             sql = `SELECT bootstrap_first_superadmin(${targetEmailSql}, ${initTenantSql}) AS res;`;
+          } else if (fnName === 'delete_rubric_field_cascade') {
+            sql = `SELECT delete_rubric_field_cascade(${formatSqlVal(args.p_rubric_version_id)}::uuid, ${formatSqlVal(
+              args.p_field_id
+            )}::uuid) AS res;`;
           } else {
             throw new Error(`Unsupported RPC: ${fnName}`);
           }
@@ -430,6 +434,14 @@ export async function runSupabaseTests(): Promise<{
   );
   const fix20261111Sql = fs.readFileSync(
     path.resolve(process.cwd(), 'supabase/migrations/20261111_fix_v_rule_unassigned.sql'),
+    'utf-8'
+  );
+  const maqra20261112Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261112_maqra_integrity_and_completion.sql'),
+    'utf-8'
+  );
+  const isolation20261113Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261113_security_tenant_profile_isolation.sql'),
     'utf-8'
   );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
@@ -543,6 +555,8 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(hardening20261029Sql);
       await pg.exec(provisioning20261030Sql);
       await pg.exec(complete20261109Sql);
+      await pg.exec(maqra20261112Sql);
+      await pg.exec(isolation20261113Sql);
       await pg.exec(`
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
         GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
@@ -2238,6 +2252,133 @@ export async function runSupabaseTests(): Promise<{
       scoreCalcError ||
         `totalDeductions: ${calcResult?.total_deductions}, finalScore: ${calcResult?.final_score}, tajwidScore: ${calcResult?.field_scores?.Tajwid}`
     );
+
+    // 61. T1.1 Validasi Integritas Maqra di PostgreSQL (surah_number 1..114, batas ayat per surah, page 1..604, & audit_questions_consistency)
+    let surah0Rejected = false;
+    let surah115Rejected = false;
+    let baqarah300Rejected = false;
+    try {
+      await pg.exec(`
+        INSERT INTO questions (id, tenant_id, code, title, surah_name, surah_number, start_ayah, end_ayah, page_number, page_start, page_end, status)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', 'MQ-BAD-0', 'Surah 0', 'Fiktif', 0, 1, 5, 1, 1, 1, 'Aktif');
+      `);
+    } catch {
+      surah0Rejected = true;
+    }
+    try {
+      await pg.exec(`
+        INSERT INTO questions (id, tenant_id, code, title, surah_name, surah_number, start_ayah, end_ayah, page_number, page_start, page_end, status)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', 'MQ-BAD-115', 'Surah 115', 'Fiktif', 115, 1, 5, 1, 1, 1, 'Aktif');
+      `);
+    } catch {
+      surah115Rejected = true;
+    }
+    try {
+      await pg.exec(`
+        INSERT INTO questions (id, tenant_id, code, title, surah_name, surah_number, start_ayah, end_ayah, page_number, page_start, page_end, status)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', 'MQ-BAD-AYAH', 'Al-Baqarah 300', 'Al-Baqarah', 2, 1, 300, 2, 2, 49, 'Aktif');
+      `);
+    } catch {
+      baqarah300Rejected = true;
+    }
+
+    assert(
+      '61. T1.1 Proteksi Integritas Maqra di PostgreSQL: Menolak INSERT questions dengan surah_number 0, 115, atau ayat melebihi jumlah ayat surah (Al-Baqarah > 286)',
+      surah0Rejected && surah115Rejected && baqarah300Rejected,
+      `surah0Rejected: ${surah0Rejected}, surah115Rejected: ${surah115Rejected}, baqarah300Rejected: ${baqarah300Rejected}`
+    );
+
+    // 62. T1.2 Paritas Perhitungan Kelengkapan Babak antara TypeScript (`getStageCompletion`) dan PostgreSQL (`get_stage_completion_sql`)
+    let sqlStageCompletion: any = null;
+    try {
+      const compRes = await pg.query<{ res: any }>(`
+        SELECT get_stage_completion_sql('${tbStageId}'::uuid) AS res;
+      `);
+      sqlStageCompletion =
+        typeof compRes.rows[0]?.res === 'string'
+          ? JSON.parse(compRes.rows[0].res)
+          : compRes.rows[0]?.res;
+    } catch {
+      sqlStageCompletion = null;
+    }
+
+    assert(
+      '62. T1.2 Paritas Kelengkapan Babak (TS vs SQL `get_stage_completion_sql`): Menghasilkan total peserta, peserta lengkap, jumlah hakim wajib, dan status kelengkapan yang identik',
+      Boolean(sqlStageCompletion) &&
+        Number(sqlStageCompletion?.total_participants_count) === 2 &&
+        Number(sqlStageCompletion?.completed_participants_count) === 2 &&
+        Number(sqlStageCompletion?.incomplete_participants_count) === 0 &&
+        Number(sqlStageCompletion?.required_judge_count) === 1 &&
+        sqlStageCompletion?.all_complete === true,
+      `sqlStageCompletion: ${JSON.stringify(sqlStageCompletion)}`
+    );
+
+    // 63. T2.1 Isolasi Profil Lintas-Tenant pada `upsert_tenant_member_profile`
+    // Admin Tenant Jabar menambahkan email milik Hakim Tenant DKI ('hakim@dki.mtq.id') dengan nama & username palsu.
+    // Keanggotaan di Tenant Jabar boleh terbuat, tetapi profiles.name & profiles.username global milik Hakim DKI TIDAK BOLEH tertimpa,
+    // dan peran Hakim DKI di Tenant DKI tetap 'judge' (bukan admin di DKI).
+    let crossTenantUpsertOk = false;
+    let dkiProfileAfter: { name?: string; username?: string; email?: string; role?: string } | null = null;
+    let dkiMembershipRoleAfter = '';
+    let isDkiAdminAfter = true;
+    try {
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${adminUserId}', true);
+        SELECT upsert_tenant_member_profile(
+          '${tenantJabarId}'::uuid,
+          NULL::uuid,
+          'username_bajakan',
+          'Nama Palsu Bajakan',
+          'hakim@dki.mtq.id',
+          'admin',
+          NULL,
+          NULL,
+          'Aktif'
+        );
+        COMMIT;
+      `);
+      crossTenantUpsertOk = true;
+
+      const profQ = await pg.query<{ name: string; username: string; email: string; role: string }>(`
+        SELECT name, username, email, role FROM public.profiles WHERE id = '${otherTenantJudgeId}'::uuid;
+      `);
+      dkiProfileAfter = profQ.rows[0] || null;
+
+      const memQ = await pg.query<{ role: string }>(`
+        SELECT role FROM public.tenant_memberships
+        WHERE tenant_id = '${tenantDkiId}'::uuid AND profile_id = '${otherTenantJudgeId}'::uuid;
+      `);
+      dkiMembershipRoleAfter = memQ.rows[0]?.role || '';
+
+      await pg.exec(`
+        BEGIN;
+        SET LOCAL ROLE authenticated;
+        SELECT set_config('request.jwt.claim.sub', '${otherTenantJudgeId}', true);
+      `);
+      const admCheck = await pg.query<{ is_adm: boolean }>(`
+        SELECT is_tenant_admin('${tenantDkiId}'::uuid) AS is_adm;
+      `);
+      isDkiAdminAfter = Boolean(admCheck.rows[0]?.is_adm);
+      await pg.exec(`COMMIT;`);
+    } catch (err: any) {
+      try {
+        await pg.exec(`ROLLBACK;`);
+      } catch {
+        // ignore
+      }
+    }
+
+    assert(
+      '63. T2.1 Isolasi Profil Lintas-Tenant: Admin Tenant A tidak dapat menimpa nama, username, atau peran global pengguna yang sudah terdaftar di Tenant B',
+      crossTenantUpsertOk &&
+        dkiProfileAfter?.name === 'KH. Hakim DKI' &&
+        dkiProfileAfter?.username === 'hakim_dki' &&
+        dkiMembershipRoleAfter === 'judge' &&
+        isDkiAdminAfter === false,
+      `crossTenantUpsertOk: ${crossTenantUpsertOk}, name: ${dkiProfileAfter?.name}, username: ${dkiProfileAfter?.username}, dkiRole: ${dkiMembershipRoleAfter}, isDkiAdmin: ${isDkiAdminAfter}`
+    );
   } finally {
     supabaseDataService.setTestDatabaseClient(null);
     await pg.close();
@@ -2245,3 +2386,5 @@ export async function runSupabaseTests(): Promise<{
 
   return { passed, failed, results };
 }
+
+

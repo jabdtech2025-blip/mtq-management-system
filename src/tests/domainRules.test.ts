@@ -15,11 +15,24 @@ import {
   RubricVersion,
   CompetitionRuleConfig
 } from '../types/mtq';
+import * as excelHelperModule from '../utils/excelHelper';
 import {
   fisherYatesShuffle,
   validateParticipantImportRows,
   validateQuestionImportRows
 } from '../utils/excelHelper';
+import { pageOfAyah, validateMaqraRange } from '../services/quranIndex';
+import { getStageCompletion } from '../services/completion';
+import {
+  validateProvisionUserPayload,
+  evaluateProvisionRateLimit,
+  resolveCorsHeaders,
+  buildPublicProvisionSuccessResponse
+} from '../utils/provisionSecurity';
+import fs from 'fs';
+import path from 'path';
+
+
 
 /**
  * SUITE PENGUJIAN OTOMATIS DOMAIN BISNIS DAN ATURAN MTQ
@@ -1473,7 +1486,228 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     `canFinalize: ${quotaOverflowEval.canFinalize}, reason: ${quotaOverflowEval.blockingReason}`
   );
 
+  // 35i. T1.1 Validasi Indeks 114 Surah & 604 Halaman Mushaf Madinah + Penolakan Import Excel Surah/Halaman Tidak Cocok
+  const pageCheckFatihah = pageOfAyah(1, 1);
+  const pageCheckBaqarah = pageOfAyah(2, 1);
+  const pageCheckMaryam = pageOfAyah(19, 1);
+  const pageCheckNas = pageOfAyah(114, 6);
+  const invalidAyahBaqarah = validateMaqraRange({ surahNumber: 2, startAyah: 1, endAyah: 300 });
+  const invalidSurah115 = validateMaqraRange({ surahNumber: 115, startAyah: 1, endAyah: 5 });
+
+  const mismatchedSurahPageImport = validateQuestionImportRows(
+    [
+      {
+        'Kode Soal': 'MQ-MISMATCH-01',
+        'Judul Maqra': 'Maqra Maryam Salah Halaman',
+        'Nama Surah': 'Maryam',
+        'Nomor Surah': 19,
+        'Ayat Awal': 1,
+        'Ayat Akhir': 15,
+        'Halaman Awal': 2, // Salah! Maryam 1-15 ada di halaman 305-306, bukan halaman 2-3
+        'Halaman Akhir': 3,
+        'Cabang Lomba': 'Tilawah Dewasa Putra',
+        'Jenjang Lomba': 'Dewasa',
+        Babak: 'Penyisihan'
+      }
+    ],
+    {
+      cabangList: masterCabang,
+      jenjangList: masterJenjang,
+      stages: masterStages,
+      existingQuestions: []
+    }
+  );
+
+  assert(
+    '35i. T1.1 Indeks 114 Surah & 604 Halaman Mushaf Madinah: Pemetaan akurat (1:1->1, 2:1->2, 19:1->305, 114:6->604), penolakan ayat 300 Al-Baqarah & surah 115, serta penolakan import Excel saat halaman tidak cocok dengan surah/ayat beserta nomor baris',
+    pageCheckFatihah === 1 &&
+      pageCheckBaqarah === 2 &&
+      pageCheckMaryam === 305 &&
+      pageCheckNas === 604 &&
+      invalidAyahBaqarah.valid === false &&
+      invalidSurah115.valid === false &&
+      mismatchedSurahPageImport.validRows.length === 0 &&
+      mismatchedSurahPageImport.errors.length === 1 &&
+      mismatchedSurahPageImport.errors[0].rowNumber === 2,
+    `pages: ${pageCheckFatihah},${pageCheckBaqarah},${pageCheckMaryam},${pageCheckNas}; baqarah300Valid: ${invalidAyahBaqarah.valid}; surah115Valid: ${invalidSurah115.valid}; mismatchValidCount: ${mismatchedSurahPageImport.validRows.length}`
+  );
+
+  // 35j. T1.2 Satu Definisi "Lengkap" (getStageCompletion) & Structured blockingReasonDetail Tanpa Pernah Menampilkan "0 peserta belum lengkap" Saat Terkunci
+  const noJudgeCompletion = getStageCompletion({
+    tenantId: 't-tb',
+    stageId: 'stg-1',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    participations: tieBreakParts,
+    participants: [tieBreakPartA, tieBreakPartB],
+    assessments: tieBreakAssessments,
+    judgeAssignments: [],
+    stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }]
+  });
+  assert(
+    '35j. T1.2 Konsistensi getStageCompletion & Structured blockingReason: Saat belum ada penugasan hakim (judgeAssignments kosong), completedParticipantsCount wajib 0 (bukan dianggap lengkap) dan kode blokir terstruktur NO_JUDGES dikembalikan',
+    noJudgeCompletion.allComplete === false &&
+      noJudgeCompletion.completedParticipantsCount === 0 &&
+      noJudgeCompletion.incompleteParticipantsCount === 2 &&
+      noJudgeCompletion.blockingReason?.code === 'NO_JUDGES' &&
+      noAssignmentEval.incompleteCount === 2 &&
+      (noAssignmentEval as unknown as { blockingReasonDetail?: { code: string } }).blockingReasonDetail?.code === 'NO_JUDGES',
+    `completedCount: ${noJudgeCompletion.completedParticipantsCount}, incompleteEval: ${noAssignmentEval.incompleteCount}, code: ${(noAssignmentEval as unknown as { blockingReasonDetail?: { code: string } }).blockingReasonDetail?.code}`
+  );
+
+  // 35k. T2.2 Pengerasan Edge Function `admin-provision-user` (Rate-limit 20/jam -> 429, Anti-enumerasi, CORS allowlist, Validasi Input, Pinned SDK)
+  const overLenNameCheck = validateProvisionUserPayload({
+    tenantId: '11111111-1111-4111-8111-111111111101',
+    name: 'A'.repeat(125),
+    username: 'hakim_valid',
+    email: 'hakim@lptq.id',
+    role: 'judge'
+  });
+  const badUsernameCheck = validateProvisionUserPayload({
+    tenantId: '11111111-1111-4111-8111-111111111101',
+    name: 'KH. Hakim Valid',
+    username: 'invalid user!@#',
+    email: 'hakim@lptq.id',
+    role: 'judge'
+  });
+  const overLenJudgeFieldCheck = validateProvisionUserPayload({
+    tenantId: '11111111-1111-4111-8111-111111111101',
+    name: 'KH. Hakim Valid',
+    username: 'hakim_valid',
+    email: 'hakim@lptq.id',
+    role: 'judge',
+    judgeField: 'F'.repeat(121)
+  });
+  const validPayloadCheck = validateProvisionUserPayload({
+    tenantId: '11111111-1111-4111-8111-111111111101',
+    name: 'KH. Hakim Valid',
+    username: 'hakim.valid_01-jbr',
+    email: 'hakim@lptq.id',
+    role: 'judge',
+    judgeCategory: 'Dewan Hakim',
+    judgeField: 'Bidang Tajwid'
+  });
+
+  const rateLimitOk = evaluateProvisionRateLimit(19, 15, 20);
+  const rateLimitCallerExceeded = evaluateProvisionRateLimit(20, 5, 20);
+  const rateLimitTenantExceeded = evaluateProvisionRateLimit(3, 20, 20);
+
+  const corsAllowedCheck = resolveCorsHeaders('https://mtq.lptq.id', 'https://mtq.lptq.id,https://admin.lptq.id');
+  const corsBlockedCheck = resolveCorsHeaders('https://evil.example.com', 'https://mtq.lptq.id');
+
+  const pubResp = buildPublicProvisionSuccessResponse({
+    profileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',
+    email: 'hakim@lptq.id',
+    role: 'judge',
+    status: 'Aktif'
+  });
+
+  const edgeFnSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/functions/admin-provision-user/index.ts'),
+    'utf-8'
+  );
+  const hasPinnedSupabaseJs =
+    /from\s+['"]https:\/\/esm\.sh\/@supabase\/supabase-js@\d+\.\d+\.\d+['"]/.test(edgeFnSource) &&
+    !edgeFnSource.includes('@supabase/supabase-js@^') &&
+    !edgeFnSource.includes('@2.45.0');
+  const hasUnifiedMessageInEdge = edgeFnSource.includes('Undangan atau penautan akun telah diproses.');
+  const hasRateLimit429InEdge = edgeFnSource.includes('429') && edgeFnSource.includes('USER_MEMBERSHIP_UPSERTED');
+  const hasAllowedOriginsInEdge = edgeFnSource.includes('ALLOWED_ORIGINS');
+
+  assert(
+    '35k. T2.2 Keamanan Edge Function `admin-provision-user`: Rate-limit 20/jam (HTTP 429), anti-enumerasi tanpa bocor provisioningState, CORS allowlist ALLOWED_ORIGINS, batas input ketat, dan pin SDK',
+    overLenNameCheck.valid === false &&
+      badUsernameCheck.valid === false &&
+      overLenJudgeFieldCheck.valid === false &&
+      validPayloadCheck.valid === true &&
+      rateLimitOk.allowed === true &&
+      rateLimitCallerExceeded.allowed === false &&
+      rateLimitCallerExceeded.status === 429 &&
+      rateLimitTenantExceeded.allowed === false &&
+      rateLimitTenantExceeded.status === 429 &&
+      corsAllowedCheck.allowed === true &&
+      corsAllowedCheck.headers['Access-Control-Allow-Origin'] === 'https://mtq.lptq.id' &&
+      corsBlockedCheck.allowed === false &&
+      pubResp.message === 'Undangan atau penautan akun telah diproses.' &&
+      !('provisioningState' in pubResp) &&
+      hasPinnedSupabaseJs &&
+      hasUnifiedMessageInEdge &&
+      hasRateLimit429InEdge &&
+      hasAllowedOriginsInEdge,
+    `overLenName: ${overLenNameCheck.valid}, badUser: ${badUsernameCheck.valid}, rl429: ${rateLimitCallerExceeded.status}, pubMsg: ${pubResp.message}, hasPinned: ${hasPinnedSupabaseJs}`
+  );
+
+  // 35l. T2.3 Pengamanan Parser Excel (Bebas `xlsx` rentan, batas 5 MB, batas 5.000 baris, blokir sel formula, & sanitasi `__proto__`)
+  const pkgJsonRaw = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf-8'));
+  const hasVulnerableXlsx = Boolean(pkgJsonRaw.dependencies?.xlsx || pkgJsonRaw.devDependencies?.xlsx);
+  const hasSafeExcelJs = Boolean(pkgJsonRaw.dependencies?.exceljs);
+
+  let over5MbRejected = false;
+  let over5000RowsRejected = false;
+  let formulaCellRejected = false;
+  let protoHeaderSanitized = false;
+
+  const excelGuards = excelHelperModule as unknown as {
+    assertWorkbookBufferSize?: (buffer: ArrayBuffer | Uint8Array) => void;
+    validateAndSanitizeRawSheetMatrix?: (matrix: unknown[][]) => Record<string, unknown>[];
+  };
+
+  if (typeof excelGuards.assertWorkbookBufferSize === 'function') {
+    try {
+      const bigBuffer = new Uint8Array(5 * 1024 * 1024 + 16);
+      excelGuards.assertWorkbookBufferSize(bigBuffer);
+    } catch {
+      over5MbRejected = true;
+    }
+  }
+
+  if (typeof excelGuards.validateAndSanitizeRawSheetMatrix === 'function') {
+    try {
+      const hugeMatrix: unknown[][] = [['ID_Peserta', 'Nama_Lengkap']];
+      for (let i = 0; i < 5005; i++) {
+        hugeMatrix.push([`TLW-${i}`, `Peserta ${i}`]);
+      }
+      excelGuards.validateAndSanitizeRawSheetMatrix(hugeMatrix);
+    } catch {
+      over5000RowsRejected = true;
+    }
+
+    try {
+      excelGuards.validateAndSanitizeRawSheetMatrix([
+        ['ID_Peserta', 'Nama_Lengkap'],
+        ['TLW-01', { formula: 'SUM(1,2)', result: 3 }]
+      ]);
+    } catch {
+      formulaCellRejected = true;
+    }
+
+    const sanitizedRows = excelGuards.validateAndSanitizeRawSheetMatrix([
+      ['__proto__', 'constructor', 'prototype', 'ID_Peserta', 'Nama_Lengkap'],
+      ['evil_proto', 'evil_ctor', 'evil_prototype', 'TLW-99', 'Peserta Aman']
+    ]);
+    protoHeaderSanitized =
+      sanitizedRows.length === 1 &&
+      !Object.prototype.hasOwnProperty.call(sanitizedRows[0], '__proto__') &&
+      !Object.prototype.hasOwnProperty.call(sanitizedRows[0], 'constructor') &&
+      !Object.prototype.hasOwnProperty.call(sanitizedRows[0], 'prototype') &&
+      sanitizedRows[0]['ID_Peserta'] === 'TLW-99' &&
+      (Object.prototype as Record<string, unknown>)['evil_proto'] === undefined;
+  }
+
+  assert(
+    '35l. T2.3 Keamanan Excel (`exceljs`): Bebas paket `xlsx`, menolak file > 5 MB, menolak > 5.000 baris, menolak sel formula, dan membuang header `__proto__`/`constructor`/`prototype`',
+    !hasVulnerableXlsx &&
+      hasSafeExcelJs &&
+      over5MbRejected &&
+      over5000RowsRejected &&
+      formulaCellRejected &&
+      protoHeaderSanitized,
+    `hasXlsx: ${hasVulnerableXlsx}, hasExcelJs: ${hasSafeExcelJs}, over5Mb: ${over5MbRejected}, over5000: ${over5000RowsRejected}, formula: ${formulaCellRejected}, proto: ${protoHeaderSanitized}`
+  );
+
   return { passed, failed, results };
 }
+
+
 
 

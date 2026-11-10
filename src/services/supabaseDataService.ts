@@ -1316,27 +1316,14 @@ export const supabaseDataService = {
       fieldsByRubricVersionId.set(rvId, list);
     });
 
-    // Auto-resolve errorCategories.fieldId against hydrated rubric fields when null or pointing to a stale field ID
+    // Clear errorCategories.fieldId only if it points to a non-existent/deleted field ID; never re-attach NULL field_id by guessing scope
     const allHydratedFields: RubricField[] = Array.from(fieldsByRubricVersionId.values()).flat();
-    if (allHydratedFields.length > 0) {
-      const validFieldIds = new Set(allHydratedFields.map((f) => f.id));
-      errorCategories.forEach((cat) => {
-        if (!cat.fieldId || !validFieldIds.has(cat.fieldId)) {
-          const catScopeCleaned = (cat.scope || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
-          const catNameCleaned = (cat.name || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
-          const matchedField = allHydratedFields.find((f) => {
-            const fNameCleaned = (f.name || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
-            return (
-              (catScopeCleaned && (catScopeCleaned.includes(fNameCleaned) || fNameCleaned.includes(catScopeCleaned))) ||
-              (catNameCleaned && (catNameCleaned.includes(fNameCleaned) || fNameCleaned.includes(catNameCleaned)))
-            );
-          });
-          if (matchedField) {
-            cat.fieldId = matchedField.id;
-          }
-        }
-      });
-    }
+    const validFieldIds = new Set(allHydratedFields.map((f) => f.id));
+    errorCategories.forEach((cat) => {
+      if (cat.fieldId && !validFieldIds.has(cat.fieldId)) {
+        cat.fieldId = undefined;
+      }
+    });
 
     const rubricVersions: RubricVersion[] = (rubricVersionsRes.data || []).map((rv: Record<string, unknown>) => {
       const rvId = String(rv.id);

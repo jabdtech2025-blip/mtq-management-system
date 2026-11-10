@@ -397,7 +397,7 @@ export const KafilahPesertaView: React.FC = () => {
     setImportFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
-      const rows = parseWorkbookToRows(buffer);
+      const rows = await parseWorkbookToRows(buffer);
       const validation = validateParticipantImportRows(rows, {
         kafilahs,
         cabangList,
