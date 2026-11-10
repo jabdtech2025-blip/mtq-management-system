@@ -816,19 +816,6 @@ export const BankSoalView: React.FC = () => {
         </select>
 
         <select
-          value={selectedLevel}
-          onChange={(e) => setSelectedLevel(e.target.value)}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
-        >
-          <option value="Semua Jenjang">Semua Jenjang</option>
-          {jenjangList.map((j) => (
-            <option key={j.id} value={j.name}>
-              {j.name}
-            </option>
-          ))}
-        </select>
-
-        <select
           value={selectedStage}
           onChange={(e) => setSelectedStage(e.target.value)}
           className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
@@ -842,66 +829,38 @@ export const BankSoalView: React.FC = () => {
         </select>
       </div>
 
-      {/* Tabs Navigation (below filter bar) */}
+      {/* Tabs Navigation (below filter bar, text only without icons or count badges) */}
       <div className="flex border-b border-slate-200 gap-6">
         <button
           onClick={() => setActiveTab('daftar_soal')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
             activeTab === 'daftar_soal'
               ? 'border-emerald-800 text-emerald-800'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <span>Daftar Soal</span>
-          <span
-            className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
-              activeTab === 'daftar_soal'
-                ? 'bg-emerald-100 text-emerald-800'
-                : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            {filteredQuestions.length}
-          </span>
         </button>
         <button
           onClick={() => setActiveTab('penetapan_soal')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
             activeTab === 'penetapan_soal'
               ? 'border-emerald-800 text-emerald-800'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <span>Penetapan Soal</span>
-          <span
-            className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
-              activeTab === 'penetapan_soal'
-                ? 'bg-emerald-100 text-emerald-800'
-                : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            {assignedMaqraRows.length}
-          </span>
         </button>
         <button
           onClick={() => setActiveTab('riwayat_undian')}
           data-testid="tab-riwayat-undian"
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
             activeTab === 'riwayat_undian'
               ? 'border-emerald-800 text-emerald-800'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <History className="w-4 h-4" />
           <span>Riwayat & Audit Undian</span>
-          <span
-            className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
-              activeTab === 'riwayat_undian'
-                ? 'bg-emerald-100 text-emerald-800'
-                : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            {lotteryDrawLogs.length}
-          </span>
         </button>
       </div>
 
@@ -915,7 +874,7 @@ export const BankSoalView: React.FC = () => {
                   <th className="px-5 py-3 w-28">Kode Maqra</th>
                   <th className="px-5 py-3">Surah & Ayat</th>
                   <th className="px-4 py-3">Hal. Mushaf</th>
-                  <th className="px-4 py-3">Cabang · Jenjang · Babak</th>
+                  <th className="px-4 py-3">Cabang · Babak</th>
                   <th className="px-4 py-3">Status Penetapan</th>
                   <th className="px-5 py-3 text-right">Aksi</th>
                 </tr>
@@ -966,11 +925,6 @@ export const BankSoalView: React.FC = () => {
                             {q.branchName || q.branchAndLevel}
                           </p>
                           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                            {q.levelName && (
-                              <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded font-semibold">
-                                {q.levelName}
-                              </span>
-                            )}
                             <span className="text-[10px] text-emerald-800 font-mono font-semibold">
                               {q.stageName}
                             </span>
@@ -1474,7 +1428,7 @@ export const BankSoalView: React.FC = () => {
         >
           <div className="space-y-5">
             {/* Scope Filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
               <div>
                 <label className="font-bold text-slate-700 block mb-1">Babak Perlombaan:</label>
                 <select
@@ -1513,28 +1467,6 @@ export const BankSoalView: React.FC = () => {
                   {cabangList.map((c) => (
                     <option key={c.id} value={c.name}>
                       {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">Jenjang Lomba:</label>
-                <select
-                  value={lotteryLevel}
-                  onChange={(e) => {
-                    const newLv = e.target.value;
-                    setLotteryLevel(newLv);
-                    setLotteryDrawResults(null);
-                    setLotteryFeedback('');
-                    syncLotteryPoolsOnFilterChange(lotteryStage, lotteryBranch, newLv);
-                  }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
-                >
-                  <option value="Semua Jenjang">Semua Jenjang</option>
-                  {jenjangList.map((j) => (
-                    <option key={j.id} value={j.name}>
-                      {j.name}
                     </option>
                   ))}
                 </select>
@@ -1885,7 +1817,7 @@ export const BankSoalView: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] font-bold text-slate-600 block mb-1">
                   Cabang Lomba (Master Data) *
@@ -1905,28 +1837,6 @@ export const BankSoalView: React.FC = () => {
                     formBranchName &&
                     !activeCabangList.some((c) => c.name === formBranchName) && (
                       <option value={formBranchName}>{formBranchName} (Historis)</option>
-                    )}
-                </select>
-              </div>
-              <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Jenjang Lomba (Master Data) *
-                </label>
-                <select
-                  value={formLevelName}
-                  onChange={(e) => setFormLevelName(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
-                >
-                  {activeJenjangList.map((j) => (
-                    <option key={j.id} value={j.name}>
-                      {j.name}
-                    </option>
-                  ))}
-                  {editingQuestion &&
-                    formLevelName &&
-                    !activeJenjangList.some((j) => j.name === formLevelName) && (
-                      <option value={formLevelName}>{formLevelName} (Historis)</option>
                     )}
                 </select>
               </div>

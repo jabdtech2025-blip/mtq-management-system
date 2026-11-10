@@ -232,16 +232,24 @@ export function validateParticipantImportRows(
       errors.push(`Cabang lomba "${branchRef || '-'}" tidak ditemukan pada Master Data Cabang Aktif.`);
     }
 
-    const matchedLevel = context.jenjangList.find(
-      (j) =>
-        j.status === 'Aktif' &&
-        (j.name.toLowerCase() === levelRef.toLowerCase() ||
-          (j.code || '').toLowerCase() === levelRef.toLowerCase() ||
-          j.id === levelRef)
-    );
-    if (!matchedLevel) {
-      errors.push(`Jenjang/Golongan "${levelRef || '-'}" tidak ditemukan pada Master Data Jenjang Aktif.`);
-    }
+    const fallbackLevel: JenjangItem =
+      context.jenjangList.find((j) => j.status === 'Aktif') ||
+      context.jenjangList[0] || {
+        id: 'jnj-default',
+        code: 'UMUM',
+        name: 'Umum',
+        status: 'Aktif',
+      };
+
+    const matchedLevel = levelRef
+      ? context.jenjangList.find(
+          (j) =>
+            j.status === 'Aktif' &&
+            (j.name.toLowerCase() === levelRef.toLowerCase() ||
+              (j.code || '').toLowerCase() === levelRef.toLowerCase() ||
+              j.id === levelRef)
+        ) || fallbackLevel
+      : fallbackLevel;
 
     const matchedStage = context.stages.find(
       (s) =>
@@ -401,16 +409,24 @@ export function validateQuestionImportRows(
       errors.push(`Cabang lomba "${branchRef || '-'}" tidak ditemukan pada Master Data Cabang Aktif.`);
     }
 
-    const matchedLevel = context.jenjangList.find(
-      (j) =>
-        j.status === 'Aktif' &&
-        (j.name.toLowerCase() === levelRef.toLowerCase() ||
-          (j.code || '').toLowerCase() === levelRef.toLowerCase() ||
-          j.id === levelRef)
-    );
-    if (!matchedLevel) {
-      errors.push(`Jenjang/Golongan "${levelRef || '-'}" tidak ditemukan pada Master Data Jenjang Aktif.`);
-    }
+    const fallbackLevel: JenjangItem =
+      context.jenjangList.find((j) => j.status === 'Aktif') ||
+      context.jenjangList[0] || {
+        id: 'jnj-default',
+        code: 'UMUM',
+        name: 'Umum',
+        status: 'Aktif',
+      };
+
+    const matchedLevel = levelRef
+      ? context.jenjangList.find(
+          (j) =>
+            j.status === 'Aktif' &&
+            (j.name.toLowerCase() === levelRef.toLowerCase() ||
+              (j.code || '').toLowerCase() === levelRef.toLowerCase() ||
+              j.id === levelRef)
+        ) || fallbackLevel
+      : fallbackLevel;
 
     const matchedStage =
       context.stages.find(
@@ -512,7 +528,6 @@ export function downloadParticipantExcelTemplate(context: {
 }): void {
   const sampleKafilah = context.kafilahs.find((k) => k.status === 'Aktif')?.name || 'Kafilah Kota Surabaya';
   const sampleBranch = context.cabangList.find((c) => c.status === 'Aktif')?.name || 'Tilawah Dewasa Putra';
-  const sampleLevel = context.jenjangList.find((j) => j.status === 'Aktif')?.name || 'Dewasa';
   const sampleStage = context.stages[0]?.name || 'Penyisihan';
 
   const templateData = [
@@ -528,7 +543,6 @@ export function downloadParticipantExcelTemplate(context: {
       Lembaga_Asal: 'PP. Darul Ulum',
       Kafilah: sampleKafilah,
       Cabang: sampleBranch,
-      Jenjang: sampleLevel,
       Babak: sampleStage,
       Status: 'Menunggu',
     },
@@ -542,12 +556,14 @@ export function downloadParticipantExcelTemplate(context: {
     ...context.cabangList
       .filter((c) => c.status === 'Aktif')
       .map((c) => ({ Kategori: 'Cabang Aktif', Kode: c.code, Nama: c.name })),
-    ...context.jenjangList
-      .filter((j) => j.status === 'Aktif')
-      .map((j) => ({ Kategori: 'Jenjang Aktif', Kode: j.code, Nama: j.name })),
     ...context.kafilahs
       .filter((k) => k.status === 'Aktif')
-      .map((k) => ({ Kategori: 'Kafilah Aktif', Kode: k.code, Nama: k.name })),
+      .map((k) => ({ Kategori: 'Grup / Kafilah Aktif', Kode: k.code, Nama: k.name })),
+    ...context.stages.map((s) => ({
+      Kategori: 'Babak Aktif',
+      Kode: s.id,
+      Nama: s.name,
+    })),
   ];
   if (masterRefRows.length > 0) {
     const wsRef = XLSX.utils.json_to_sheet(masterRefRows);
@@ -566,7 +582,6 @@ export function downloadQuestionExcelTemplate(context: {
   stages: StageItem[];
 }): void {
   const sampleBranch = context.cabangList.find((c) => c.status === 'Aktif')?.name || 'Tilawah Dewasa Putra';
-  const sampleLevel = context.jenjangList.find((j) => j.status === 'Aktif')?.name || 'Dewasa';
   const sampleStage = context.stages[0]?.name || 'Penyisihan';
 
   const templateData = [
@@ -580,7 +595,6 @@ export function downloadQuestionExcelTemplate(context: {
       Halaman_Mulai: 282,
       Halaman_Selesai: 283,
       Cabang: sampleBranch,
-      Jenjang: sampleLevel,
       Babak: sampleStage,
       Status: 'Aktif',
       Deskripsi: 'Fokus mad thabi\'i dan waqaf tam',
@@ -595,9 +609,11 @@ export function downloadQuestionExcelTemplate(context: {
     ...context.cabangList
       .filter((c) => c.status === 'Aktif')
       .map((c) => ({ Kategori: 'Cabang Aktif', Kode: c.code, Nama: c.name })),
-    ...context.jenjangList
-      .filter((j) => j.status === 'Aktif')
-      .map((j) => ({ Kategori: 'Jenjang Aktif', Kode: j.code, Nama: j.name })),
+    ...context.stages.map((s) => ({
+      Kategori: 'Babak Aktif',
+      Kode: s.id,
+      Nama: s.name,
+    })),
   ];
   if (masterRefRows.length > 0) {
     const wsRef = XLSX.utils.json_to_sheet(masterRefRows);

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Download,
   Search,
@@ -33,14 +33,19 @@ export const RekapNilaiView: React.FC = () => {
     refreshSupabaseConnection
   } = useMtq();
 
-  // Real-time live synchronization: automatically fetch fresh assessments every 2.5s so judge deductions appear immediately without manual refresh
+  const refreshFnRef = useRef(refreshSupabaseConnection);
   useEffect(() => {
-    void refreshSupabaseConnection();
-    const timer = setInterval(() => {
-      void refreshSupabaseConnection();
-    }, 2500);
-    return () => clearInterval(timer);
+    refreshFnRef.current = refreshSupabaseConnection;
   }, [refreshSupabaseConnection]);
+
+  // Real-time live synchronization: poll every 3s using a stable ref so in-flight requests are never cancelled by state re-renders
+  useEffect(() => {
+    void refreshFnRef.current();
+    const timer = setInterval(() => {
+      void refreshFnRef.current();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStage, setSelectedStage] = useState('Semua Babak');
@@ -303,8 +308,8 @@ export const RekapNilaiView: React.FC = () => {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center gap-3">
+        <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"

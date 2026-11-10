@@ -599,24 +599,7 @@ export const KafilahPesertaView: React.FC = () => {
               ))}
             </select>
 
-            {/* 4. Semua Jenjang */}
-            <select
-              value={filterLevel}
-              onChange={(e) => {
-                setFilterLevel(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
-            >
-              <option value="ALL">Semua Jenjang</option>
-              {jenjangList.map((j) => (
-                <option key={j.id} value={j.name}>
-                  {j.name}
-                </option>
-              ))}
-            </select>
-
-            {/* 5. Semua Babak */}
+            {/* 4. Semua Babak */}
             <select
               value={filterStage}
               onChange={(e) => {
@@ -674,23 +657,13 @@ export const KafilahPesertaView: React.FC = () => {
             aria-selected={viewMode === 'peserta'}
             onClick={() => setViewMode('peserta')}
             data-testid="view-mode-peserta-btn"
-            className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+            className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
               viewMode === 'peserta'
                 ? 'border-emerald-800 text-emerald-800'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <UserCheck className="w-4 h-4" />
             <span>Tampilan Per Peserta</span>
-            <span
-              className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
-                viewMode === 'peserta'
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-slate-100 text-slate-600'
-              }`}
-            >
-              {participants.length}
-            </span>
           </button>
 
           <button
@@ -699,23 +672,13 @@ export const KafilahPesertaView: React.FC = () => {
             aria-selected={viewMode === 'grup'}
             onClick={() => setViewMode('grup')}
             data-testid="view-mode-grup-btn"
-            className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+            className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
               viewMode === 'grup'
                 ? 'border-emerald-800 text-emerald-800'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <Users className="w-4 h-4" />
             <span>Tampilan Grup</span>
-            <span
-              className={`text-[11px] px-2 py-0.2 rounded-full font-semibold ${
-                viewMode === 'grup'
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-slate-100 text-slate-700'
-              }`}
-            >
-              {kafilahs.length}
-            </span>
           </button>
         </div>
 
@@ -824,14 +787,13 @@ export const KafilahPesertaView: React.FC = () => {
                   <th className="py-3.5 px-4">Instansi Asal</th>
                   <th className="py-3.5 px-4">Grup (Kafilah)</th>
                   <th className="py-3.5 px-4">Cabang</th>
-                  <th className="py-3.5 px-4">Jenjang</th>
                   <th className="py-3.5 px-4 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {paginatedParticipants.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-10 text-center text-slate-400">
+                    <td colSpan={7} className="py-10 text-center text-slate-400">
                       Tidak ada data peserta yang sesuai dengan filter pencarian.
                     </td>
                   </tr>
@@ -858,7 +820,6 @@ export const KafilahPesertaView: React.FC = () => {
                       </td>
                       <td className="py-3 px-4 font-semibold text-slate-800">{p.kafilahName}</td>
                       <td className="py-3 px-4 font-medium text-slate-800">{p.branchName}</td>
-                      <td className="py-3 px-4 font-medium text-slate-700">{p.levelName || 'Umum'}</td>
                       <td className="py-3 px-4 text-center whitespace-nowrap">
                         <button
                           type="button"
@@ -954,7 +915,7 @@ export const KafilahPesertaView: React.FC = () => {
                       <th className="py-2.5 px-3">No Urut / Undian</th>
                       <th className="py-2.5 px-3">ID Peserta</th>
                       <th className="py-2.5 px-3">Nama & Biodata</th>
-                      <th className="py-2.5 px-3">Cabang & Jenjang</th>
+                      <th className="py-2.5 px-3">Cabang & Babak</th>
                       <th className="py-2.5 px-3 text-center">Status</th>
                       <th className="py-2.5 px-3 text-center">Aksi</th>
                     </tr>
@@ -981,9 +942,6 @@ export const KafilahPesertaView: React.FC = () => {
                         <td className="py-2.5 px-3 text-slate-600">
                           <div className="font-semibold text-slate-800">{p.branchName}</div>
                           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded font-semibold">
-                              {p.levelName || 'Umum'}
-                            </span>
                             <span className="text-[10px] text-emerald-800 font-semibold font-mono">
                               Babak: {p.stageName}
                             </span>
@@ -1131,13 +1089,7 @@ export const KafilahPesertaView: React.FC = () => {
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">10. Jenjang Lomba</span>
-              <span className="font-semibold text-slate-900 mt-0.5 block">
-                {detailParticipant.levelName || '-'}
-              </span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">11. Cabang Lomba</span>
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">10. Cabang Lomba</span>
               <span className="font-semibold text-slate-900 mt-0.5 block">
                 {detailParticipant.branchName}
               </span>
@@ -1359,33 +1311,7 @@ export const KafilahPesertaView: React.FC = () => {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  10. Jenjang Lomba (Master Data) *
-                </label>
-                <select
-                  value={partLevelName}
-                  onChange={(e) => setPartLevelName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg outline-none"
-                >
-                  {activeJenjangList.map((j) => (
-                    <option key={j.id} value={j.name}>
-                      {j.name} {j.description ? `(${j.description})` : ''}
-                    </option>
-                  ))}
-                  {editingParticipant &&
-                    editingParticipant.levelName &&
-                    !activeJenjangList.some((j) => j.name === editingParticipant.levelName) && (
-                      <option value={editingParticipant.levelName}>
-                        {editingParticipant.levelName} (Historis)
-                      </option>
-                    )}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="sm:col-span-1">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  11. Cabang Musabaqah (Master Data) *
+                  10. Cabang Musabaqah (Master Data) *
                 </label>
                 <select
                   value={partBranchName}
@@ -1405,6 +1331,9 @@ export const KafilahPesertaView: React.FC = () => {
                     )}
                 </select>
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   12. Babak Aktif (Master Data) *
@@ -1637,7 +1566,7 @@ export const KafilahPesertaView: React.FC = () => {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Nama Grup (Kabupaten/Kota)
+                Nama Grup
               </label>
               <input
                 type="text"
@@ -1729,14 +1658,14 @@ export const KafilahPesertaView: React.FC = () => {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Nama Kabupaten/Kota
+                Nama Grup
               </label>
               <input
                 type="text"
                 required
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="Misal: Kabupaten Sumedang"
+                placeholder="Misal: Kafilah Kabupaten Sumedang"
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-700 outline-none"
               />
             </div>

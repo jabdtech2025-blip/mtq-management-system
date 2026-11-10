@@ -672,7 +672,84 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  const [currentView, setCurrentView] = useState<ViewType>('dashboard');
+  const VIEW_TO_PATH: Record<ViewType, string> = {
+    dashboard: '/dashboard',
+    kafilah: '/grup-peserta',
+    bank_soal: '/bank-soal',
+    master_data: '/master-data',
+    penilaian_hakim: '/penilaian-hakim',
+    penilaian_dual_panel: '/lembar-penilaian',
+    rekap_nilai: '/rekap-nilai',
+    hasil_kelulusan: '/hasil-kelulusan',
+    stage_management: '/manajemen-babak',
+    user_management: '/pengguna-hakim',
+    log_aktivitas: '/log-aktivitas',
+    superadmin_dashboard: '/platform/dashboard',
+    superadmin_tenants: '/platform/tenants',
+    superadmin_users: '/platform/users',
+    superadmin_audit: '/platform/audit'
+  };
+
+  const PATH_TO_VIEW: Record<string, ViewType> = Object.entries(VIEW_TO_PATH).reduce(
+    (acc, [view, path]) => {
+      acc[path] = view as ViewType;
+      return acc;
+    },
+    {} as Record<string, ViewType>
+  );
+
+  const [currentView, setCurrentViewState] = useState<ViewType>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.location?.pathname) {
+        const cleanPath = window.location.pathname.replace(/\/+$/, '') || '/';
+        if (PATH_TO_VIEW[cleanPath]) {
+          return PATH_TO_VIEW[cleanPath];
+        }
+      }
+    } catch {}
+    return 'dashboard';
+  });
+
+  const setCurrentView = useCallback((nextView: ViewType | ((prev: ViewType) => ViewType)) => {
+    setCurrentViewState((prev) => {
+      const resolved = typeof nextView === 'function' ? nextView(prev) : nextView;
+      try {
+        if (typeof window !== 'undefined' && window.history?.pushState) {
+          const targetPath = VIEW_TO_PATH[resolved] || '/dashboard';
+          const currentClean = window.location.pathname.replace(/\/+$/, '') || '/';
+          if (currentClean !== targetPath) {
+            window.history.pushState({ view: resolved }, '', targetPath + window.location.search + window.location.hash);
+          }
+        }
+      } catch {}
+      return resolved;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Sync initial URL if at root '/'
+    try {
+      const currentClean = window.location.pathname.replace(/\/+$/, '') || '/';
+      if (currentClean === '/' && window.history?.replaceState) {
+        const initialPath = VIEW_TO_PATH[currentView] || '/dashboard';
+        window.history.replaceState({ view: currentView }, '', initialPath + window.location.search + window.location.hash);
+      }
+    } catch {}
+
+    const handlePopState = () => {
+      try {
+        const cleanPath = window.location.pathname.replace(/\/+$/, '') || '/';
+        const matched = PATH_TO_VIEW[cleanPath];
+        if (matched) {
+          setCurrentViewState(matched);
+        }
+      } catch {}
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const toggleSidebar = () => setIsSidebarOpen((prev) => !prev);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string>('part-04');
@@ -1221,13 +1298,36 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setCurrentUserId(profile.authUserId);
 
-      // Pastikan tampilan awal sesuai dengan peran yang terautentikasi
+      // Pastikan tampilan awal sesuai dengan peran yang terautentikasi tanpa menimpa URL spesifik yang sedang dibuka
+      const currentCleanPath =
+        typeof window !== 'undefined' ? window.location.pathname.replace(/\/+$/, '') || '/' : '/';
+      const explicitUrlView = PATH_TO_VIEW[currentCleanPath];
+
       if (effectiveRole === 'superadmin' && targetTenantId === 'platform') {
-        setCurrentView((prev) => (prev === 'dashboard' || !prev.startsWith('superadmin_') ? 'superadmin_dashboard' : prev));
+        setCurrentView((prev) =>
+          explicitUrlView && explicitUrlView.startsWith('superadmin_')
+            ? explicitUrlView
+            : prev === 'dashboard' || !prev.startsWith('superadmin_')
+            ? 'superadmin_dashboard'
+            : prev
+        );
       } else if (effectiveRole === 'judge') {
-        setCurrentView((prev) => (prev === 'dashboard' || prev.startsWith('superadmin_') ? 'penilaian_hakim' : prev));
+        const judgeAllowedViews: ViewType[] = ['penilaian_hakim', 'penilaian_dual_panel'];
+        setCurrentView((prev) =>
+          explicitUrlView && judgeAllowedViews.includes(explicitUrlView)
+            ? explicitUrlView
+            : prev === 'dashboard' || prev.startsWith('superadmin_')
+            ? 'penilaian_hakim'
+            : prev
+        );
       } else if (effectiveRole === 'admin') {
-        setCurrentView((prev) => (prev.startsWith('superadmin_') ? 'dashboard' : prev));
+        setCurrentView((prev) =>
+          explicitUrlView && !explicitUrlView.startsWith('superadmin_')
+            ? explicitUrlView
+            : prev.startsWith('superadmin_')
+            ? 'dashboard'
+            : prev
+        );
       }
 
       if (!profile.hasProfileRow || (profile.memberships.length === 0 && profile.globalRole !== 'superadmin')) {
@@ -1458,27 +1558,55 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [currentTenantId, isOfflineDemoSimulation]);
 
-  // Supabase Realtime Subscription (judge_assessments, stage_participations, stages)
-  useEffect(() => {
-    if (!isLiveDbActive || !isLiveAccessAuthorized || !isValidUuid(currentTenantId)) {
-      return;
-    }
-
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = supabaseDataService.subscribeToTenantRealtime(
-      currentTenantId,
-      ({ table, eventType }) => {
-        setSyncStatus(`Sinkronisasi Realtime (${table} • ${eventType})...`);
-        if (refreshTimer) clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => {
-          void refreshSupabaseConnection();
-        }, 350);
+  const notifyCrossTabSync = useCallback((reason: string) => {
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('mtq_realtime_sync_channel');
+        bc.postMessage({ type: 'MTQ_DATA_UPDATED', reason, timestamp: Date.now() });
+        bc.close();
       }
-    );
+    } catch {}
+  }, []);
+
+  // Supabase Realtime Subscription + Cross-Tab BroadcastChannel (judge_assessments, stage_participations, stages)
+  useEffect(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const triggerRefresh = (label: string) => {
+      setSyncStatus(label);
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        void refreshSupabaseConnection();
+      }, 250);
+    };
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('mtq_realtime_sync_channel');
+        bc.onmessage = (ev) => {
+          if (ev.data?.type === 'MTQ_DATA_UPDATED') {
+            triggerRefresh(`Sinkronisasi Antar-Tab (${ev.data.reason || 'Penilaian'})...`);
+          }
+        };
+      }
+    } catch {}
+
+    let unsubscribeSupabase = () => {};
+    if (isLiveDbActive && isLiveAccessAuthorized && isValidUuid(currentTenantId)) {
+      unsubscribeSupabase = supabaseDataService.subscribeToTenantRealtime(
+        currentTenantId,
+        ({ table, eventType }) => {
+          triggerRefresh(`Sinkronisasi Realtime (${table} • ${eventType})...`);
+        }
+      );
+    }
 
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer);
-      unsubscribe();
+      unsubscribeSupabase();
+      try {
+        if (bc) bc.close();
+      } catch {}
     };
   }, [isLiveDbActive, isLiveAccessAuthorized, currentTenantId]);
 
@@ -1774,7 +1902,23 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       competitionRules,
       rubricVersions
     });
-    return res.rubric;
+    if (res.rubric) return res.rubric;
+
+    // Fallback: jika rubrik cabang masih berstatus Draft atau nama cabang sedikit berbeda, gunakan rubrik yang memiliki bidang
+    const tenantRubrics = rubricVersions.filter(
+      (r) => (r.tenantId === currentTenantId || r.tenantId === 'system') && r.fields && r.fields.length > 0
+    );
+    const branchClean = (branchName || '').toLowerCase().trim();
+    const byBranchMatch = tenantRubrics.find((r) => {
+      const rBr = (r.branchName || '').toLowerCase().trim();
+      return (
+        (branchId && r.branchId === branchId) ||
+        (branchClean && rBr && (rBr.includes(branchClean) || branchClean.includes(rBr)))
+      );
+    });
+    if (byBranchMatch) return byBranchMatch;
+
+    return tenantRubrics.find((r) => r.status === 'Aktif') || tenantRubrics[0] || null;
   };
 
   /**
@@ -2315,18 +2459,48 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     stageId: string | undefined,
     part: Participant
   ): JudgeAssignment[] => {
-    return judgeAssignments.filter((ja) => {
+    const matchesBranch = (branchName?: string, branchId?: string): boolean => {
+      if (!branchName || branchName === 'Semua Cabang') return true;
+      if (part.branchId && branchId && part.branchId === branchId) return true;
+      const jaBr = branchName.toLowerCase().trim();
+      const pBr = (part.branchName || '').toLowerCase().trim();
+      if (!pBr) return true;
+      return jaBr === pBr || pBr.includes(jaBr) || jaBr.includes(pBr);
+    };
+
+    const explicitAssignments = judgeAssignments.filter((ja) => {
       if (ja.tenantId !== currentTenantId) return false;
-      const matchesStage = stageId && ja.stageId ? ja.stageId === stageId : ja.stageName === targetStage;
+      const matchesStage =
+        (stageId && ja.stageId && ja.stageId === stageId) ||
+        ja.stageName === targetStage ||
+        !ja.stageName;
       if (!matchesStage) return false;
-      if (part.branchId && ja.branchId) {
-        return ja.branchId === part.branchId;
-      }
-      if (ja.branchName && part.branchName) {
-        return ja.branchName === part.branchName;
-      }
-      return true;
+      return matchesBranch(ja.branchName, ja.branchId);
     });
+
+    // Sertakan juga hakim dari manajemen pengguna (users) yang ditugaskan ke cabang ini namun belum memiliki baris di judgeAssignments
+    const assignedJudgeIds = new Set(explicitAssignments.map((ja) => ja.judgeId));
+    const fallbackFromUsers: JudgeAssignment[] = users
+      .filter(
+        (u) =>
+          u.role === 'judge' &&
+          u.status !== 'Nonaktif' &&
+          !assignedJudgeIds.has(u.id) &&
+          matchesBranch(u.assignedBranch, undefined)
+      )
+      .map((u) => ({
+        id: `ja-profile-${u.id}-${stageId || targetStage}`,
+        tenantId: currentTenantId,
+        judgeId: u.id,
+        judgeName: u.name,
+        stageId: stageId || 'stage-penyisihan',
+        stageName: targetStage,
+        branchId: part.branchId,
+        branchName: u.assignedBranch || part.branchName || 'Semua Cabang',
+        judgeField: u.judgeField || 'Dewan Hakim'
+      }));
+
+    return [...explicitAssignments, ...fallbackFromUsers];
   };
 
   /**
@@ -2634,38 +2808,67 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     const stageId = targetStageObj?.id || 'stage-penyisihan';
 
-    // Mandatory official judge assignment check
+    // Mandatory official judge assignment check (with profile fallback)
     const stageBranchAssignments = getStageBranchJudgeAssignments(targetStage, targetStageObj?.id, part);
-    const judgeAssignment = stageBranchAssignments.find((ja) => ja.judgeId === judgeId);
+    const targetJudge = users.find((u) => u.id === judgeId) || currentUser;
+    const judgeAssignment =
+      stageBranchAssignments.find((ja) => ja.judgeId === judgeId) ||
+      (targetJudge.role === 'judge'
+        ? {
+            id: `ja-fallback-${judgeId}`,
+            tenantId: currentTenantId,
+            judgeId,
+            judgeName: targetJudge.name,
+            stageId,
+            stageName: targetStage,
+            branchName: targetJudge.assignedBranch || part.branchName,
+            judgeField: targetJudge.judgeField || 'Dewan Hakim'
+          }
+        : undefined);
+
     if (!judgeAssignment) {
       console.warn('Penilaian ditolak: Hakim tidak memiliki penugasan resmi pada babak dan cabang ini.');
+      return;
+    }
+
+    // Resolusi rubrik aktif dinamis sesuai cabang lomba peserta (P0)
+    const activeRubric = getActiveRubricForBranch(part.branchName, part.branchId, part.levelId, part.levelName);
+    if (!activeRubric) {
+      console.warn(`Pembaruan nilai dibatalkan: Cabang "${part.branchName}" belum memiliki rubrik aktif yang valid.`);
       return;
     }
 
     // Field-level access restriction: Judge may only score categories within their assigned field
     if (judgeAssignment.judgeField || judgeAssignment.judgeFieldId) {
       const cat = errorCategories.find((c) => c.id === categoryId);
-      if (cat && cat.fieldId && judgeAssignment.judgeFieldId) {
-        if (cat.fieldId !== judgeAssignment.judgeFieldId) {
-          console.warn(`Perubahan nilai ditolak: Kategori "${cat.name}" bukan bagian dari bidang penugasan hakim.`);
-          return;
-        }
-      } else if (cat && judgeAssignment.judgeField) {
-        const assignedName = judgeAssignment.judgeField.toLowerCase();
-        const catScope = (cat.scope || '').toLowerCase();
-        const catName = (cat.name || '').toLowerCase();
-        const matchesScope = catScope.includes(assignedName) || assignedName.includes(catScope);
-        const matchesName = catName.includes(assignedName) || assignedName.includes(catName);
-        if (cat.scope && !matchesScope && !matchesName && !assignedName.includes('umum')) {
-          console.warn(`Perubahan nilai ditolak: Kategori "${cat.name}" bukan bagian dari bidang penugasan hakim (${judgeAssignment.judgeField}).`);
-          return;
+      if (cat) {
+        const assignedFieldClean = (judgeAssignment.judgeField || '')
+          .toLowerCase()
+          .replace(/^bidang\s+/i, '')
+          .trim();
+        const matchedRubricField = activeRubric.fields.find((f) => {
+          if (judgeAssignment.judgeFieldId && f.id === judgeAssignment.judgeFieldId) return true;
+          const fClean = f.name.toLowerCase().replace(/^bidang\s+/i, '').trim();
+          return (
+            assignedFieldClean &&
+            (fClean === assignedFieldClean ||
+              fClean.includes(assignedFieldClean) ||
+              assignedFieldClean.includes(fClean))
+          );
+        });
+
+        if (cat.fieldId && matchedRubricField) {
+          if (cat.fieldId !== matchedRubricField.id) {
+            const catScopeClean = (cat.scope || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
+            const fClean = matchedRubricField.name.toLowerCase().replace(/^bidang\s+/i, '').trim();
+            if (!catScopeClean.includes(fClean) && !fClean.includes(catScopeClean)) {
+              console.warn(`Perubahan nilai ditolak: Kategori "${cat.name}" bukan bagian dari bidang penugasan hakim.`);
+              return;
+            }
+          }
         }
       }
     }
-
-    const prevAssessmentsSnapshot = assessments;
-    const prevSpSnapshot = stageParticipations;
-    const prevParticipantsSnapshot = participants;
 
     // Get or create stage participation
     let sp = stageParticipations.find(
@@ -2709,18 +2912,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const nowTime = getWibTime();
 
-    const targetJudge = users.find((u) => u.id === judgeId) || currentUser;
     const currentCounts = existing ? { ...existing.errorCounts } : {};
     const oldCount = currentCounts[categoryId] || 0;
     const newCount = Math.max(0, oldCount + delta);
     currentCounts[categoryId] = newCount;
-
-    // Resolusi rubrik aktif dinamis sesuai cabang lomba peserta (P0)
-    const activeRubric = getActiveRubricForBranch(part.branchName, part.branchId);
-    if (!activeRubric) {
-      console.warn(`Pembaruan nilai dibatalkan: Cabang "${part.branchName}" belum memiliki rubrik aktif yang valid.`);
-      return;
-    }
 
     const scoreResult = calculateAssessmentScore(
       currentCounts,
@@ -2756,7 +2951,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           participantId,
           judgeId,
           judgeName: targetJudge.name,
-          judgeField: targetJudge.judgeField || 'Dewan Hakim',
+          judgeField: judgeAssignment.judgeField || targetJudge.judgeField || 'Dewan Hakim',
           questionId: targetQuestionId,
           status: 'in_progress',
           errorCounts: currentCounts,
@@ -2773,7 +2968,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setAssessments((prev) => {
       const others = prev.filter((a) => a.id !== updatedAssessment.id);
-      return [...others, updatedAssessment];
+      const next = [...others, updatedAssessment];
+      assessmentsRef.current = next;
+      return next;
     });
 
     // Update stage participation status to Berlangsung
@@ -2816,6 +3013,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
+    notifyCrossTabSync(`Koreksi Nilai ${part.name}`);
+
     if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
       setSyncStatus('Menyimpan ke database...');
       const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
@@ -2840,6 +3039,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setSyncStatus('Tersimpan di Database');
             setLastSyncTime(getWibTime());
             void outboxSyncService.markSynced(`assessment-draft-${updatedAssessment.id}`);
+            notifyCrossTabSync(`Simpan Nilai ${part.name}`);
             if (res.data?.assignedMaqraId) {
               setAssessments((prev) =>
                 prev.map((a) =>
@@ -2848,13 +3048,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               );
             }
           } else {
-            setSyncStatus(`Gagal Menyimpan ke Database: ${res.message}`);
-            addNotification({
-              title: 'Gagal Menyimpan ke Database',
-              message: res.message,
-              type: 'error',
-              module: 'Penilaian'
-            });
+            setSyncStatus(`Menunggu Sinkronisasi Ulang: ${res.message}`);
             void outboxSyncService.enqueueOperation({
               idempotencyKey: `assessment-draft-${updatedAssessment.id}`,
               tenantId: currentTenantId,
@@ -2868,14 +3062,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               },
               errorMessage: res.message
             });
-            setAssessments(prevAssessmentsSnapshot);
-            setStageParticipations(prevSpSnapshot);
-            setParticipants(prevParticipantsSnapshot);
           }
         })
         .catch((err) => {
           const msg = err instanceof Error ? err.message : 'Kesalahan jaringan';
-          setSyncStatus(`Gagal Menyimpan ke Database: ${msg}`);
+          setSyncStatus(`Menunggu Sinkronisasi Ulang: ${msg}`);
           void outboxSyncService.enqueueOperation({
             idempotencyKey: `assessment-draft-${updatedAssessment.id}`,
             tenantId: currentTenantId,
@@ -2889,9 +3080,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             },
             errorMessage: msg
           });
-          setAssessments(prevAssessmentsSnapshot);
-          setStageParticipations(prevSpSnapshot);
-          setParticipants(prevParticipantsSnapshot);
         });
     } else {
       setSyncStatus('Mode Simulasi Lokal (Tersimpan di Browser)');
@@ -5385,7 +5573,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .upsertErrorCategory({
           ...merged,
           id: toDeterministicUuid(merged.id),
-          tenantId: toDeterministicUuid(currentTenantId)
+          tenantId: toDeterministicUuid(currentTenantId),
+          fieldId: merged.fieldId ? toDeterministicUuid(merged.fieldId) : undefined
         })
         .then((res) => {
           if (!res.success) {
@@ -5410,7 +5599,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .upsertErrorCategory({
           ...newCat,
           id: toDeterministicUuid(newCat.id),
-          tenantId: toDeterministicUuid(currentTenantId)
+          tenantId: toDeterministicUuid(currentTenantId),
+          fieldId: newCat.fieldId ? toDeterministicUuid(newCat.fieldId) : undefined
         })
         .then((res) => {
           if (!res.success) {
@@ -5426,7 +5616,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateErrorCategory = (id: string, updated: Partial<ErrorCategory>) => {
     const existing = errorCategories.find((c) => c.id === id && c.tenantId === currentTenantId);
     if (!existing) return;
-    const merged: ErrorCategory = { ...existing, ...updated };
+    const merged: ErrorCategory = {
+      ...existing,
+      ...updated,
+      fieldId: updated.fieldId || existing.fieldId
+    };
     setErrorCategories((prev) =>
       prev.map((c) =>
         c.id === id && c.tenantId === currentTenantId ? merged : c
@@ -5437,7 +5631,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .upsertErrorCategory({
           ...merged,
           id: toDeterministicUuid(merged.id),
-          tenantId: toDeterministicUuid(currentTenantId)
+          tenantId: toDeterministicUuid(currentTenantId),
+          fieldId: merged.fieldId ? toDeterministicUuid(merged.fieldId) : undefined
         })
         .then((res) => {
           if (!res.success) {

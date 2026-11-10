@@ -28,8 +28,39 @@ export const UserManagementView: React.FC = () => {
     retryUserProvisioning,
     requestPasswordReset,
     currentTenant,
-    isLiveSupabaseMode
+    isLiveSupabaseMode,
+    cabangList,
+    rubricVersions
   } = useMtq();
+
+  // Active branches from Master Data
+  const activeBranches = React.useMemo(() => {
+    const active = cabangList.filter((c) => c.status === 'Aktif');
+    return active.length > 0 ? active : cabangList;
+  }, [cabangList]);
+
+  // Active rubric fields from Master Data
+  const activeRubricFields = React.useMemo(() => {
+    const fieldNames = new Set<string>();
+    rubricVersions
+      .filter((rv) => rv.status === 'Aktif')
+      .forEach((rv) => {
+        rv.fields.forEach((f) => {
+          if (f.name) fieldNames.add(f.name);
+        });
+      });
+    if (fieldNames.size === 0) {
+      rubricVersions.forEach((rv) => {
+        rv.fields.forEach((f) => {
+          if (f.name) fieldNames.add(f.name);
+        });
+      });
+    }
+    const list = Array.from(fieldNames);
+    return list.length > 0
+      ? list
+      : ['Bidang Tajwid', 'Bidang Fashohah', 'Bidang Suara', 'Bidang Lagu'];
+  }, [rubricVersions]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('Semua Peran');
@@ -49,11 +80,9 @@ export const UserManagementView: React.FC = () => {
   const [formEmail, setFormEmail] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [formRole, setFormRole] = useState<UserRole>('judge');
-  const [formCategory, setFormCategory] = useState('Hakim 1');
-  const [formField, setFormField] = useState('Bidang Tajwid & Makhraj');
-  const [formBranch, setFormBranch] = useState('Tilawah Dewasa Putra');
+  const [formField, setFormField] = useState('');
+  const [formBranch, setFormBranch] = useState('');
   const [formStage, setFormStage] = useState('Penyisihan');
-  const [formMimbar, setFormMimbar] = useState('Mimbar Utama Masjid Al-Jabbar');
 
   // Filter users by current tenant (or platform for superadmin viewing)
   const tenantUsers = users.filter(
@@ -82,11 +111,9 @@ export const UserManagementView: React.FC = () => {
     setFormEmail('');
     setFormPassword('');
     setFormRole('judge');
-    setFormCategory('Hakim Baru');
-    setFormField('Bidang Fasahah & Waqf');
-    setFormBranch('Tilawah Dewasa Putra');
+    setFormField(activeRubricFields[0] || 'Bidang Tajwid');
+    setFormBranch(activeBranches[0]?.name || 'Tilawah Dewasa Putra');
     setFormStage('Penyisihan');
-    setFormMimbar('Mimbar Utama');
     setIsModalOpen(true);
   };
 
@@ -97,11 +124,9 @@ export const UserManagementView: React.FC = () => {
     setFormEmail(u.email || '');
     setFormPassword('');
     setFormRole(u.role);
-    setFormCategory(u.judgeCategory || '');
-    setFormField(u.judgeField || '');
-    setFormBranch(u.assignedBranch || 'Tilawah Dewasa Putra');
+    setFormField(u.judgeField || activeRubricFields[0] || '');
+    setFormBranch(u.assignedBranch || activeBranches[0]?.name || '');
     setFormStage(u.assignedStage || 'Penyisihan');
-    setFormMimbar(u.mimbarLocation || '');
     setIsModalOpen(true);
   };
 
@@ -125,11 +150,9 @@ export const UserManagementView: React.FC = () => {
           username: formUsername,
           email: formEmail,
           role: formRole,
-          judgeCategory: formRole === 'judge' ? formCategory : undefined,
           judgeField: formRole === 'judge' ? formField : undefined,
           assignedBranch: formRole === 'judge' ? formBranch : undefined,
-          assignedStage: formRole === 'judge' ? formStage : undefined,
-          mimbarLocation: formRole === 'judge' ? formMimbar : undefined
+          assignedStage: formRole === 'judge' ? formStage : undefined
         });
         setOperationBanner({
           type: res.success ? 'success' : 'warning',
@@ -143,11 +166,10 @@ export const UserManagementView: React.FC = () => {
           email: formEmail,
           role: formRole,
           status: 'Aktif',
-          judgeCategory: formRole === 'judge' ? formCategory : undefined,
+          judgeCategory: formRole === 'judge' ? 'Dewan Hakim' : undefined,
           judgeField: formRole === 'judge' ? formField : undefined,
           assignedBranch: formRole === 'judge' ? formBranch : undefined,
           assignedStage: formRole === 'judge' ? formStage : undefined,
-          mimbarLocation: formRole === 'judge' ? formMimbar : undefined,
           initialPassword: formPassword.trim() || undefined
         });
         setOperationBanner({
@@ -230,8 +252,8 @@ export const UserManagementView: React.FC = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center gap-3">
+        <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -242,7 +264,7 @@ export const UserManagementView: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <select
             value={selectedRoleFilter}
             onChange={(e) => setSelectedRoleFilter(e.target.value)}
@@ -523,49 +545,41 @@ export const UserManagementView: React.FC = () => {
                   <p className="font-bold text-[11px] uppercase tracking-wider text-emerald-800">
                     Konfigurasi Penugasan Hakim
                   </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="font-bold text-slate-600 block mb-1">Label Hakim</label>
-                      <input
-                        type="text"
-                        value={formCategory}
-                        onChange={(e) => setFormCategory(e.target.value)}
-                        placeholder="Hakim 1"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                      />
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian</label>
-                      <input
-                        type="text"
+                      <select
                         value={formField}
                         onChange={(e) => setFormField(e.target.value)}
-                        placeholder="Bidang Tajwid & Makhraj"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                      />
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-800"
+                      >
+                        {activeRubricFields.map((fieldName) => (
+                          <option key={fieldName} value={fieldName}>
+                            {fieldName}
+                          </option>
+                        ))}
+                        {formField && !activeRubricFields.includes(formField) && (
+                          <option value={formField}>{formField}</option>
+                        )}
+                      </select>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-slate-600 block mb-1">Cabang Penugasan</label>
-                      <input
-                        type="text"
+                      <select
                         value={formBranch}
                         onChange={(e) => setFormBranch(e.target.value)}
-                        placeholder="Tilawah Dewasa Putra"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-slate-600 block mb-1">Lokasi Mimbar</label>
-                      <input
-                        type="text"
-                        value={formMimbar}
-                        onChange={(e) => setFormMimbar(e.target.value)}
-                        placeholder="Mimbar Utama Masjid Al-Jabbar"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                      />
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-800"
+                      >
+                        {activeBranches.map((cab) => (
+                          <option key={cab.id} value={cab.name}>
+                            {cab.name}
+                          </option>
+                        ))}
+                        {formBranch && !activeBranches.some((c) => c.name === formBranch) && (
+                          <option value={formBranch}>{formBranch}</option>
+                        )}
+                      </select>
                     </div>
                   </div>
                 </div>

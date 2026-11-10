@@ -50,22 +50,35 @@ export const PenilaianHakimListView: React.FC = () => {
     );
   }, [judgeAssignments, currentTenant.id, activeJudgeId]);
 
-  // Assigned participants strictly matched by branch and stage in assignments
+  // Assigned participants matched by judgeAssignments OR judge's assignedBranch from User Management
   const assignedParticipants = useMemo(() => {
-    if (myAssignments.length === 0) {
-      // STRICT: No silent fallback to all participants!
+    const judgeProfile = users.find((u) => u.id === activeJudgeId);
+    if (myAssignments.length === 0 && !judgeProfile?.assignedBranch) {
       return [];
     }
 
     return participants.filter((p) => {
       if (p.tenantId !== currentTenant.id) return false;
-      return myAssignments.some((ja) => {
-        const matchesStage = !ja.stageName || ja.stageName === p.stageName;
-        const matchesBranch = !ja.branchName || p.branchName.includes(ja.branchName) || ja.branchName.includes(p.branchName);
+      if (myAssignments.length > 0) {
+        return myAssignments.some((ja) => {
+          const matchesStage = !ja.stageName || ja.stageName === p.stageName;
+          const matchesBranch =
+            !ja.branchName ||
+            p.branchName.toLowerCase().includes(ja.branchName.toLowerCase()) ||
+            ja.branchName.toLowerCase().includes(p.branchName.toLowerCase());
+          return matchesStage && matchesBranch;
+        });
+      }
+      if (judgeProfile?.assignedBranch) {
+        const matchesStage = !judgeProfile.assignedStage || judgeProfile.assignedStage === p.stageName;
+        const matchesBranch =
+          p.branchName.toLowerCase().includes(judgeProfile.assignedBranch.toLowerCase()) ||
+          judgeProfile.assignedBranch.toLowerCase().includes(p.branchName.toLowerCase());
         return matchesStage && matchesBranch;
-      });
+      }
+      return false;
     });
-  }, [participants, myAssignments, currentTenant.id]);
+  }, [participants, myAssignments, users, activeJudgeId, currentTenant.id]);
 
   // Get assessment for each participant by this judge across all stage questions
   const participantsWithJudgeState = useMemo(() => {
@@ -204,8 +217,8 @@ export const PenilaianHakimListView: React.FC = () => {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center gap-3">
+        <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"

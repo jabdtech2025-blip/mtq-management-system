@@ -184,11 +184,6 @@ export const MasterDataView: React.FC = () => {
       icon: <BookOpen className="w-3.5 h-3.5" />
     },
     {
-      id: 'jenjang',
-      label: `Jenjang Usia (${jenjangList.length})`,
-      icon: <GraduationCap className="w-3.5 h-3.5" />
-    },
-    {
       id: 'cabang',
       label: `Cabang / Golongan (${cabangList.length})`,
       icon: <Trophy className="w-3.5 h-3.5" />
@@ -626,7 +621,17 @@ export const MasterDataView: React.FC = () => {
                 </tr>
               ) : (
                 errorCategories.map((cat, idx) => {
-                  const mappedField = availableRubricFields.find((f) => f.id === cat.fieldId);
+                  const mappedField =
+                    availableRubricFields.find((f) => f.id === cat.fieldId) ||
+                    availableRubricFields.find((f) => {
+                      const fNameCleaned = f.name.toLowerCase().replace(/^bidang\s+/i, '').trim();
+                      const cScopeCleaned = (cat.scope || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
+                      const cNameCleaned = (cat.name || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
+                      return (
+                        (cScopeCleaned && (cScopeCleaned.includes(fNameCleaned) || fNameCleaned.includes(cScopeCleaned))) ||
+                        (cNameCleaned && (cNameCleaned.includes(fNameCleaned) || fNameCleaned.includes(cNameCleaned)))
+                      );
+                    });
                   return (
                     <tr key={`${cat.id}-${idx}`} className="hover:bg-slate-50/70">
                     <td className="px-5 py-3.5 font-mono font-bold text-slate-900">{cat.code}</td>
@@ -665,7 +670,7 @@ export const MasterDataView: React.FC = () => {
                             setCatName(cat.name);
                             setCatCode(cat.code);
                             setCatScope(cat.scope);
-                            setCatFieldId(cat.fieldId || '');
+                            setCatFieldId(cat.fieldId || mappedField?.id || '');
                             setCatDeduction(cat.defaultDeduction);
                             setIsAddCategoryOpen(true);
                           }}
@@ -775,9 +780,6 @@ export const MasterDataView: React.FC = () => {
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
                           Cabang: <strong className="text-slate-700">{rubric.branchName}</strong>
-                          {rubric.levelName && (
-                            <> · Golongan/Jenjang: <strong className="text-slate-700">{rubric.levelName}</strong></>
-                          )}
                           {' '}· Sumber:{' '}
                           <span className="font-mono text-slate-600">{rubric.officialSource || 'Standar LPTQ'}</span>
                         </p>
@@ -1366,7 +1368,7 @@ export const MasterDataView: React.FC = () => {
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Penugasan Dewan Hakim per Babak, Cabang, Jenjang & Bidang
+              Penugasan Dewan Hakim per Babak, Cabang & Bidang
             </h3>
             <button
               onClick={() => {
@@ -1394,7 +1396,6 @@ export const MasterDataView: React.FC = () => {
                 <th className="px-5 py-3">Nama Dewan Hakim</th>
                 <th className="px-4 py-3">Babak</th>
                 <th className="px-4 py-3">Cabang</th>
-                <th className="px-4 py-3">Jenjang Usia</th>
                 <th className="px-4 py-3">Bidang Penilaian</th>
                 <th className="px-5 py-3 text-right">Aksi</th>
               </tr>
@@ -1402,10 +1403,10 @@ export const MasterDataView: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {judgeAssignments.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                  <td colSpan={5} className="px-5 py-12 text-center text-slate-400">
                     <p className="font-bold text-slate-700 text-sm">Belum Ada Penugasan Dewan Hakim</p>
                     <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                      Database belum memiliki daftar penugasan dewan hakim. Klik "Tambah Penugasan Hakim" untuk menugaskan hakim pada babak, cabang, jenjang, dan bidang penilaian.
+                      Database belum memiliki daftar penugasan dewan hakim. Klik "Tambah Penugasan Hakim" untuk menugaskan hakim pada babak, cabang, dan bidang penilaian.
                     </p>
                   </td>
                 </tr>
@@ -1415,7 +1416,6 @@ export const MasterDataView: React.FC = () => {
                     <td className="px-5 py-3.5 font-bold text-slate-900">{ja.judgeName}</td>
                     <td className="px-4 py-3.5 font-semibold text-slate-800">{ja.stageName}</td>
                     <td className="px-4 py-3.5 text-slate-600">{ja.branchName}</td>
-                    <td className="px-4 py-3.5 text-slate-600">{ja.levelName || 'Semua Jenjang'}</td>
                     <td className="px-4 py-3.5 font-medium text-emerald-800">{ja.judgeField}</td>
                     <td className="px-5 py-3.5 text-right">
                       <button
@@ -1583,60 +1583,37 @@ export const MasterDataView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-slate-600 block mb-1">Cabang / Golongan Lomba</label>
-                  {cabangList.length > 0 ? (
-                    <select
-                      value={newRubricBranch}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setNewRubricBranch(val);
-                        const match = cabangList.find((c) => c.name === val);
-                        setNewRubricBranchId(match?.id || '');
-                      }}
-                      required
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                    >
-                      <option value="">-- Pilih Cabang Lomba --</option>
-                      {cabangList.map((c) => (
-                        <option key={c.id} value={c.name}>
-                          {c.name} ({c.code})
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      value={newRubricBranch}
-                      onChange={(e) => setNewRubricBranch(e.target.value)}
-                      required
-                      placeholder="Ketik cabang (atau tambah di tab Cabang)"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-                    />
-                  )}
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-600 block mb-1">Jenjang Usia Terkait</label>
+              <div>
+                <label className="font-bold text-slate-600 block mb-1">Cabang / Golongan Lomba</label>
+                {cabangList.length > 0 ? (
                   <select
-                    value={newRubricLevelId}
+                    value={newRubricBranch}
                     onChange={(e) => {
-                      const id = e.target.value;
-                      setNewRubricLevelId(id);
-                      const match = jenjangList.find((j) => j.id === id);
-                      setNewRubricLevelName(match?.name || '');
+                      const val = e.target.value;
+                      setNewRubricBranch(val);
+                      const match = cabangList.find((c) => c.name === val);
+                      setNewRubricBranchId(match?.id || '');
                     }}
+                    required
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
                   >
-                    <option value="">Semua Jenjang / Umum</option>
-                    {jenjangList.map((j) => (
-                      <option key={j.id} value={j.id}>
-                        {j.name} ({j.code})
+                    <option value="">-- Pilih Cabang Lomba --</option>
+                    {cabangList.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name} ({c.code})
                       </option>
                     ))}
                   </select>
-                </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={newRubricBranch}
+                    onChange={(e) => setNewRubricBranch(e.target.value)}
+                    required
+                    placeholder="Ketik cabang (atau tambah di tab Cabang)"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -2158,27 +2135,6 @@ export const MasterDataView: React.FC = () => {
                     ))}
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 block mb-1">Jenjang Usia</label>
-                <select
-                  value={assignLevelId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    setAssignLevelId(id);
-                    const match = jenjangList.find((j) => j.id === id);
-                    setAssignLevelName(match?.name || '');
-                  }}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                >
-                  <option value="">Semua Jenjang Usia</option>
-                  {jenjangList.map((j) => (
-                    <option key={j.id} value={j.id}>
-                      {j.name} ({j.code})
-                    </option>
-                  ))}
-                </select>
               </div>
 
               <div>

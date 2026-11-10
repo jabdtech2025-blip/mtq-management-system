@@ -1316,6 +1316,28 @@ export const supabaseDataService = {
       fieldsByRubricVersionId.set(rvId, list);
     });
 
+    // Auto-resolve errorCategories.fieldId against hydrated rubric fields when null or pointing to a stale field ID
+    const allHydratedFields: RubricField[] = Array.from(fieldsByRubricVersionId.values()).flat();
+    if (allHydratedFields.length > 0) {
+      const validFieldIds = new Set(allHydratedFields.map((f) => f.id));
+      errorCategories.forEach((cat) => {
+        if (!cat.fieldId || !validFieldIds.has(cat.fieldId)) {
+          const catScopeCleaned = (cat.scope || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
+          const catNameCleaned = (cat.name || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
+          const matchedField = allHydratedFields.find((f) => {
+            const fNameCleaned = (f.name || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
+            return (
+              (catScopeCleaned && (catScopeCleaned.includes(fNameCleaned) || fNameCleaned.includes(catScopeCleaned))) ||
+              (catNameCleaned && (catNameCleaned.includes(fNameCleaned) || fNameCleaned.includes(catNameCleaned)))
+            );
+          });
+          if (matchedField) {
+            cat.fieldId = matchedField.id;
+          }
+        }
+      });
+    }
+
     const rubricVersions: RubricVersion[] = (rubricVersionsRes.data || []).map((rv: Record<string, unknown>) => {
       const rvId = String(rv.id);
       const rawTenant = String(rv.tenant_id || SYSTEM_TENANT_UUID);
@@ -3345,17 +3367,35 @@ export const supabaseDataService = {
       if (rfError) return { success: false, mode: 'supabase_live', message: rfError.message };
     }
 
-    // Hapus bidang yang telah dihapus dari daftar rubric.fields secara kaskade aman
+    // Hapus bidang yang telah dihapus dari daftar rubric.fields secara kaskade aman, namun migrasikan relasi jika kode/nama bidang masih ada
     try {
       const { data: existingFields } = await client
         .from('rubric_fields')
-        .select('id')
+        .select('id, code, name')
         .eq('rubric_version_id', rubric.id);
       const activeSet = new Set(activeFieldIds);
-      const removeIds = (existingFields || [])
-        .map((f: { id: string }) => f.id)
-        .filter((id: string) => !activeSet.has(id));
+      const removedFieldObjs = (existingFields || []).filter((f: { id: string }) => !activeSet.has(f.id));
+      const removeIds = removedFieldObjs.map((f: { id: string }) => f.id);
       if (removeIds.length > 0) {
+        // Coba migrasikan error_categories dan judge_assignments ke fieldId baru jika kode/namanya cocok
+        for (const oldFld of removedFieldObjs as { id: string; code?: string; name?: string }[]) {
+          const matchedNewIdx = rubric.fields.findIndex(
+            (nf) =>
+              (oldFld.code && nf.code.toLowerCase() === oldFld.code.toLowerCase()) ||
+              (oldFld.name && nf.name.toLowerCase() === oldFld.name.toLowerCase())
+          );
+          if (matchedNewIdx >= 0 && activeFieldIds[matchedNewIdx]) {
+            const newTargetFieldId = activeFieldIds[matchedNewIdx];
+            await client
+              .from('error_categories')
+              .update({ rubric_field_id: newTargetFieldId })
+              .eq('rubric_field_id', oldFld.id);
+            await client
+              .from('judge_assignments')
+              .update({ rubric_field_id: newTargetFieldId })
+              .eq('rubric_field_id', oldFld.id);
+          }
+        }
         await client.from('error_categories').update({ rubric_field_id: null }).in('rubric_field_id', removeIds);
         await client.from('judge_assignments').update({ rubric_field_id: null }).in('rubric_field_id', removeIds);
         const { data: critRows } = await client.from('rubric_criteria').select('id').in('rubric_field_id', removeIds);
@@ -3884,11 +3924,13 @@ export const supabaseDataService = {
         {
           event: '*',
           schema: 'public',
-          table: 'judge_assessments',
-          filter: `tenant_id=eq.${tenantId}`
+          table: 'judge_assessments'
         },
-        (payload: { eventType?: string }) => {
-          onChange({ table: 'judge_assessments', eventType: payload?.eventType || 'UPDATE' });
+        (payload: { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+          const rowTenantId = String(payload?.new?.tenant_id || payload?.old?.tenant_id || '');
+          if (!rowTenantId || rowTenantId === tenantId) {
+            onChange({ table: 'judge_assessments', eventType: payload?.eventType || 'UPDATE' });
+          }
         }
       )
       .on(
@@ -3896,11 +3938,13 @@ export const supabaseDataService = {
         {
           event: '*',
           schema: 'public',
-          table: 'stage_participations',
-          filter: `tenant_id=eq.${tenantId}`
+          table: 'stage_participations'
         },
-        (payload: { eventType?: string }) => {
-          onChange({ table: 'stage_participations', eventType: payload?.eventType || 'UPDATE' });
+        (payload: { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+          const rowTenantId = String(payload?.new?.tenant_id || payload?.old?.tenant_id || '');
+          if (!rowTenantId || rowTenantId === tenantId) {
+            onChange({ table: 'stage_participations', eventType: payload?.eventType || 'UPDATE' });
+          }
         }
       )
       .on(

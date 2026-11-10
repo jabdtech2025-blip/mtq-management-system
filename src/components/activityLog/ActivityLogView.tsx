@@ -6,9 +6,24 @@ import {
   AlertTriangle,
   XCircle,
   Download,
-  RefreshCw
+  RefreshCw,
+  Eye,
+  X
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
+
+interface NormalizedLogEntry {
+  id: string;
+  timestamp: string;
+  sortOrder: number;
+  actorName: string;
+  actorRole: string;
+  module: string;
+  action: string;
+  summary: string;
+  target?: string;
+  outcome: 'Success' | 'Warning' | 'Error';
+}
 
 export const ActivityLogView: React.FC = () => {
   const {
@@ -24,6 +39,7 @@ export const ActivityLogView: React.FC = () => {
   const [filterModule, setFilterModule] = useState<string>('ALL');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedLog, setSelectedLog] = useState<NormalizedLogEntry | null>(null);
   const pageSize = 20;
 
   const handleRefresh = async () => {
@@ -37,18 +53,7 @@ export const ActivityLogView: React.FC = () => {
 
   // Combine and normalize auditLogs, activityLogs, and runtime notifications into unified log entries
   const normalizedLogs = useMemo(() => {
-    const list: {
-      id: string;
-      timestamp: string;
-      sortOrder: number;
-      actorName: string;
-      actorRole: string;
-      module: string;
-      action: string;
-      summary: string;
-      target?: string;
-      outcome: 'Success' | 'Warning' | 'Error';
-    }[] = [];
+    const list: NormalizedLogEntry[] = [];
 
     // 1. Runtime notifications (including errors, warnings, and saved actions)
     (notifications || []).forEach((notif, idx) => {
@@ -254,7 +259,7 @@ export const ActivityLogView: React.FC = () => {
       </div>
 
       {/* Filter Toolbar */}
-      <div className="p-2.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-2.5">
+      <div className="p-2.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs flex flex-wrap items-center gap-2.5">
         {/* Search */}
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -270,7 +275,7 @@ export const ActivityLogView: React.FC = () => {
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           {/* Status Filter */}
           <select
             value={filterOutcome}
@@ -341,24 +346,25 @@ export const ActivityLogView: React.FC = () => {
         </div>
       </div>
 
-      {/* Compact Log Table Optimized for 100% Zoom */}
+      {/* Horizontally Scrollable Log Table Without Text Truncation */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-[11px]">
+          <table className="w-full min-w-max text-left border-collapse text-[11px]">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px]">
-                <th className="py-2.5 px-3 whitespace-nowrap w-28">Waktu</th>
-                <th className="py-2.5 px-3 w-44">Aktor / Pengguna</th>
-                <th className="py-2.5 px-2.5 whitespace-nowrap w-28">Modul</th>
-                <th className="py-2.5 px-3 w-52">Aksi / Peristiwa</th>
-                <th className="py-2.5 px-3">Rincian Aktivitas</th>
-                <th className="py-2.5 px-3 text-center whitespace-nowrap w-24">Status</th>
+                <th className="py-2.5 px-3.5 whitespace-nowrap">Waktu</th>
+                <th className="py-2.5 px-3.5 whitespace-nowrap">Aktor / Pengguna</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Modul</th>
+                <th className="py-2.5 px-3.5 whitespace-nowrap">Aksi / Peristiwa</th>
+                <th className="py-2.5 px-3.5 whitespace-nowrap">Rincian Aktivitas</th>
+                <th className="py-2.5 px-3 text-center whitespace-nowrap">Status</th>
+                <th className="py-2.5 px-3.5 text-center whitespace-nowrap">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {paginatedLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-slate-400">
+                  <td colSpan={7} className="py-10 text-center text-slate-400">
                     <History className="w-6 h-6 mx-auto mb-1.5 text-slate-300" />
                     <p className="font-medium text-slate-700 text-xs">Tidak ada riwayat aktivitas</p>
                     <p className="text-[11px] text-slate-500 mt-0.5">
@@ -377,72 +383,66 @@ export const ActivityLogView: React.FC = () => {
                       className="hover:bg-slate-50/60 transition-colors"
                     >
                       {/* Timestamp */}
-                      <td className="py-2 px-3 whitespace-nowrap font-mono text-[10px] text-slate-500">
+                      <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-[10px] text-slate-500">
                         {log.timestamp}
                       </td>
 
-                      {/* Actor */}
-                      <td className="py-2 px-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-semibold text-[9px] shrink-0 border border-slate-200">
-                            {log.actorName.slice(0, 2).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-medium text-slate-900 truncate max-w-[130px]">{log.actorName}</p>
-                            <p className="text-[10px] text-slate-400 truncate max-w-[130px]">{log.actorRole}</p>
-                          </div>
-                        </div>
+                      {/* Actor (plain text without avatar or event subtitle) */}
+                      <td className="py-2.5 px-3.5 whitespace-nowrap font-medium text-slate-900">
+                        {log.actorName}
                       </td>
 
                       {/* Module */}
-                      <td className="py-2 px-2.5 whitespace-nowrap">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
                         <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
                           {log.module}
                         </span>
                       </td>
 
                       {/* Action */}
-                      <td className="py-2 px-3 font-medium text-slate-900 max-w-[200px]">
-                        <p className="truncate" title={log.action}>
-                          {log.action}
-                        </p>
+                      <td className="py-2.5 px-3.5 whitespace-nowrap font-medium text-slate-900">
+                        <span>{log.action}</span>
                         {log.target && (
-                          <p
-                            className="text-[10px] font-mono text-slate-500 truncate"
-                            title={log.target}
-                          >
-                            Target: {log.target}
-                          </p>
+                          <span className="ml-2 text-[10px] font-mono text-slate-500">
+                            (Target: {log.target})
+                          </span>
                         )}
                       </td>
 
                       {/* Summary */}
-                      <td className="py-2 px-3 max-w-md text-slate-600 leading-snug text-[11px]">
-                        <p className="line-clamp-1" title={log.summary}>
-                          {log.summary}
-                        </p>
+                      <td className="py-2.5 px-3.5 whitespace-nowrap text-slate-600 text-[11px]">
+                        {log.summary}
                       </td>
 
                       {/* Outcome Status */}
-                      <td className="py-2 px-3 text-center whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${
-                            isErr
-                              ? 'bg-slate-100 text-slate-900 border-slate-300'
-                              : isWarn
-                              ? 'bg-slate-50 text-slate-800 border-slate-200'
-                              : 'bg-white text-slate-800 border-slate-200'
-                          }`}
-                        >
-                          {isErr ? (
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        {isErr ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-900 border border-slate-300">
                             <XCircle className="w-2.5 h-2.5 text-slate-700" />
-                          ) : isWarn ? (
+                            <span>{log.outcome}</span>
+                          </span>
+                        ) : isWarn ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-50 text-slate-800 border border-slate-200">
                             <AlertTriangle className="w-2.5 h-2.5 text-slate-600" />
-                          ) : (
-                            <CheckCircle2 className="w-2.5 h-2.5 text-slate-600" />
-                          )}
-                          <span>{log.outcome}</span>
-                        </span>
+                            <span>{log.outcome}</span>
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-medium text-slate-700">
+                            {log.outcome}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Action Column */}
+                      <td className="py-2.5 px-3.5 text-center whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedLog(log)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-[10px] font-medium text-slate-700 cursor-pointer transition-colors"
+                        >
+                          <Eye className="w-3 h-3 text-slate-500" />
+                          <span>Lihat Detail</span>
+                        </button>
                       </td>
                     </tr>
                   );
@@ -483,6 +483,98 @@ export const ActivityLogView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Modal Lihat Detail Log Aktivitas */}
+      {selectedLog && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Detail Log Aktivitas</h3>
+                <p className="text-[11px] text-slate-500 font-mono mt-0.5">{selectedLog.id}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedLog(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block">
+                    Waktu Kejadian
+                  </span>
+                  <span className="font-mono text-slate-800 font-medium mt-0.5 block">
+                    {selectedLog.timestamp}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block">
+                    Status
+                  </span>
+                  <span className="font-medium text-slate-900 mt-0.5 block">
+                    {selectedLog.outcome}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block">
+                    Aktor / Pengguna
+                  </span>
+                  <span className="font-medium text-slate-900 mt-0.5 block">
+                    {selectedLog.actorName}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block">
+                    Modul Sistem
+                  </span>
+                  <span className="font-medium text-slate-800 mt-0.5 block">
+                    {selectedLog.module}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block mb-1">
+                  Aksi / Peristiwa
+                </span>
+                <div className="p-3 rounded-lg border border-slate-200 bg-white font-medium text-slate-900">
+                  {selectedLog.action}
+                  {selectedLog.target && (
+                    <span className="block text-[11px] font-mono text-slate-500 mt-1">
+                      Sasaran / Target: {selectedLog.target}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block mb-1">
+                  Rincian Lengkap Aktivitas
+                </span>
+                <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
+                  {selectedLog.summary}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/70 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedLog(null)}
+                className="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium cursor-pointer transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

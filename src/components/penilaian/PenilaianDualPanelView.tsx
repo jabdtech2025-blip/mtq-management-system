@@ -387,25 +387,31 @@ export const PenilaianDualPanelView: React.FC = () => {
   const assignedFieldId = currentJudgeAssignment?.judgeFieldId;
 
   // Error counting values from active assessment
-  // Restrict judges to accessing and scoring ONLY error categories for their assigned field
+  // Restrict judges to accessing and scoring error categories for their assigned field, with flexible field/scope matching
   const activeErrorCategories = useMemo(() => {
     const activeOnly = errorCategories.filter((cat) => cat.status !== 'Nonaktif');
 
-    // If user is a judge or admin monitoring a specific judge with an assigned field
     if (assignedFieldId || assignedFieldName) {
       const lowerAssigned = (assignedFieldName || '').toLowerCase();
-      // Match field in rubric if available
-      const matchingRubricField = activeRubric?.fields?.find(
-        (f) =>
-          (assignedFieldId && f.id === assignedFieldId) ||
-          f.name.toLowerCase() === lowerAssigned ||
-          f.code.toLowerCase() === lowerAssigned ||
-          lowerAssigned.includes(f.name.toLowerCase()) ||
-          lowerAssigned.includes(f.code.toLowerCase())
-      );
+      const cleanedAssigned = lowerAssigned.replace(/^bidang\s+/i, '').trim();
+
+      const matchingRubricField = activeRubric?.fields?.find((f) => {
+        if (assignedFieldId && f.id === assignedFieldId) return true;
+        const fName = f.name.toLowerCase();
+        const fCode = f.code.toLowerCase();
+        const cleanedFName = fName.replace(/^bidang\s+/i, '').trim();
+        return (
+          fName === lowerAssigned ||
+          fCode === lowerAssigned ||
+          lowerAssigned.includes(fName) ||
+          fName.includes(lowerAssigned) ||
+          (cleanedAssigned && (cleanedFName.includes(cleanedAssigned) || cleanedAssigned.includes(cleanedFName)))
+        );
+      });
 
       const targetFieldId = assignedFieldId || matchingRubricField?.id;
       const targetFieldName = (matchingRubricField?.name || assignedFieldName || '').toLowerCase();
+      const cleanedTargetField = targetFieldName.replace(/^bidang\s+/i, '').trim();
 
       const filtered = activeOnly.filter((cat) => {
         if (targetFieldId && cat.fieldId === targetFieldId) return true;
@@ -413,14 +419,13 @@ export const PenilaianDualPanelView: React.FC = () => {
         const catName = (cat.name || '').toLowerCase();
         if (targetFieldName && (catScope.includes(targetFieldName) || targetFieldName.includes(catScope))) return true;
         if (targetFieldName && (catName.includes(targetFieldName) || targetFieldName.includes(catName))) return true;
+        if (cleanedTargetField && (catScope.includes(cleanedTargetField) || catName.includes(cleanedTargetField))) return true;
         return false;
       });
 
-      // If specific categories exist for this field, return only those
       if (filtered.length > 0) return filtered;
     }
 
-    // Fallback: If no field is assigned or user is general admin, return all active categories
     return activeOnly;
   }, [errorCategories, assignedFieldId, assignedFieldName, activeRubric]);
   const errorCounts = currentAssessment?.errorCounts || {};
@@ -1022,9 +1027,10 @@ export const PenilaianDualPanelView: React.FC = () => {
                             </span>
                           </div>
 
-                          {/* Plus / Minus Buttons (Disabled if admin mode or finalized) */}
+                          {/* Plus / Minus Buttons (Disabled only if admin mode or finalized) */}
                           <div className="flex items-center gap-1">
                             <button
+                              type="button"
                               onClick={() =>
                                 updateErrorCount(
                                   currentParticipant.id,
@@ -1032,10 +1038,10 @@ export const PenilaianDualPanelView: React.FC = () => {
                                   cat.id,
                                   -1,
                                   activeStageName,
-                                  activeQuestionId
+                                  activeQuestionId || currentParticipant.questionId || undefined
                                 )
                               }
-                              disabled={count <= 0 || isFinalized || isAdminMode || participantAssignedQuestions.length === 0}
+                              disabled={count <= 0 || isFinalized || isAdminMode}
                               className="w-7 h-7 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
                               title="Kurangi 1 Kesalahan"
                               aria-label={`Kurangi kesalahan ${cat.name}`}
@@ -1044,6 +1050,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                             </button>
 
                             <button
+                              type="button"
                               onClick={() =>
                                 updateErrorCount(
                                   currentParticipant.id,
@@ -1051,10 +1058,10 @@ export const PenilaianDualPanelView: React.FC = () => {
                                   cat.id,
                                   1,
                                   activeStageName,
-                                  activeQuestionId
+                                  activeQuestionId || currentParticipant.questionId || undefined
                                 )
                               }
-                              disabled={isFinalized || isAdminMode || participantAssignedQuestions.length === 0}
+                              disabled={isFinalized || isAdminMode}
                               className="w-7 h-7 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer"
                               title="Tambah 1 Kesalahan"
                               aria-label={`Tambah kesalahan ${cat.name}`}

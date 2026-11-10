@@ -1,6 +1,6 @@
 {
-  "summary":  "Rencana implementasi perbaikan lanjutan untuk tata letak Dashboard, TopHeader non-bold, penyusunan ulang halaman Grup & Peserta, penyederhanaan Bank Soal & Audit Undian, penyeragaman tipografi Master Data (Jenjang & Cabang), otomatisasi filter babak terakhir di Hasil & Kelulusan, penyesuaian ukuran tabel & warna kartu di Log Aktivitas, pembersihan footer Sidebar, serta penyederhanaan empty state Notifikasi.",
-  "updatedAt":  "2026-11-09T13:16:08.310143708Z",
+  "summary":  "Rencana implementasi lengkap untuk 11 perbaikan sistem MTQ: penyederhanaan penugasan hakim dengan dropdown Master Data, penyembunyian elemen Jenjang Usia di seluruh antarmuka, pelabelan ulang form Grup, penambahan referensi Babak Aktif pada template Excel Bank Soal, stabilisasi pemetaan Bidang Rubrik pada Kategori Kesalahan, perbaikan tombol tambah kesalahan pada lembar penilaian hakim, sinkronisasi real-time Rekap Nilai, URL routing penuh antar halaman, pembersihan ikon/angka pada tab, optimalisasi lebar penuh barisan filter, serta peningkatan tabel scrollable dan modal detail pada Log Aktivitas.",
+  "updatedAt":  "2026-11-10T02:24:43.152796187Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
