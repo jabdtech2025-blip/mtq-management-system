@@ -977,14 +977,12 @@ export const SuperadminSettingsView: React.FC = () => {
             <div className="p-3.5 rounded-[var(--radius-md)] bg-purple-50/70 border border-purple-200 text-xs text-purple-950 space-y-1.5">
               <p className="font-bold flex items-center gap-1.5 text-purple-900">
                 <Info className="w-4 h-4 shrink-0 text-purple-700" />
-                Arsitektur Edge SEO & Pengujian Crawler
+                Arsitektur SEO & Sinkronisasi Metadata
               </p>
               <p className="text-purple-800 leading-relaxed">
-                Permintaan HTML ke halaman publik <code className="font-mono">/</code> diproses oleh{' '}
-                <code className="font-mono">middleware.ts</code> (Vercel Edge Middleware) dengan cache 5 menit
-                (<code className="font-mono">s-maxage=300</code>), sedangkan halaman kerja internal{' '}
-                <code className="font-mono">/app</code> otomatis diberi{' '}
-                <code className="font-mono">noindex,nofollow</code>.
+                Pengaturan SEO, favicon, dan tag Open Graph disinkronisasikan secara dinamis pada aplikasi SPA melalui{' '}
+                <code className="font-mono">useDocumentMeta</code> hook serta tersimpan secara permanen pada database Supabase tabel{' '}
+                <code className="font-mono">public.site_settings</code>.
               </p>
               <div className="pt-1 flex flex-wrap gap-3 text-[11px] font-semibold text-purple-700">
                 <span className="inline-flex items-center gap-1">
