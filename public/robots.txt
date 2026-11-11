@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /dashboard
+Disallow: /platform/
+
+Sitemap: https://mtq.id/sitemap.xml

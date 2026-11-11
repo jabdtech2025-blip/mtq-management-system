@@ -456,10 +456,10 @@ export const KafilahPesertaView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
-            {groupLabel} & Peserta MTQ
+            Grup & Peserta MTQ
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Kelola {groupLabel.toLowerCase()}, verifikasi berkas administrasi, dan seluruh atribut peserta secara terpadu
+            Kelola grup kontingen, verifikasi berkas administrasi, dan seluruh atribut peserta secara terpadu
           </p>
         </div>
 
@@ -470,7 +470,7 @@ export const KafilahPesertaView: React.FC = () => {
               type="button"
               onClick={() => setIsImportDropdownOpen(!isImportDropdownOpen)}
               data-testid="import-dropdown-btn"
-              className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl shadow-2xs transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5 text-emerald-700" />
               <span>Import</span>
@@ -478,7 +478,7 @@ export const KafilahPesertaView: React.FC = () => {
             </button>
 
             {isImportDropdownOpen && (
-              <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in duration-100">
+              <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40">
                 <button
                   type="button"
                   data-testid="open-participant-import-btn"
@@ -515,7 +515,7 @@ export const KafilahPesertaView: React.FC = () => {
               type="button"
               onClick={() => openAddParticipantModal()}
               data-testid="add-participant-global-btn"
-              className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
             >
               <UserPlus className="w-4 h-4" />
               <span>Tambah Peserta</span>
@@ -525,7 +525,7 @@ export const KafilahPesertaView: React.FC = () => {
               type="button"
               onClick={() => setIsAddKafilahOpen(true)}
               data-testid="add-kafilah-btn"
-              className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Tambah Grup</span>
@@ -561,104 +561,110 @@ export const KafilahPesertaView: React.FC = () => {
       )}
 
       {/* 2. Middle Container: Dedicated Filter & Search Bar Only */}
-      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200/80 shadow-2xs">
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200/80 shadow-sm">
         {viewMode === 'peserta' ? (
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* 1. Search Bar */}
-            <div className="relative flex-1 min-w-[220px]">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
+          <div className="space-y-2.5">
+            {/* Baris 1: Search Bar & Filter Grup */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              {/* 1. Search Bar */}
+              <div className="relative flex-[2] min-w-0">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Cari No Urut, ID, nama peserta, nama ayah, instansi..."
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 focus:bg-white text-slate-800 placeholder-slate-400 transition-all"
+                />
+              </div>
+
+              {/* 2. Semua Grup */}
+              <select
+                value={filterKafilahId}
                 onChange={(e) => {
-                  setSearchQuery(e.target.value);
+                  setFilterKafilahId(e.target.value);
                   setCurrentPage(1);
                 }}
-                placeholder="Cari No Urut, ID, nama peserta, nama ayah, instansi..."
-                className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 focus:bg-white text-slate-800 placeholder-slate-400 transition-all"
-              />
+                className="flex-1 min-w-[200px] px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+              >
+                <option value="ALL">Semua Grup</option>
+                {kafilahs.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* 2. Semua Grup */}
-            <select
-              value={filterKafilahId}
-              onChange={(e) => {
-                setFilterKafilahId(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
-            >
-              <option value="ALL">Semua Grup</option>
-              {kafilahs.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.name}
-                </option>
-              ))}
-            </select>
+            {/* Baris 2: Cabang, Babak, Verifikasi, dan No Urut */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {/* 3. Semua Cabang */}
+              <select
+                value={filterBranch}
+                onChange={(e) => {
+                  setFilterBranch(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+              >
+                <option value="ALL">Semua Cabang</option>
+                {cabangList.map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
 
-            {/* 3. Semua Cabang */}
-            <select
-              value={filterBranch}
-              onChange={(e) => {
-                setFilterBranch(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
-            >
-              <option value="ALL">Semua Cabang</option>
-              {cabangList.map((c) => (
-                <option key={c.id} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              {/* 4. Semua Babak */}
+              <select
+                value={filterStage}
+                onChange={(e) => {
+                  setFilterStage(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+              >
+                <option value="ALL">Semua Babak</option>
+                {stages.map((s) => (
+                  <option key={s.id} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
 
-            {/* 4. Semua Babak */}
-            <select
-              value={filterStage}
-              onChange={(e) => {
-                setFilterStage(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
-            >
-              <option value="ALL">Semua Babak</option>
-              {stages.map((s) => (
-                <option key={s.id} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              {/* 5. Filter Status Verifikasi Berkas */}
+              <select
+                value={filterVerification}
+                onChange={(e) => {
+                  setFilterVerification(e.target.value);
+                  setCurrentPage(1);
+                }}
+                data-testid="filter-verification-status"
+                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+              >
+                <option value="ALL">Semua Verifikasi</option>
+                <option value="Diajukan">Diajukan</option>
+                <option value="Diverifikasi">Diverifikasi</option>
+                <option value="Ditolak">Ditolak</option>
+              </select>
 
-            {/* 5. Filter Status Verifikasi Berkas */}
-            <select
-              value={filterVerification}
-              onChange={(e) => {
-                setFilterVerification(e.target.value);
-                setCurrentPage(1);
-              }}
-              data-testid="filter-verification-status"
-              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
-            >
-              <option value="ALL">Semua Verifikasi</option>
-              <option value="Diajukan">Diajukan</option>
-              <option value="Diverifikasi">Diverifikasi</option>
-              <option value="Ditolak">Ditolak</option>
-            </select>
-
-            {/* 6. No Urut (Sorting) */}
-            <select
-              value={sortBy}
-              onChange={(e) =>
-                setSortBy(e.target.value as 'adminSeq' | 'lottery' | 'name' | 'kafilah')
-              }
-              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
-            >
-              <option value="adminSeq">No Urut</option>
-              <option value="lottery">No Undian</option>
-              <option value="name">Nama Peserta</option>
-              <option value="kafilah">{groupLabel}</option>
-            </select>
+              {/* 6. No Urut (Sorting) */}
+              <select
+                value={sortBy}
+                onChange={(e) =>
+                  setSortBy(e.target.value as 'adminSeq' | 'lottery' | 'name' | 'kafilah')
+                }
+                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+              >
+                <option value="adminSeq">No Urut</option>
+                <option value="lottery">No Undian</option>
+                <option value="name">Nama Peserta</option>
+                <option value="kafilah">Grup</option>
+              </select>
+            </div>
           </div>
         ) : (
           /* Tampilan Grup: Search Bar Only */
@@ -721,7 +727,7 @@ export const KafilahPesertaView: React.FC = () => {
 
       {/* MODE 1: Main Grup Table */}
       {viewMode === 'grup' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
@@ -806,7 +812,7 @@ export const KafilahPesertaView: React.FC = () => {
 
       {/* MODE 2: Main Per Peserta Table + Mobile Cards */}
       {viewMode === 'peserta' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           {/* Mobile Card Layout (md:hidden) */}
           <div className="md:hidden divide-y divide-slate-100">
             {paginatedParticipants.length === 0 ? (
@@ -978,7 +984,7 @@ export const KafilahPesertaView: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => setDetailParticipant(p)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 font-bold text-xs transition-colors cursor-pointer shadow-2xs"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 font-bold text-xs transition-colors cursor-pointer shadow-sm"
                               title="Lihat detail lengkap peserta"
                             >
                               <Eye className="w-3.5 h-3.5 text-emerald-700" />
@@ -1067,7 +1073,7 @@ export const KafilahPesertaView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => openAddParticipantModal(selectedKafilah)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
                   <span>Tambah Peserta ke Grup Ini</span>
@@ -1337,7 +1343,7 @@ export const KafilahPesertaView: React.FC = () => {
               <button
                 type="submit"
                 form="participant-full-form"
-                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg shadow-xs cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg shadow-sm cursor-pointer"
               >
                 {editingParticipant ? 'Simpan Perubahan' : 'Daftarkan Peserta'}
               </button>
@@ -1816,7 +1822,7 @@ export const KafilahPesertaView: React.FC = () => {
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg shadow-xs cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg shadow-sm cursor-pointer"
               >
                 Simpan Perubahan
               </button>
@@ -1898,7 +1904,7 @@ export const KafilahPesertaView: React.FC = () => {
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg shadow-xs cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg shadow-sm cursor-pointer"
               >
                 Simpan Grup
               </button>

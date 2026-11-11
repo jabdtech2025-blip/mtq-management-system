@@ -3,9 +3,12 @@ import {
   BookmarkCheck,
   Search,
   Lock,
-  Clock
+  Clock,
+  CheckCircle2,
+  Users
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
+import { PageHeader, StatCard, Card, Badge, Button, Input, Select, EmptyState } from '../ui';
 
 export const PenilaianHakimListView: React.FC = () => {
   const {
@@ -13,7 +16,6 @@ export const PenilaianHakimListView: React.FC = () => {
     currentUser,
     users,
     participants,
-    stageParticipations,
     judgeAssignments,
     assessments,
     getParticipantStageQuestions,
@@ -27,7 +29,6 @@ export const PenilaianHakimListView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('Semua Status');
   const [branchFilter, setBranchFilter] = useState('Semua Cabang');
 
-  // Opsi cabang diambil dari master cabang tenant aktif (bukan daftar tetap/demo)
   const tenantBranchNames = useMemo(() => {
     const names = (cabangList || [])
       .filter((c) => (!c.tenantId || c.tenantId === currentTenant.id) && c.status !== 'Nonaktif')
@@ -36,7 +37,6 @@ export const PenilaianHakimListView: React.FC = () => {
     return Array.from(new Set(names));
   }, [cabangList, currentTenant.id]);
 
-  // List of judges in current tenant for admin monitoring selection
   const tenantJudges = useMemo(() => {
     return users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id);
   }, [users, currentTenant.id]);
@@ -53,14 +53,12 @@ export const PenilaianHakimListView: React.FC = () => {
     mimbarLocation: 'Mimbar Utama'
   };
 
-  // Find assignments strictly for this judge in currentTenant
   const myAssignments = useMemo(() => {
     return judgeAssignments.filter(
       (ja) => ja.tenantId === currentTenant.id && ja.judgeId === activeJudgeId
     );
   }, [judgeAssignments, currentTenant.id, activeJudgeId]);
 
-  // Assigned participants matched by judgeAssignments OR judge's assignedBranch from User Management
   const assignedParticipants = useMemo(() => {
     const judgeProfile = users.find((u) => u.id === activeJudgeId);
     if (myAssignments.length === 0 && !judgeProfile?.assignedBranch) {
@@ -90,7 +88,6 @@ export const PenilaianHakimListView: React.FC = () => {
     });
   }, [participants, myAssignments, users, activeJudgeId, currentTenant.id]);
 
-  // Get assessment for each participant by this judge across all stage questions
   const participantsWithJudgeState = useMemo(() => {
     return assignedParticipants.map((p) => {
       const stageQuestions = getParticipantStageQuestions(p.id, p.stageName);
@@ -120,7 +117,6 @@ export const PenilaianHakimListView: React.FC = () => {
         status = 'in_progress';
       }
 
-      // Judge score: average across finalized questions for this judge
       let score = '--';
       if (finalizedCount > 0) {
         const sum = finalizedAsms.reduce((acc, curr) => acc + (curr?.finalScore || 0), 0);
@@ -177,258 +173,228 @@ export const PenilaianHakimListView: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
-      {/* Top Title Area */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-900">
-            {currentUser.role === 'judge' ? 'Daftar Penugasan Penilaian Peserta' : 'Monitoring Penilaian Dewan Hakim'}
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title={currentUser.role === 'judge' ? 'Daftar Penugasan Penilaian Peserta' : 'Monitoring Penilaian Dewan Hakim'}
+        description={
+          <>
             {currentUser.role === 'judge' ? 'Dewan Hakim' : 'Menampilkan penugasan hakim'}:{' '}
             <span className="font-semibold text-slate-800">{activeJudge.name}</span> ·{' '}
             {activeJudge.judgeField || 'Bidang Penilaian'} · {activeJudge.mimbarLocation || 'Mimbar Utama'}
-          </p>
-        </div>
-      </div>
+          </>
+        }
+      />
 
-      {/* 4 Standard Summary Boxes without colored shadows */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* Total Ditugaskan */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-          <p className="text-xs font-medium text-slate-500">Total Ditugaskan</p>
-          <p className="text-3xl font-bold text-slate-900 mt-2 tabular-nums font-mono">
-            {totalAssigned}
-          </p>
-        </div>
-
-        {/* Selesai (Final/Terkunci) */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-          <p className="text-xs font-medium text-slate-500">Selesai (Final/Terkunci)</p>
-          <p className="text-3xl font-bold text-slate-900 mt-2 tabular-nums font-mono">
-            {totalFinal}
-          </p>
-        </div>
-
-        {/* Sedang Berlangsung */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-          <p className="text-xs font-medium text-slate-500">Sedang Berlangsung</p>
-          <p className="text-3xl font-bold text-slate-900 mt-2 tabular-nums font-mono">
-            {totalInProgress}
-          </p>
-        </div>
-
-        {/* Menunggu Tampil */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-          <p className="text-xs font-medium text-slate-500">Menunggu Tampil</p>
-          <p className="text-3xl font-bold text-slate-900 mt-2 tabular-nums font-mono">
-            {totalPending}
-          </p>
-        </div>
+      {/* 4 Summary StatCards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Total Ditugaskan"
+          value={totalAssigned}
+          icon={<Users />}
+          tone="slate"
+        />
+        <StatCard
+          label="Selesai (Final/Terkunci)"
+          value={totalFinal}
+          icon={<CheckCircle2 />}
+          tone="emerald"
+        />
+        <StatCard
+          label="Sedang Berlangsung"
+          value={totalInProgress}
+          icon={<Clock />}
+          tone="amber"
+        />
+        <StatCard
+          label="Menunggu Tampil"
+          value={totalPending}
+          icon={<Clock />}
+          tone="sky"
+        />
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center gap-3">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari nomor undian, nama peserta, atau grup..."
-            className="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 text-slate-800 placeholder-slate-400"
-          />
-        </div>
+      <Card className="p-4 flex flex-wrap items-center gap-3">
+        <Input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Cari nomor undian, nama peserta, atau grup..."
+          leftIcon={<Search className="w-4 h-4" />}
+          containerClassName="flex-[2] min-w-[240px]"
+        />
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Dropdown Pantau Hakim (Narrow, name only, with ellipsis if long) */}
-          {currentUser.role !== 'judge' && tenantJudges.length > 0 && (
-            <select
-              value={adminSelectedJudgeId}
-              onChange={(e) => {
-                setAdminSelectedJudgeId(e.target.value);
-                setMonitoringJudgeId(e.target.value);
-              }}
-              aria-label="Pilih Dewan Hakim"
-              title="Pilih Dewan Hakim"
-              className="w-36 sm:w-40 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 bg-white outline-none truncate"
-            >
-              {tenantJudges.map((j) => (
-                <option key={j.id} value={j.id} title={j.name}>
-                  {j.name}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {/* Dropdown Status Penilaian (No title label) */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            aria-label="Status Penilaian"
-            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-800 bg-white outline-none"
+        {currentUser.role !== 'judge' && tenantJudges.length > 0 && (
+          <Select
+            value={adminSelectedJudgeId}
+            onChange={(e) => {
+              setAdminSelectedJudgeId(e.target.value);
+              setMonitoringJudgeId(e.target.value);
+            }}
+            aria-label="Pilih Dewan Hakim"
+            title="Pilih Dewan Hakim"
+            containerClassName="flex-1 min-w-[180px]"
           >
-            <option value="Semua Status">Semua Status</option>
-            <option value="Berlangsung">Berlangsung</option>
-            <option value="Final">Final/Terkunci</option>
-            <option value="Menunggu">Menunggu</option>
-          </select>
-
-          {/* Dropdown Cabang (No title label) */}
-          <select
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-            aria-label="Cabang"
-            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-800 bg-white outline-none"
-          >
-            <option value="Semua Cabang">Semua Cabang</option>
-            {tenantBranchNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
+            {tenantJudges.map((j) => (
+              <option key={j.id} value={j.id} title={j.name}>
+                {j.name}
               </option>
             ))}
-          </select>
-        </div>
-      </div>
+          </Select>
+        )}
 
-      {/* Participants Assignment Table matching screenshot */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-600 font-semibold">
-                <th className="py-3.5 px-4 text-center">Undian</th>
-                <th className="py-3.5 px-4">ID Peserta</th>
-                <th className="py-3.5 px-4">Nama Lengkap Peserta</th>
-                <th className="py-3.5 px-4">Grup</th>
-                <th className="py-3.5 px-4">Cabang & Babak</th>
-                <th className="py-3.5 px-4">Soal Maqra Ditugaskan</th>
-                <th className="py-3.5 px-4 text-center">{currentUser.role === 'judge' ? 'Status Saya' : 'Status Hakim'}</th>
-                <th className="py-3.5 px-4 text-center">{currentUser.role === 'judge' ? 'Nilai Saya' : 'Nilai Hakim'}</th>
-                <th className="py-3.5 px-4 text-center">Aksi Penilaian</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredParticipants.length === 0 ? (
+        <Select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Status Penilaian"
+          containerClassName="flex-1 min-w-[150px]"
+        >
+          <option value="Semua Status">Semua Status</option>
+          <option value="Berlangsung">Berlangsung</option>
+          <option value="Final">Final/Terkunci</option>
+          <option value="Menunggu">Menunggu</option>
+        </Select>
+
+        <Select
+          value={branchFilter}
+          onChange={(e) => setBranchFilter(e.target.value)}
+          aria-label="Cabang"
+          containerClassName="flex-1 min-w-[170px]"
+        >
+          <option value="Semua Cabang">Semua Cabang</option>
+          {tenantBranchNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </Select>
+      </Card>
+
+      {/* Participants Assignment Table (min 14px text-sm for scoring table rows) */}
+      <Card noPadding>
+        {filteredParticipants.length === 0 ? (
+          <EmptyState
+            title="Belum ada peserta yang ditugaskan kepada Anda untuk babak dan cabang ini."
+            description="Silakan hubungi administrator MTQ untuk konfigurasi penugasan dewan hakim."
+            className="border-0 rounded-none"
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 text-xs text-slate-600 font-bold uppercase tracking-wider">
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
-                    <p className="font-semibold text-slate-600">
-                      Belum ada peserta yang ditugaskan kepada Anda untuk babak dan cabang ini.
-                    </p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Silakan hubungi administrator MTQ untuk konfigurasi penugasan dewan hakim.
-                    </p>
-                  </td>
+                  <th className="py-3.5 px-4 text-center">Undian</th>
+                  <th className="py-3.5 px-4">ID Peserta</th>
+                  <th className="py-3.5 px-4">Nama Lengkap Peserta</th>
+                  <th className="py-3.5 px-4">Grup</th>
+                  <th className="py-3.5 px-4">Cabang & Babak</th>
+                  <th className="py-3.5 px-4">Soal Maqra Ditugaskan</th>
+                  <th className="py-3.5 px-4 text-center">{currentUser.role === 'judge' ? 'Status Saya' : 'Status Hakim'}</th>
+                  <th className="py-3.5 px-4 text-center">{currentUser.role === 'judge' ? 'Nilai Saya' : 'Nilai Hakim'}</th>
+                  <th className="py-3.5 px-4 text-center">Aksi Penilaian</th>
                 </tr>
-              ) : (
-                filteredParticipants.map((p, pIdx) => {
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-800">
+                {filteredParticipants.map((p, pIdx) => {
                   const isFinal = p.judgeStatus === 'finalized';
-                const isInProgress = p.judgeStatus === 'in_progress';
+                  const isInProgress = p.judgeStatus === 'in_progress';
 
-                return (
-                  <tr key={`${p.id}-${pIdx}`} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3.5 px-4 text-center font-bold text-slate-900 font-mono text-sm">
-                      {p.lotteryNumber}
-                    </td>
-                    <td className="py-3.5 px-4 font-mono font-bold text-emerald-800">
-                      {p.participantId}
-                    </td>
-                    <td className="py-3.5 px-4 font-semibold text-slate-900">
-                      {p.name}
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-600">{p.kafilahName}</td>
-                    <td className="py-3.5 px-4">
-                      <p className="font-medium text-slate-800">{p.branchName}</p>
-                      <p className="text-xs text-slate-400">{p.stageName}</p>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      {p.totalQuestions === 0 ? (
-                        <span className="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                          Maqra Belum Ditetapkan
-                        </span>
-                      ) : (
-                        <div className="space-y-1">
-                          {p.stageQuestions.map((q, qIdx) => (
-                            <div key={`${q.id || q.questionId}-${qIdx}`} className="flex flex-wrap items-center gap-1.5 text-xs">
-                              <span className="font-semibold text-emerald-800">
-                                {q.code ? `${q.code}: ` : ''}{q.title}
-                              </span>
-                              <span className="text-xs text-slate-400 font-mono">
-                                (Hal. {q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd ? `${q.pageStart}-${q.pageEnd}` : q.pageNumber})
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      {p.judgeStatus === 'no_maqra' ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                          Maqra Belum Ada
-                        </span>
-                      ) : isFinal ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <Lock className="w-3 h-3" />
-                          Final ({p.finalizedCount}/{p.totalQuestions} Maqra)
-                        </span>
-                      ) : isInProgress ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                          Berlangsung ({p.finalizedCount}/{p.totalQuestions} Maqra)
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
-                          <Clock className="w-3 h-3 text-slate-400" />
-                          Belum Dimulai (0/{p.totalQuestions} Maqra)
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-center font-bold font-mono text-sm tabular-nums text-slate-900">
-                      {p.judgeScore}
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      {p.totalQuestions === 0 ? (
-                        <button
-                          disabled
-                          className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-400 font-semibold text-xs px-3 py-1.5 rounded-lg cursor-not-allowed shadow-none"
-                          title="Peserta belum memiliki maqra pada babak ini"
-                        >
-                          <span>Menunggu Maqra</span>
-                        </button>
-                      ) : isInProgress ? (
-                        <button
-                          onClick={() => handleOpenScoring(p.id)}
-                          className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-3.5 py-1.5 rounded-lg shadow-xs transition-all cursor-pointer"
-                        >
-                          <BookmarkCheck className="w-3.5 h-3.5" />
-                          <span>Lanjut Menilai</span>
-                        </button>
-                      ) : isFinal ? (
-                        <button
-                          onClick={() => handleOpenScoring(p.id)}
-                          className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer"
-                        >
-                          <BookmarkCheck className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Lihat Lembar</span>
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleOpenScoring(p.id)}
-                          className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer"
-                        >
-                          <BookmarkCheck className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Mulai Menilai</span>
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-          </table>
-        </div>
-      </div>
+                  return (
+                    <tr key={`${p.id}-${pIdx}`} className="even:bg-slate-50/40 hover:bg-emerald-50/40 transition-colors">
+                      <td className="py-3.5 px-4 text-center font-bold text-slate-900 font-mono tabular-nums text-sm">
+                        {p.lotteryNumber}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-emerald-800 text-xs">
+                        {p.participantId}
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-900 text-sm">
+                        {p.name}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-600 text-sm">{p.kafilahName}</td>
+                      <td className="py-3.5 px-4">
+                        <p className="font-medium text-slate-800 text-sm">{p.branchName}</p>
+                        <p className="text-xs text-slate-500">{p.stageName}</p>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {p.totalQuestions === 0 ? (
+                          <Badge variant="warning">Maqra Belum Ditetapkan</Badge>
+                        ) : (
+                          <div className="space-y-1">
+                            {p.stageQuestions.map((q, qIdx) => (
+                              <div key={`${q.id || q.questionId}-${qIdx}`} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                <span className="font-semibold text-emerald-800">
+                                  {q.code ? `${q.code}: ` : ''}{q.title}
+                                </span>
+                                <span className="text-xs text-slate-500 font-mono tabular-nums">
+                                  (Hal. {q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd ? `${q.pageStart}-${q.pageEnd}` : q.pageNumber})
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        {p.judgeStatus === 'no_maqra' ? (
+                          <Badge variant="neutral">Maqra Belum Ada</Badge>
+                        ) : isFinal ? (
+                          <Badge variant="success" icon={<Lock className="w-3 h-3" />}>
+                            Final ({p.finalizedCount}/{p.totalQuestions} Maqra)
+                          </Badge>
+                        ) : isInProgress ? (
+                          <Badge variant="warning" dot>
+                            Berlangsung ({p.finalizedCount}/{p.totalQuestions} Maqra)
+                          </Badge>
+                        ) : (
+                          <Badge variant="neutral" icon={<Clock className="w-3 h-3" />}>
+                            Belum Dimulai (0/{p.totalQuestions} Maqra)
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-bold font-mono text-sm tabular-nums text-slate-900">
+                        {p.judgeScore}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        {p.totalQuestions === 0 ? (
+                          <Button size="sm" variant="secondary" disabled title="Peserta belum memiliki maqra pada babak ini">
+                            Menunggu Maqra
+                          </Button>
+                        ) : isInProgress ? (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={() => handleOpenScoring(p.id)}
+                            leftIcon={<BookmarkCheck className="w-3.5 h-3.5" />}
+                          >
+                            Lanjut Menilai
+                          </Button>
+                        ) : isFinal ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleOpenScoring(p.id)}
+                            leftIcon={<BookmarkCheck className="w-3.5 h-3.5" />}
+                          >
+                            Lihat Lembar
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleOpenScoring(p.id)}
+                            leftIcon={<BookmarkCheck className="w-3.5 h-3.5" />}
+                          >
+                            Mulai Menilai
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 };

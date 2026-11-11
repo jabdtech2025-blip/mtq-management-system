@@ -446,3 +446,76 @@ export interface AuditLogItem {
   outcome: 'Success' | 'Failed' | 'Warning';
 }
 
+export interface SiteSettings {
+  id: 'global';
+  siteName: string;
+  titleTemplate: string;
+  defaultTitle: string;
+  metaDescription: string;
+  metaKeywords: string;
+  canonicalUrl: string;
+  robots: 'index,follow' | 'noindex,nofollow';
+  faviconUrl: string;
+  ogTitle: string;
+  ogDescription: string;
+  ogImageUrl: string;
+  ogImageAlt: string;
+  ogType: string;
+  ogLocale: string;
+  twitterCard: 'summary_large_image' | 'summary';
+  twitterSite: string;
+  themeColor: string;
+  googleSiteVerification: string;
+  manualChecks: Record<string, boolean>;
+  updatedBy?: string | null;
+  updatedAt: string;
+}
+
+export const DEFAULT_SITE_SETTINGS: SiteSettings = {
+  id: 'global',
+  siteName: 'Manajemen MTQ',
+  titleTemplate: '%s — Manajemen MTQ',
+  defaultTitle: 'Manajemen MTQ — Musabaqah Digital',
+  metaDescription:
+    'Platform manajemen MTQ multi-tenant dengan penilaian digital dewan hakim, mushaf kanvas, dan rekapitulasi nilai real-time.',
+  metaKeywords: 'MTQ, STQ, LPTQ, Musabaqah Tilawatil Quran, E-Scoring MTQ',
+  canonicalUrl: 'https://mtq.id',
+  robots: 'index,follow',
+  faviconUrl: '/icon.svg',
+  ogTitle: 'Manajemen MTQ — Musabaqah Digital',
+  ogDescription:
+    'Platform manajemen MTQ multi-tenant dengan penilaian digital dewan hakim, mushaf kanvas, dan rekapitulasi nilai real-time.',
+  ogImageUrl: 'https://mtq.id/icons/icon-512x512.png',
+  ogImageAlt: 'Logo dan Antarmuka Manajemen MTQ Digital',
+  ogType: 'website',
+  ogLocale: 'id_ID',
+  twitterCard: 'summary_large_image',
+  twitterSite: '@lptq_id',
+  themeColor: '#065f46',
+  googleSiteVerification: '',
+  manualChecks: {},
+  updatedBy: null,
+  updatedAt: '2026-11-18 09:00 WIB'
+};
+
+export type PlatformHealthCheckKey =
+  | 'schema_version'
+  | 'unmapped_error_categories'
+  | 'borrowed_maqra_sheets'
+  | 'rubrics_without_official_source'
+  | 'tenants_without_active_admin'
+  | 'stages_without_judges'
+  | 'pending_verifications'
+  | 'stalled_assessments'
+  | 'site_settings_missing';
+
+export type PlatformHealthStatus = 'ok' | 'warning' | 'critical';
+
+export interface PlatformHealthCheckItem {
+  key: PlatformHealthCheckKey;
+  label: string;
+  status: PlatformHealthStatus;
+  count: number;
+  detail: Record<string, any>[];
+  how_to_fix: string;
+}

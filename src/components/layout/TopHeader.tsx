@@ -1,26 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Menu,
-  Sparkles,
-  LogOut,
   Bell,
   Trash2,
   CheckCircle2,
   AlertTriangle,
   Info,
   XCircle,
-  ChevronRight
+  ChevronRight,
+  WifiOff
 } from 'lucide-react';
 import { useMtq, ViewType } from '../../context/MtqContext';
 import { formatTimestampDisplay } from '../../utils/dateTime';
+import { PWAInstallHeaderButton } from '../pwa/PWAInstallSection';
 
 export const TopHeader: React.FC = () => {
   const {
     currentView,
     currentTenant,
+    currentUser,
     toggleSidebar,
-    isSuperadminWorkspaceMode,
-    exitTenantWorkspace,
     isLiveSupabaseMode,
     connectionInfo,
     syncStatus,
@@ -102,85 +101,99 @@ export const TopHeader: React.FC = () => {
       ? 'bg-amber-400'
       : 'bg-amber-500';
 
-  // Breadcrumb mapping for Enterprise AppShell
+  const groupLabel = currentTenant?.groupLabel || 'Grup';
+
+  // Breadcrumb mapping disamakan dengan label menu & kelompok tahap lomba di Sidebar
   const viewRouteInfo: Record<ViewType, { section: string; title: string }> = {
-    dashboard: { section: 'Operasional', title: 'Dashboard' },
-    kafilah: { section: 'Data Peserta', title: 'Grup & Peserta' },
-    bank_soal: { section: 'Materi Lomba', title: 'Bank Soal & Maqra' },
-    master_data: { section: 'Konfigurasi', title: 'Master Data & Rubrik' },
-    user_management: { section: 'Pengaturan', title: 'Pengguna & Hakim' },
-    penilaian_hakim: { section: 'Penilaian', title: 'Monitoring Penilaian' },
-    rekap_nilai: { section: 'Hasil Lomba', title: 'Rekap Nilai Real-Time' },
-    stage_management: { section: 'Kompetisi', title: 'Manajemen Babak' },
-    hasil_kelulusan: { section: 'Hasil Lomba', title: 'Hasil & Kelulusan' },
-    penilaian_dual_panel: { section: 'Penilaian', title: 'Penilaian Mushaf' },
-    log_aktivitas: { section: 'Sistem', title: 'Log Aktivitas' },
-    superadmin_dashboard: { section: 'Superadmin', title: 'Dashboard Platform' },
-    superadmin_tenants: { section: 'Superadmin', title: 'Penyelenggara MTQ' },
-    superadmin_users: { section: 'Superadmin', title: 'Manajemen Akun' },
-    superadmin_audit: { section: 'Superadmin', title: 'Audit Log Platform' }
+    dashboard: { section: 'Ringkasan', title: 'Dashboard' },
+    master_data: { section: 'Persiapan', title: 'Master Data & Rubrik' },
+    user_management: { section: 'Persiapan', title: 'Pengguna & Hakim' },
+    bank_soal: { section: 'Persiapan', title: 'Bank Soal & Maqra' },
+    kafilah: { section: 'Pendaftaran', title: 'Grup & Peserta' },
+    stage_management: { section: 'Pelaksanaan', title: 'Manajemen Babak' },
+    penilaian_hakim: {
+      section: currentUser.role === 'judge' ? 'Pelaksanaan Penilaian' : 'Pelaksanaan',
+      title: currentUser.role === 'judge' ? 'Peserta Saya' : 'Monitoring Penilaian'
+    },
+    penilaian_dual_panel: {
+      section: currentUser.role === 'judge' ? 'Pelaksanaan Penilaian' : 'Pelaksanaan',
+      title: 'Penilaian Mushaf'
+    },
+    rekap_nilai: {
+      section: currentUser.role === 'judge' ? 'Pelaksanaan Penilaian' : 'Pelaksanaan',
+      title: currentUser.role === 'judge' ? 'Rekap / Riwayat Nilai' : 'Rekap Nilai Real-Time'
+    },
+    hasil_kelulusan: { section: 'Hasil', title: 'Hasil & Kelulusan' },
+    log_aktivitas: { section: 'Audit', title: 'Log Aktivitas' },
+    superadmin_dashboard: { section: 'Superadmin Platform', title: 'Dashboard Platform' },
+    superadmin_tenants: { section: 'Superadmin Platform', title: 'Penyelenggara MTQ (Manajemen MTQ)' },
+    superadmin_users: { section: 'Superadmin Platform', title: 'Manajemen Akun' },
+    superadmin_health: { section: 'Superadmin Platform', title: 'Kesehatan Sistem (Health Check)' },
+    superadmin_audit: { section: 'Superadmin Platform', title: 'Audit Log Platform' },
+    superadmin_settings: { section: 'Superadmin Platform', title: 'SEO dan Meta Situs' }
   };
 
-  const routeInfo = viewRouteInfo[currentView] || { section: 'Beranda', title: 'MTQ Digital' };
+  const routeInfo = viewRouteInfo[currentView] || { section: 'Ringkasan', title: 'Dashboard' };
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shrink-0 select-none">
-      {isSuperadminWorkspaceMode && (
-        <div className="bg-amber-900 text-amber-50 px-4 lg:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs border-b border-amber-700/60">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-normal uppercase tracking-wider text-xs">
-              <Sparkles className="w-3 h-3" /> Mode Supervisi Tenant
-            </span>
-            <span className="font-normal text-amber-100">
-              Anda sedang mengelola ruang kerja operasional:{' '}
-              <span className="text-white underline decoration-amber-400">{currentTenant.name}</span> ({currentTenant.eventName})
-            </span>
-          </div>
-          <button
-            onClick={exitTenantWorkspace}
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-800 hover:bg-amber-700 text-white font-normal transition-colors border border-amber-600 cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            Kembali ke Panel Platform
-          </button>
-        </div>
-      )}
-
+    <header className="surface-glass border-b border-slate-200 sticky top-0 z-30 shrink-0 select-none">
       <div className="px-4 lg:px-6 py-3 flex items-center justify-between gap-3">
-        {/* Left: AppShell Breadcrumb Routing Header (all non-bold) */}
+        {/* Left: AppShell Breadcrumb Routing Header */}
         <div className="flex items-center gap-3 min-w-0">
           <button
+            type="button"
             onClick={toggleSidebar}
             aria-label="Buka menu navigasi"
-            className="lg:hidden p-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 transition-colors cursor-pointer shrink-0"
+            className="lg:hidden w-10 h-10 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 transition-colors cursor-pointer shrink-0 shadow-sm"
           >
             <Menu className="w-5 h-5" />
           </button>
 
-          {/* Dynamic Breadcrumb Route - Non-bold text */}
-          <div className="flex items-center gap-1.5 min-w-0 text-xs sm:text-sm font-normal">
-            <span className="text-slate-400 font-normal hidden sm:inline truncate">
+          {/* Dynamic Breadcrumb Route */}
+          <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 min-w-0 text-xs sm:text-sm">
+            <span className="text-slate-400 hidden sm:inline truncate">
               {currentTenant?.name || 'MTQ'}
             </span>
             <ChevronRight className="w-3.5 h-3.5 text-slate-300 hidden sm:inline shrink-0" />
-            <span className="text-slate-500 font-normal truncate hidden md:inline">
+            <span className="text-slate-500 truncate hidden md:inline">
               {routeInfo.section}
             </span>
             <ChevronRight className="w-3.5 h-3.5 text-slate-300 hidden md:inline shrink-0" />
-            <span className="text-sm sm:text-base font-normal text-slate-800 tracking-tight truncate">
+            <span className="text-sm sm:text-base font-semibold text-slate-800 tracking-tight truncate">
               {routeInfo.title}
             </span>
-          </div>
+          </nav>
         </div>
 
-        {/* Right: Connected Status + Local Notifications Bell */}
-        <div className="flex items-center gap-3 shrink-0">
-          {/* Connection Status Pill (non-bold) */}
+        {/* Right: Offline Badge + PWA Install + Connected Status + Local Notifications Bell */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          {/* Offline Indicator Badge with Pending Sync Count (shown when navigator.onLine === false) */}
+          {!isBrowserOnline && (
+            <div
+              data-testid="header-offline-badge"
+              role="status"
+              aria-live="polite"
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-amber-300 bg-amber-50 text-amber-900 text-xs font-bold shadow-sm"
+              title="Koneksi perangkat terputus. Perubahan disimpan di antrean lokal dan akan disinkronkan saat kembali online."
+            >
+              <WifiOff className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span>
+                Offline ·{' '}
+                <span className="font-mono tabular-nums">{pendingOrFailedCount}</span>{' '}
+                menunggu sinkron
+              </span>
+            </div>
+          )}
+
+          {/* In-App Install Prompt Button */}
+          <PWAInstallHeaderButton />
+
+          {/* Connection Status Pill */}
           <div
             data-testid="header-connection-status"
             title={`${syncStatus}${lastSyncTime ? ` • Sinkron terakhir: ${lastSyncTime}` : ''}`}
-            className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200/80 bg-slate-50 text-xs font-normal text-slate-700 shadow-2xs"
+            className="inline-flex items-center gap-2 h-9 px-3 rounded-md border border-slate-200/80 bg-white/90 text-xs font-medium text-slate-700 shadow-sm"
           >
             <span className={`w-2 h-2 rounded-full ${dotColorClass}`} />
             <span>
@@ -194,7 +207,7 @@ export const TopHeader: React.FC = () => {
             </span>
           </div>
 
-          {/* Notification Bell (placed to the right of connected) */}
+          {/* Notification Bell */}
           <div className="relative" ref={notificationDropdownRef}>
             <button
               type="button"
@@ -206,15 +219,15 @@ export const TopHeader: React.FC = () => {
               }}
               aria-label="Buka notifikasi"
               data-testid="notification-bell-btn"
-              className={`relative p-2 rounded-xl border transition-colors cursor-pointer ${
+              className={`relative w-10 h-10 inline-flex items-center justify-center rounded-md border transition-colors cursor-pointer ${
                 isNotificationOpen
                   ? 'border-emerald-600 bg-emerald-50 text-emerald-900'
-                  : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 shadow-2xs'
+                  : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 shadow-sm'
               }`}
             >
               <Bell className="w-4 h-4" />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-rose-600 text-white rounded-full text-xs font-normal flex items-center justify-center leading-none shadow-xs animate-pulse">
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-rose-600 text-white rounded-full text-xs font-mono tabular-nums flex items-center justify-center leading-none shadow-sm">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
@@ -222,14 +235,14 @@ export const TopHeader: React.FC = () => {
 
             {/* Notification Dropdown Popover */}
             {isNotificationOpen && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-lg shadow-md border border-slate-200 z-50 overflow-hidden transition-all duration-150">
                 <div className="p-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
                   <div className="flex items-center gap-2">
                     <Bell className="w-4 h-4 text-emerald-800" />
-                    <h3 className="text-xs font-normal text-slate-900">
+                    <h3 className="text-xs font-bold text-slate-900">
                       Notifikasi Sistem
                     </h3>
-                    <span className="px-1.5 py-0.2 rounded text-xs font-normal bg-slate-200 text-slate-700">
+                    <span className="px-1.5 py-0.5 rounded-sm text-xs font-mono tabular-nums bg-slate-200 text-slate-700">
                       {notifications.length}
                     </span>
                   </div>
@@ -237,7 +250,7 @@ export const TopHeader: React.FC = () => {
                     <button
                       type="button"
                       onClick={clearNotifications}
-                      className="inline-flex items-center gap-1 text-xs font-normal text-slate-500 hover:text-rose-600 cursor-pointer transition-colors"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-rose-600 cursor-pointer transition-colors"
                       title="Hapus semua riwayat notifikasi lokal"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -249,7 +262,7 @@ export const TopHeader: React.FC = () => {
                 <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
                   {notifications.length === 0 ? (
                     <div className="py-8 px-4 text-center">
-                      <p className="text-xs font-normal text-slate-500">Tidak ada notifikasi baru</p>
+                      <p className="text-xs text-slate-500">Tidak ada notifikasi baru</p>
                     </div>
                   ) : (
                     notifications.map((item) => {
@@ -276,10 +289,10 @@ export const TopHeader: React.FC = () => {
                           {icon}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-1">
-                              <p className="font-medium text-slate-800 text-xs truncate">
+                              <p className="font-semibold text-slate-800 text-xs truncate">
                                 {item.title}
                               </p>
-                              <span className="text-xs text-slate-400 font-mono shrink-0">
+                              <span className="text-xs text-slate-400 font-mono tabular-nums shrink-0">
                                 {formatTimestampDisplay(item.timestamp)}
                               </span>
                             </div>
@@ -287,7 +300,7 @@ export const TopHeader: React.FC = () => {
                               {item.message}
                             </p>
                             {item.module && (
-                              <span className="inline-block mt-1 px-1.5 py-0.2 rounded bg-slate-100 text-xs font-normal text-slate-600">
+                              <span className="inline-block mt-1 px-1.5 py-0.5 rounded-sm bg-slate-100 text-xs text-slate-600">
                                 {item.module}
                               </span>
                             )}

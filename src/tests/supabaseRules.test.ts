@@ -523,6 +523,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261117_flow_consistency.sql'),
     'utf-8'
   );
+  const siteSettings20261118Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261118_site_settings_and_health.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -640,6 +644,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(lottery20261115Sql);
       await pg.exec(integrity20261116Sql);
       await pg.exec(flow20261117Sql);
+      await pg.exec(siteSettings20261118Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -3916,6 +3921,165 @@ export async function runSupabaseTests(): Promise<{
       '99. J4 Rantai Migrasi Lengkap: schema.sql + seluruh migrasi berurutan (sesuai README) + seed.sql berhasil di database kosong tanpa fungsi ganda (overload)',
       chainError === '' && chainOverloads === 0,
       `error: ${chainError}, overloads: ${chainOverloads}`
+    );
+
+    // ---------- 100. Fase 4: Pengaturan SEO (site_settings) RLS, Validasi, & Audit ----------
+    const runAsAnon = async (sql: string) => {
+      try {
+        await pg.exec(`BEGIN; SELECT set_config('request.jwt.claim.sub', '', true); SET LOCAL ROLE anon;`);
+        const r = await pg.query<any>(sql);
+        await pg.exec('COMMIT;');
+        return { ok: true, rows: r.rows, error: '' };
+      } catch (e: any) {
+        await pg.exec('ROLLBACK;');
+        return { ok: false, rows: [] as any[], error: String(e?.message || e) };
+      }
+    };
+
+    const anonReadSettings = await runAsAnon(`SELECT id, site_name, robots FROM public.site_settings WHERE id = 'global';`);
+    const anonUpdateSettings = await runAsAnon(
+      `UPDATE public.site_settings SET site_name = 'Diretas Anon' WHERE id = 'global' RETURNING id;`
+    );
+    const adminUpdateSettings = await runAs(
+      igAdminId,
+      `UPDATE public.site_settings SET site_name = 'Diubah Admin Tenant' WHERE id = 'global' RETURNING id;`
+    );
+    const judgeUpdateSettings = await runAs(
+      igJudgeTajwidId,
+      `UPDATE public.site_settings SET site_name = 'Diubah Hakim' WHERE id = 'global' RETURNING id;`
+    );
+    const superUpdateSettings = await runAs(
+      bootstrapUserId,
+      `UPDATE public.site_settings
+       SET default_title = 'MTQ Nasional XXX — Penilaian Digital LPTQ',
+           og_title = 'MTQ Nasional XXX Resmi',
+           robots = 'index,follow'
+       WHERE id = 'global'
+       RETURNING id, default_title, og_title, updated_by::text;`
+    );
+    const siteSettingsAuditCheck = await runAs(
+      bootstrapUserId,
+      `SELECT action, summary, metadata FROM public.audit_logs WHERE action = 'SITE_SETTINGS_UPDATED' ORDER BY created_at DESC LIMIT 1;`
+    );
+    const tooLongTitleUpdate = await runAs(
+      bootstrapUserId,
+      `UPDATE public.site_settings SET default_title = '${'A'.repeat(75)}' WHERE id = 'global';`
+    );
+    const tooLongDescUpdate = await runAs(
+      bootstrapUserId,
+      `UPDATE public.site_settings SET meta_description = '${'B'.repeat(205)}' WHERE id = 'global';`
+    );
+    const nonHttpsCanonicalUpdate = await runAs(
+      bootstrapUserId,
+      `UPDATE public.site_settings SET canonical_url = 'http://tidak-aman.mtq.id' WHERE id = 'global';`
+    );
+    const nonHttpsOgImageUpdate = await runAs(
+      bootstrapUserId,
+      `UPDATE public.site_settings SET og_image_url = 'http://tidak-aman.mtq.id/og.png' WHERE id = 'global';`
+    );
+
+    assert(
+      '100. Fase 4 Pengaturan SEO (site_settings): anon dapat membaca, admin tenant & hakim ditolak mengubah, superadmin berhasil memperbarui & tercatat di audit_logs (SITE_SETTINGS_UPDATED), serta validasi panjang & protokol https://',
+      anonReadSettings.ok === true &&
+        anonReadSettings.rows.length === 1 &&
+        (anonUpdateSettings.ok === false || anonUpdateSettings.rows.length === 0) &&
+        adminUpdateSettings.rows.length === 0 &&
+        judgeUpdateSettings.rows.length === 0 &&
+        superUpdateSettings.ok === true &&
+        superUpdateSettings.rows.length === 1 &&
+        superUpdateSettings.rows[0]?.updated_by === bootstrapUserId &&
+        siteSettingsAuditCheck.ok === true &&
+        siteSettingsAuditCheck.rows.length === 1 &&
+        String(siteSettingsAuditCheck.rows[0]?.summary || '').includes('default_title') &&
+        String(siteSettingsAuditCheck.rows[0]?.summary || '').includes('og_title') &&
+        tooLongTitleUpdate.ok === false &&
+        tooLongDescUpdate.ok === false &&
+        nonHttpsCanonicalUpdate.ok === false &&
+        nonHttpsOgImageUpdate.ok === false,
+      `anonRead: ${anonReadSettings.rows.length}, adminRows: ${adminUpdateSettings.rows.length}, judgeRows: ${judgeUpdateSettings.rows.length}, superOk: ${superUpdateSettings.ok} (${superUpdateSettings.error}), auditSummary: ${siteSettingsAuditCheck.rows[0]?.summary}, titleConstraintOk: ${!tooLongTitleUpdate.ok}, descConstraintOk: ${!tooLongDescUpdate.ok}, httpsCanonicalOk: ${!nonHttpsCanonicalUpdate.ok}, httpsOgOk: ${!nonHttpsOgImageUpdate.ok}`
+    );
+
+    // ---------- 101. Fase 5: Health Dashboard RPC (get_platform_health) & app_schema_versions ----------
+    const anonHealthCall = await runAsAnon(`SELECT public.get_platform_health() AS h;`);
+    const adminHealthCall = await runAs(igAdminId, `SELECT public.get_platform_health() AS h;`);
+    const judgeHealthCall = await runAs(igJudgeTajwidId, `SELECT public.get_platform_health() AS h;`);
+
+    const healthTestTenantId = generateUuid();
+    const healthTestCatId = generateUuid();
+    const healthTestStageId = generateUuid();
+    const healthTestPartId = generateUuid();
+    const healthTestSpId = generateUuid();
+
+    await asSuper(`
+      INSERT INTO public.tenants (id, code, name, event_name, region, edition, period, status)
+      VALUES ('${healthTestTenantId}', 'MTQ-HEALTH-TEST', 'LPTQ Uji Health Tanpa Admin', 'MTQ Uji Health 2026', 'Nasional', 'Pedoman 2025', '2026', 'Aktif');
+
+      INSERT INTO public.error_categories (id, tenant_id, code, name, default_deduction, status, rubric_field_id, criterion_id, deduction_rule_id)
+      VALUES ('${healthTestCatId}', '${healthTestTenantId}', 'ERR-UNMAP-99', 'Kategori Uji Tanpa Pemetaan', 1.00, 'Aktif', NULL, NULL, NULL);
+
+      INSERT INTO public.stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, status, is_finalized)
+      VALUES ('${healthTestStageId}', '${tenantJabarId}', '${igBranchId}', 'Babak Uji Tanpa Hakim Fase 5', 99, 3, 'Aktif', false);
+
+      INSERT INTO public.participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status, verification_status)
+      VALUES ('${healthTestPartId}', '${tenantJabarId}', '${kafilahBandungId}', '${igBranchId}', 'HLT-01', 'Peserta Uji Health Diajukan', 'Putra', 'HLT-01', 'Menunggu', 'Diajukan');
+
+      INSERT INTO public.stage_participations (id, tenant_id, stage_id, participant_id, lottery_number, status)
+      VALUES ('${healthTestSpId}', '${tenantJabarId}', '${healthTestStageId}', '${healthTestPartId}', 'HLT-01', 'Belum Dimulai');
+    `);
+
+    const superHealthCall = await runAs(bootstrapUserId, `SELECT public.get_platform_health() AS h;`);
+    const healthItems: Array<{
+      key: string;
+      label: string;
+      status: 'ok' | 'warning' | 'critical';
+      count: number;
+      detail: any[];
+      how_to_fix: string;
+    }> = Array.isArray(superHealthCall.rows[0]?.h) ? superHealthCall.rows[0].h : [];
+
+    const expectedHealthKeys = [
+      'schema_version',
+      'unmapped_error_categories',
+      'borrowed_maqra_sheets',
+      'rubrics_without_official_source',
+      'tenants_without_active_admin',
+      'stages_without_judges',
+      'pending_verifications',
+      'stalled_assessments',
+      'site_settings_missing'
+    ];
+    const returnedKeySet = new Set(healthItems.map((i) => i.key));
+    const hasAllHealthKeys = expectedHealthKeys.every((k) => returnedKeySet.has(k));
+    const findHealthItem = (k: string) => healthItems.find((i) => i.key === k);
+
+    // Bersihkan data uji sementara agar tidak mengganggu tes berikutnya
+    await asSuper(`
+      DELETE FROM public.stage_participations WHERE id = '${healthTestSpId}';
+      DELETE FROM public.participants WHERE id = '${healthTestPartId}';
+      DELETE FROM public.stages WHERE id = '${healthTestStageId}';
+      DELETE FROM public.error_categories WHERE id = '${healthTestCatId}';
+      DELETE FROM public.tenants WHERE id = '${healthTestTenantId}';
+    `);
+
+    assert(
+      '101. Fase 5 Health Dashboard RPC (get_platform_health): ditolak untuk anon, admin tenant, & hakim; mengembalikan seluruh 9 key pemeriksaan bagi superadmin; dan mendeteksi akurat status critical/warning pada data uji',
+      anonHealthCall.ok === false &&
+        adminHealthCall.ok === false &&
+        judgeHealthCall.ok === false &&
+        superHealthCall.ok === true &&
+        hasAllHealthKeys === true &&
+        findHealthItem('schema_version')?.status === 'ok' &&
+        findHealthItem('unmapped_error_categories')?.status === 'critical' &&
+        (findHealthItem('unmapped_error_categories')?.count || 0) >= 1 &&
+        findHealthItem('tenants_without_active_admin')?.status === 'warning' &&
+        (findHealthItem('tenants_without_active_admin')?.count || 0) >= 1 &&
+        findHealthItem('stages_without_judges')?.status === 'warning' &&
+        (findHealthItem('stages_without_judges')?.count || 0) >= 1 &&
+        findHealthItem('pending_verifications')?.status === 'warning' &&
+        (findHealthItem('pending_verifications')?.count || 0) >= 1,
+      `anonOk: ${anonHealthCall.ok}, adminOk: ${adminHealthCall.ok}, judgeOk: ${judgeHealthCall.ok}, superOk: ${superHealthCall.ok} (${superHealthCall.error}), hasAllKeys: ${hasAllHealthKeys}, items: ${JSON.stringify(
+        healthItems.map((i) => ({ key: i.key, status: i.status, count: i.count }))
+      )}`
     );
 
     await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);

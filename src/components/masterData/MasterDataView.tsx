@@ -563,7 +563,7 @@ export const MasterDataView: React.FC = () => {
               onClick={() => setActiveTab(tab.id)}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 isActive
-                  ? 'bg-emerald-800 text-white shadow-2xs'
+                  ? 'bg-emerald-800 text-white shadow-sm'
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
               }`}
             >
@@ -576,7 +576,7 @@ export const MasterDataView: React.FC = () => {
 
       {/* Tab 1: Kategori Kesalahan & Pemetaan Bidang Rubrik */}
       {activeTab === 'kategori' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -596,7 +596,7 @@ export const MasterDataView: React.FC = () => {
                 setCatDeduction(0.5);
                 setIsAddCategoryOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Kategori</span>
@@ -736,7 +736,7 @@ export const MasterDataView: React.FC = () => {
                 setNewRubricDescription('');
                 setIsAddRubricOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Buat Versi Rubrik Baru</span>
@@ -762,7 +762,7 @@ export const MasterDataView: React.FC = () => {
                   <div
                     key={`${rubric.id}-${idx}`}
                     className={`bg-white rounded-xl border transition-all ${
-                      isActive ? 'border-emerald-300 ring-1 ring-emerald-300 shadow-xs' : 'border-slate-200'
+                      isActive ? 'border-emerald-300 ring-1 ring-emerald-300 shadow-sm' : 'border-slate-200'
                     } p-5 space-y-4`}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
@@ -819,7 +819,7 @@ export const MasterDataView: React.FC = () => {
                                 text: res.message
                               });
                             }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer shadow-xs"
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer shadow-sm"
                           >
                             Aktifkan Versi Ini
                           </button>
@@ -937,7 +937,7 @@ export const MasterDataView: React.FC = () => {
 
       {/* Tab 3: Aturan Cabang & Tie-Break Dinamis (P0) */}
       {activeTab === 'aturan_cabang' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -963,7 +963,7 @@ export const MasterDataView: React.FC = () => {
                 setRuleIsVerified(true);
                 setIsEditRuleOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Aturan Cabang</span>
@@ -1094,7 +1094,7 @@ export const MasterDataView: React.FC = () => {
 
       {/* Tab 4: Babak Musabaqah */}
       {activeTab === 'babak' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
               Konfigurasi Babak & Kuota Kelulusan
@@ -1107,7 +1107,7 @@ export const MasterDataView: React.FC = () => {
                 setStageBranch(cabangList[0]?.name || 'Semua Cabang');
                 setIsAddStageOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Babak</span>
@@ -1205,14 +1205,14 @@ export const MasterDataView: React.FC = () => {
 
       {/* Tab 5: Jenjang Usia */}
       {activeTab === 'jenjang' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
               Jenjang Usia Musabaqah (Kategori Peserta)
             </h3>
             <button
               onClick={() => setIsAddGenericOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Jenjang</span>
@@ -1289,14 +1289,14 @@ export const MasterDataView: React.FC = () => {
 
       {/* Tab 6: Cabang / Golongan */}
       {activeTab === 'cabang' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
               Cabang dan Golongan Musabaqah
             </h3>
             <button
               onClick={() => setIsAddGenericOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Cabang</span>
@@ -1373,7 +1373,7 @@ export const MasterDataView: React.FC = () => {
 
       {/* Tab 7: Penugasan Hakim */}
       {activeTab === 'hakim' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
               Penugasan Dewan Hakim per Babak, Cabang & Bidang
@@ -1391,7 +1391,7 @@ export const MasterDataView: React.FC = () => {
                 setAssignField(firstField?.name || firstJudge?.judgeField || '');
                 setIsAssignJudgeOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Penugasan Hakim</span>
@@ -1444,8 +1444,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Add / Edit Category Modal with Relational Field Selector */}
       {isAddCategoryOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">
               {editingCategory ? 'Edit Kategori Kesalahan' : 'Tambah Kategori Kesalahan'}
             </h3>
@@ -1548,8 +1548,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Add New Rubric Version Modal */}
       {isAddRubricOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-lg w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">
               Buat Versi Rubrik Baru (Draft Lifecycle)
             </h3>
@@ -1669,8 +1669,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Edit / Add Field Modal */}
       {isEditFieldOpen && editingRubric && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-sm w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">
               {editingField ? `Edit Batas Nilai Bidang: ${editingField.name}` : `Tambah Bidang ke ${editingRubric.name}`}
             </h3>
@@ -1785,8 +1785,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Edit / Add Branch Rule Config Modal */}
       {isEditRuleOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-lg w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">
               {editingRule ? `Edit Aturan Cabang: ${editingRule.branchName}` : 'Tambah Aturan Kompetisi Cabang'}
             </h3>
@@ -1997,8 +1997,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Add Stage Modal */}
       {isAddStageOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">Tambah Babak Baru</h3>
             <form onSubmit={handleSaveStage} className="space-y-4 text-xs">
               <div>
@@ -2067,8 +2067,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Add Generic (Jenjang/Cabang) Modal */}
       {isAddGenericOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl border border-slate-200 p-6">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-sm w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">
               Tambah {activeTab === 'jenjang' ? 'Jenjang Usia' : 'Cabang'}
             </h3>
@@ -2117,8 +2117,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Assign Judge Modal */}
       {isAssignJudgeOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">Penugasan Dewan Hakim</h3>
             <form onSubmit={handleSaveJudgeAssignment} className="space-y-4 text-xs">
               <div>
@@ -2217,8 +2217,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Delete Guard Warning Modal with Deactivate Option */}
       {deleteWarningItem && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
             <div className="flex items-center gap-3 text-amber-600 mb-3">
               <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
                 <AlertCircle className="w-5 h-5 text-amber-700" />
@@ -2253,7 +2253,7 @@ export const MasterDataView: React.FC = () => {
               <button
                 type="button"
                 onClick={handleDeactivateWarningItem}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer"
               >
                 Nonaktifkan Saja
               </button>
@@ -2264,8 +2264,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Rubric Delete Confirmation Modal */}
       {rubricToDelete && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
             <div className="flex items-center gap-3 text-rose-600 mb-3">
               <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
                 <AlertCircle className="w-5 h-5 text-rose-700" />
@@ -2302,7 +2302,7 @@ export const MasterDataView: React.FC = () => {
                     text: res.message
                   });
                 }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer"
               >
                 Ya, Hapus Permanen
               </button>
@@ -2313,8 +2313,8 @@ export const MasterDataView: React.FC = () => {
 
       {/* Rubric Field Delete Confirmation Modal */}
       {fieldToDelete && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
             <div className="flex items-center gap-3 text-rose-600 mb-3">
               <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
                 <AlertCircle className="w-5 h-5 text-rose-700" />
@@ -2347,7 +2347,7 @@ export const MasterDataView: React.FC = () => {
                   handleToggleOrRemoveField(fieldToDelete.rubric, fieldToDelete.field, 'remove');
                   setFieldToDelete(null);
                 }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer"
               >
                 Ya, Hapus Bidang
               </button>

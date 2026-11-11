@@ -32,8 +32,8 @@ test.describe('E2E: Lembar Penilaian Dewan Hakim, Dual Panel & Anotasi Mushaf', 
     // Buka Lembar Penilaian Peserta
     await page.getByRole('button', { name: /Mulai Menilai|Lanjut Menilai|Buka Lembar/i }).first().click();
 
-    // Verifikasi header Lembar Penilaian Dewan Hakim
-    await expect(page.getByText(/Lembar Penilaian Dewan Hakim/i).first()).toBeVisible();
+    // Verifikasi header standar Penilaian Mushaf
+    await expect(page.getByText(/Penilaian Mushaf/i).first()).toBeVisible();
 
     // Verifikasi panel kiri: Mushaf Madinah & toolbar anotasi
     await expect(page.getByText(/Hal\./i).first()).toBeVisible();

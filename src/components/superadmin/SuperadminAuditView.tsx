@@ -48,8 +48,8 @@ export const SuperadminAuditView: React.FC = () => {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-wrap items-center gap-3">
+        <div className="relative flex-[2] min-w-[240px]">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -60,22 +60,20 @@ export const SuperadminAuditView: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedOutcome}
-            onChange={(e) => setSelectedOutcome(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
-          >
-            <option value="Semua Status">Semua Status Hasil</option>
-            <option value="Success">Success</option>
-            <option value="Warning">Warning</option>
-            <option value="Failed">Failed</option>
-          </select>
-        </div>
+        <select
+          value={selectedOutcome}
+          onChange={(e) => setSelectedOutcome(e.target.value)}
+          className="flex-1 sm:max-w-xs min-w-[180px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
+        >
+          <option value="Semua Status">Semua Status Hasil</option>
+          <option value="Success">Success</option>
+          <option value="Warning">Warning</option>
+          <option value="Failed">Failed</option>
+        </select>
       </div>
 
       {/* Audit Log Table */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[800px] text-xs">
             <thead>

@@ -239,8 +239,8 @@ export const SuperadminUsersView: React.FC = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-wrap items-center gap-3">
+        <div className="relative flex-[2] min-w-[240px]">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -251,37 +251,35 @@ export const SuperadminUsersView: React.FC = () => {
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <select
-            value={selectedRoleFilter}
-            onChange={(e) => setSelectedRoleFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
-          >
-            <option value="Semua Peran">Semua Peran</option>
-            <option value="Superadmin">Superadmin</option>
-            <option value="Admin">Admin MTQ</option>
-            <option value="Hakim">Dewan Hakim</option>
-          </select>
+        <select
+          value={selectedRoleFilter}
+          onChange={(e) => setSelectedRoleFilter(e.target.value)}
+          className="flex-1 min-w-[160px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
+        >
+          <option value="Semua Peran">Semua Peran</option>
+          <option value="Superadmin">Superadmin</option>
+          <option value="Admin">Admin MTQ</option>
+          <option value="Hakim">Dewan Hakim</option>
+        </select>
 
-          <select
-            value={selectedTenantFilter}
-            onChange={(e) => setSelectedTenantFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
-          >
-            <option value="Semua Tenant">Semua Tenant MTQ</option>
-            <option value="Platform">Platform Inti</option>
-            <option value="unassigned">Belum Ditugaskan (Tabel Profiles)</option>
-            {tenants.map((t, idx) => (
-              <option key={`${t.id}-${idx}`} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          value={selectedTenantFilter}
+          onChange={(e) => setSelectedTenantFilter(e.target.value)}
+          className="flex-1 min-w-[200px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
+        >
+          <option value="Semua Tenant">Semua Tenant MTQ</option>
+          <option value="Platform">Platform Inti</option>
+          <option value="unassigned">Belum Ditugaskan (Tabel Profiles)</option>
+          {tenants.map((t, idx) => (
+            <option key={`${t.id}-${idx}`} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Users Table */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[780px] text-xs">
             <thead>
@@ -450,8 +448,8 @@ export const SuperadminUsersView: React.FC = () => {
 
       {/* Reassign Tenant Confirmation Modal */}
       {reassignModalUser && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-2">
               {reassignModalUser.tenantId === 'unassigned'
                 ? 'Tetapkan Penyelenggara MTQ (Tenant)'
@@ -473,7 +471,7 @@ export const SuperadminUsersView: React.FC = () => {
                 <select
                   value={targetTenantId}
                   onChange={(e) => setTargetTenantId(e.target.value)}
-                  className="px-2 py-1 border border-slate-300 rounded font-semibold text-slate-900 bg-white"
+                  className="px-2 py-1 border border-slate-300 rounded-md font-semibold text-slate-900 bg-white"
                 >
                   {tenants.map((t, idx) => (
                     <option key={`${t.id}-${idx}`} value={t.id}>
@@ -504,15 +502,16 @@ export const SuperadminUsersView: React.FC = () => {
 
       {/* Add / Edit User Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
             <div className="flex items-center justify-between pb-3 border-b mb-4">
               <h3 className="font-extrabold text-base text-slate-900">
                 {editingUser ? 'Edit Akun Pengguna' : 'Tambah Akun Global'}
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                aria-label="Tutup modal akun global"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-md"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -629,8 +628,8 @@ export const SuperadminUsersView: React.FC = () => {
 
       {/* Delete User Confirmation Modal */}
       {deleteModalUser && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150 space-y-4">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6 space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
                 <Trash2 className="w-5 h-5" />

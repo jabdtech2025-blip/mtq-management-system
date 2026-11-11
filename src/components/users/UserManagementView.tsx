@@ -252,8 +252,8 @@ export const UserManagementView: React.FC = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center gap-3">
-        <div className="relative flex-1">
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-wrap items-center gap-3">
+        <div className="relative flex-[2] min-w-[240px]">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -264,21 +264,19 @@ export const UserManagementView: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <select
-            value={selectedRoleFilter}
-            onChange={(e) => setSelectedRoleFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
-          >
-            <option value="Semua Peran">Semua Peran</option>
-            <option value="Admin">Admin MTQ</option>
-            <option value="Hakim">Dewan Hakim</option>
-          </select>
-        </div>
+        <select
+          value={selectedRoleFilter}
+          onChange={(e) => setSelectedRoleFilter(e.target.value)}
+          className="flex-1 sm:max-w-xs min-w-[180px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
+        >
+          <option value="Semua Peran">Semua Peran</option>
+          <option value="Admin">Admin MTQ</option>
+          <option value="Hakim">Dewan Hakim</option>
+        </select>
       </div>
 
       {/* Users Table */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[780px] text-xs">
             <thead>
@@ -454,15 +452,16 @@ export const UserManagementView: React.FC = () => {
 
       {/* Add / Edit User Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-lg w-full shadow-lg border border-slate-200 p-6">
             <div className="flex items-center justify-between pb-3 border-b mb-4">
               <h3 className="font-extrabold text-base text-slate-900">
                 {editingUser ? 'Edit Pengguna / Hakim' : 'Tambah Pengguna Baru'}
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                aria-label="Tutup modal pengguna"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-md"
               >
                 <X className="w-5 h-5" />
               </button>

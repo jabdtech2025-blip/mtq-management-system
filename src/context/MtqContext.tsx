@@ -20,7 +20,9 @@ import {
   RubricVersion,
   CompetitionRuleConfig,
   LotteryDrawLogItem,
-  LotteryDrawResultItem
+  LotteryDrawResultItem,
+  SiteSettings,
+  DEFAULT_SITE_SETTINGS
 } from '../types/mtq';
 import {
   INITIAL_TENANTS,
@@ -85,7 +87,9 @@ export type ViewType =
   | 'superadmin_dashboard'
   | 'superadmin_tenants'
   | 'superadmin_users'
-  | 'superadmin_audit';
+  | 'superadmin_health'
+  | 'superadmin_audit'
+  | 'superadmin_settings';
 
 export interface LocalNotification {
   id: string;
@@ -397,6 +401,8 @@ interface MtqContextType {
   requestPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
   completePasswordReset: (newPassword: string) => Promise<{ success: boolean; message: string }>;
   bootstrapFirstSuperadmin: (targetEmail: string) => Promise<{ success: boolean; message: string }>;
+  siteSettings: SiteSettings;
+  updateSiteSettings: (updates: Partial<SiteSettings>) => Promise<{ success: boolean; message: string }>;
 }
 
 const MtqContext = createContext<MtqContextType | undefined>(undefined);
@@ -422,9 +428,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [currentTenantId, setCurrentTenantId] = useState<string>(() => {
     try {
-      return localStorage.getItem(STORAGE_PREFIX + 'tenant_id') || 'tenant-jabar';
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'tenant_id');
+      if (saved) return saved;
+      return 'platform';
     } catch {
-      return 'tenant-jabar';
+      return 'platform';
     }
   });
 
@@ -715,7 +723,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     superadmin_dashboard: '/platform/dashboard',
     superadmin_tenants: '/platform/tenants',
     superadmin_users: '/platform/users',
-    superadmin_audit: '/platform/audit'
+    superadmin_health: '/platform/health',
+    superadmin_audit: '/platform/audit',
+    superadmin_settings: '/platform/settings'
   };
 
   const PATH_TO_VIEW: Record<string, ViewType> = Object.entries(VIEW_TO_PATH).reduce(
@@ -7452,6 +7462,125 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'site_settings');
+      if (saved) {
+        return { ...DEFAULT_SITE_SETTINGS, ...JSON.parse(saved), id: 'global' };
+      }
+    } catch {
+      // Fallback to default
+    }
+    return { ...DEFAULT_SITE_SETTINGS };
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + 'site_settings', JSON.stringify(siteSettings));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [siteSettings]);
+
+  useEffect(() => {
+    if (isLiveDbActive) {
+      void supabaseDataService.fetchSiteSettings().then((res) => {
+        if (res.success && res.data) {
+          setSiteSettings(res.data);
+        }
+      });
+    }
+  }, [isLiveDbActive]);
+
+  const updateSiteSettings = async (
+    updates: Partial<SiteSettings>
+  ): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'superadmin') {
+      return {
+        success: false,
+        message: 'Akses ditolak: Hanya Superadmin yang dapat memperbarui Pengaturan SEO & Meta.'
+      };
+    }
+
+    const nextSettings: SiteSettings = {
+      ...siteSettings,
+      ...updates,
+      id: 'global'
+    };
+
+    if (nextSettings.defaultTitle.trim().length > 70) {
+      return {
+        success: false,
+        message: 'Judul Bawaan (Default Title) maksimal 70 karakter.'
+      };
+    }
+    if (nextSettings.metaDescription.trim().length > 200) {
+      return {
+        success: false,
+        message: 'Deskripsi Meta maksimal 200 karakter.'
+      };
+    }
+    if (!/^https:\/\//.test(nextSettings.canonicalUrl.trim())) {
+      return {
+        success: false,
+        message: 'Canonical URL wajib diawali dengan https://'
+      };
+    }
+    if (!/^https:\/\//.test(nextSettings.ogImageUrl.trim())) {
+      return {
+        success: false,
+        message: 'URL Gambar Open Graph wajib diawali dengan https://'
+      };
+    }
+
+    const changedKeys = (Object.keys(updates) as (keyof SiteSettings)[]).filter(
+      (k) => k !== 'updatedAt' && k !== 'updatedBy' && updates[k] !== siteSettings[k]
+    );
+
+    if (isLiveDbActive) {
+      const res = await supabaseDataService.updateSiteSettings(updates);
+      if (!res.success) {
+        return { success: false, message: res.message };
+      }
+      if (res.data) {
+        setSiteSettings(res.data);
+      }
+    } else {
+      const nowWib = getWibTime();
+      const updatedLocal: SiteSettings = {
+        ...nextSettings,
+        updatedBy: currentUser.id,
+        updatedAt: `18 Nov 2026 ${nowWib}`
+      };
+      setSiteSettings(updatedLocal);
+    }
+
+    const changedColsSummary =
+      changedKeys.length > 0 ? changedKeys.join(', ') : 'updated_at';
+
+    setAuditLogs((prev) => [
+      {
+        id: generateUniqueLogId('aud'),
+        timestamp: `18 Nov 2026 ${getWibTime()}`,
+        actor: `${currentUser.name} (${currentUser.role})`,
+        action: 'SITE_SETTINGS_UPDATED',
+        target: 'Pengaturan Situs & SEO (global)',
+        tenantName: 'Platform Global',
+        summary: `Memperbarui pengaturan SEO & meta situs. Kolom berubah: ${changedColsSummary}`,
+        outcome: 'Success'
+      },
+      ...prev
+    ]);
+
+    setSyncStatus('Pengaturan SEO & Meta Disimpan');
+    setLastSyncTime(getWibTime());
+
+    return {
+      success: true,
+      message: 'Pengaturan SEO & Meta situs berhasil diperbarui dan tercatat pada log audit.'
+    };
+  };
+
   return (
     <MtqContext.Provider
       value={{
@@ -7580,6 +7709,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         requestPasswordReset,
         completePasswordReset,
         bootstrapFirstSuperadmin,
+        siteSettings,
+        updateSiteSettings,
         notifications,
         addNotification,
         markAllNotificationsAsRead,

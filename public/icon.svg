@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#065f46" />
+  <rect x="44" y="44" width="424" height="424" rx="84" fill="none" stroke="#10b981" stroke-width="6" opacity="0.35" />
+  <!-- Open Mushaf / BookOpen Icon -->
+  <path d="M112 164c0-17.673 14.327-32 32-32h72c22.091 0 40 17.909 40 40v196c0-13.255-10.745-24-24-24h-88c-17.673 0-32-14.327-32-32V164z" fill="#ffffff" />
+  <path d="M400 164c0-17.673-14.327-32-32-32h-72c-22.091 0-40 17.909-40 40v196c0-13.255 10.745-24 24-24h88c17.673 0 32-14.327 32-32V164z" fill="#ecfdf5" />
+  <!-- Gold Spine & Bookmark Accent -->
+  <rect x="248" y="156" width="16" height="216" rx="8" fill="#f59e0b" />
+  <circle cx="256" cy="120" r="14" fill="#fbbf24" />
+  <!-- Page Lines -->
+  <rect x="140" y="188" width="84" height="12" rx="6" fill="#065f46" opacity="0.75" />
+  <rect x="140" y="218" width="84" height="12" rx="6" fill="#065f46" opacity="0.55" />
+  <rect x="140" y="248" width="64" height="12" rx="6" fill="#065f46" opacity="0.4" />
+  <rect x="288" y="188" width="84" height="12" rx="6" fill="#065f46" opacity="0.75" />
+  <rect x="288" y="218" width="84" height="12" rx="6" fill="#065f46" opacity="0.55" />
+  <rect x="288" y="248" width="64" height="12" rx="6" fill="#065f46" opacity="0.4" />
+</svg>

@@ -26,9 +26,13 @@ import {
   RubricCriterion,
   DeductionRule,
   LotteryDrawLogItem,
-  LotteryDrawResultItem
+  LotteryDrawResultItem,
+  SiteSettings,
+  DEFAULT_SITE_SETTINGS,
+  PlatformHealthCheckItem
 } from '../types/mtq';
 import { generateUuid, isValidUuid, toDeterministicUuid, validateDatabaseUuids } from '../utils/uuid';
+import { formatDateTimeWIB } from '../utils/dateTime';
 
 export interface RpcServiceResult<T = Record<string, any>> {
   success: boolean;
@@ -4094,5 +4098,180 @@ export const supabaseDataService = {
         // Ignore cleanup errors on unmount
       }
     };
+  },
+
+  async fetchSiteSettings(): Promise<RpcServiceResult<SiteSettings>> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: true,
+        mode: 'local_offline_fallback',
+        message: 'Menggunakan pengaturan SEO & Meta bawaan (Mode Lokal).',
+        data: { ...DEFAULT_SITE_SETTINGS }
+      };
+    }
+
+    const { data, error } = await client
+      .from('site_settings')
+      .select('*')
+      .eq('id', 'global')
+      .maybeSingle();
+
+    if (error || !data) {
+      return {
+        success: false,
+        mode: 'supabase_live',
+        message: error?.message || 'Baris site_settings global belum ditemukan.',
+        data: { ...DEFAULT_SITE_SETTINGS }
+      };
+    }
+
+    const mapped: SiteSettings = {
+      id: 'global',
+      siteName: String(data.site_name ?? DEFAULT_SITE_SETTINGS.siteName),
+      titleTemplate: String(data.title_template ?? DEFAULT_SITE_SETTINGS.titleTemplate),
+      defaultTitle: String(data.default_title ?? DEFAULT_SITE_SETTINGS.defaultTitle),
+      metaDescription: String(data.meta_description ?? DEFAULT_SITE_SETTINGS.metaDescription),
+      metaKeywords: String(data.meta_keywords ?? DEFAULT_SITE_SETTINGS.metaKeywords),
+      canonicalUrl: String(data.canonical_url ?? DEFAULT_SITE_SETTINGS.canonicalUrl),
+      robots: data.robots === 'noindex,nofollow' ? 'noindex,nofollow' : 'index,follow',
+      faviconUrl: String(data.favicon_url ?? DEFAULT_SITE_SETTINGS.faviconUrl),
+      ogTitle: String(data.og_title ?? DEFAULT_SITE_SETTINGS.ogTitle),
+      ogDescription: String(data.og_description ?? DEFAULT_SITE_SETTINGS.ogDescription),
+      ogImageUrl: String(data.og_image_url ?? DEFAULT_SITE_SETTINGS.ogImageUrl),
+      ogImageAlt: String(data.og_image_alt ?? DEFAULT_SITE_SETTINGS.ogImageAlt),
+      ogType: String(data.og_type ?? DEFAULT_SITE_SETTINGS.ogType),
+      ogLocale: String(data.og_locale ?? DEFAULT_SITE_SETTINGS.ogLocale),
+      twitterCard: data.twitter_card === 'summary' ? 'summary' : 'summary_large_image',
+      twitterSite: String(data.twitter_site ?? DEFAULT_SITE_SETTINGS.twitterSite),
+      themeColor: String(data.theme_color ?? DEFAULT_SITE_SETTINGS.themeColor),
+      googleSiteVerification: String(data.google_site_verification ?? ''),
+      manualChecks:
+        data.manual_checks && typeof data.manual_checks === 'object'
+          ? (data.manual_checks as Record<string, boolean>)
+          : {},
+      updatedBy: data.updated_by ? String(data.updated_by) : null,
+      updatedAt: data.updated_at ? formatDateTimeWIB(String(data.updated_at)) : DEFAULT_SITE_SETTINGS.updatedAt
+    };
+
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message: 'Pengaturan situs berhasil dimuat.',
+      data: mapped
+    };
+  },
+
+  async updateSiteSettings(updates: Partial<SiteSettings>): Promise<RpcServiceResult<SiteSettings>> {
+    if (updates.defaultTitle !== undefined && updates.defaultTitle.trim().length > 70) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: 'Judul Bawaan (Default Title) maksimal 70 karakter.'
+      };
+    }
+    if (updates.metaDescription !== undefined && updates.metaDescription.trim().length > 200) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: 'Deskripsi Meta maksimal 200 karakter.'
+      };
+    }
+    if (updates.canonicalUrl !== undefined && !/^https:\/\//.test(updates.canonicalUrl.trim())) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: 'Canonical URL wajib diawali dengan https://'
+      };
+    }
+    if (updates.ogImageUrl !== undefined && !/^https:\/\//.test(updates.ogImageUrl.trim())) {
+      return {
+        success: false,
+        mode: this.isLive() ? 'supabase_live' : 'local_offline_fallback',
+        message: 'URL Gambar Open Graph wajib diawali dengan https://'
+      };
+    }
+
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: true,
+        mode: 'local_offline_fallback',
+        message: 'Pengaturan SEO & Meta berhasil disimpan pada sesi lokal.',
+        data: {
+          ...DEFAULT_SITE_SETTINGS,
+          ...updates,
+          id: 'global',
+          updatedAt: formatDateTimeWIB(new Date().toISOString())
+        }
+      };
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (updates.siteName !== undefined) payload.site_name = updates.siteName.trim();
+    if (updates.titleTemplate !== undefined) payload.title_template = updates.titleTemplate.trim();
+    if (updates.defaultTitle !== undefined) payload.default_title = updates.defaultTitle.trim();
+    if (updates.metaDescription !== undefined) payload.meta_description = updates.metaDescription.trim();
+    if (updates.metaKeywords !== undefined) payload.meta_keywords = updates.metaKeywords.trim();
+    if (updates.canonicalUrl !== undefined) payload.canonical_url = updates.canonicalUrl.trim();
+    if (updates.robots !== undefined) payload.robots = updates.robots;
+    if (updates.faviconUrl !== undefined) payload.favicon_url = updates.faviconUrl.trim();
+    if (updates.ogTitle !== undefined) payload.og_title = updates.ogTitle.trim();
+    if (updates.ogDescription !== undefined) payload.og_description = updates.ogDescription.trim();
+    if (updates.ogImageUrl !== undefined) payload.og_image_url = updates.ogImageUrl.trim();
+    if (updates.ogImageAlt !== undefined) payload.og_image_alt = updates.ogImageAlt.trim();
+    if (updates.ogType !== undefined) payload.og_type = updates.ogType.trim();
+    if (updates.ogLocale !== undefined) payload.og_locale = updates.ogLocale.trim();
+    if (updates.twitterCard !== undefined) payload.twitter_card = updates.twitterCard;
+    if (updates.twitterSite !== undefined) payload.twitter_site = updates.twitterSite.trim();
+    if (updates.themeColor !== undefined) payload.theme_color = updates.themeColor.trim();
+    if (updates.googleSiteVerification !== undefined)
+      payload.google_site_verification = updates.googleSiteVerification.trim();
+    if (updates.manualChecks !== undefined) payload.manual_checks = updates.manualChecks;
+
+    const { data, error } = await client
+      .from('site_settings')
+      .update(payload)
+      .eq('id', 'global')
+      .select('*')
+      .maybeSingle();
+
+    if (error || !data) {
+      return {
+        success: false,
+        mode: 'supabase_live',
+        message: error?.message || 'Gagal memperbarui pengaturan SEO & Meta (pastikan Anda masuk sebagai Superadmin).'
+      };
+    }
+
+    return this.fetchSiteSettings();
+  },
+
+  async getPlatformHealth(): Promise<RpcServiceResult<PlatformHealthCheckItem[]>> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return {
+        success: false,
+        mode: 'local_offline_fallback',
+        message: 'Evaluasi kesehatan dijalankan dari state lokal Mode Demo.'
+      };
+    }
+
+    const { data, error } = await client.rpc('get_platform_health');
+    if (error || !Array.isArray(data)) {
+      return {
+        success: false,
+        mode: 'supabase_live',
+        message: error?.message || 'Gagal menjalankan pemeriksaan kesehatan platform.'
+      };
+    }
+
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message: 'Pemeriksaan kesehatan platform selesai.',
+      data: data as PlatformHealthCheckItem[]
+    };
   }
 };
+

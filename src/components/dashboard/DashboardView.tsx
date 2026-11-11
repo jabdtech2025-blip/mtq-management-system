@@ -4,16 +4,13 @@ import {
   Building,
   Gavel,
   CheckCircle2,
-  FileSpreadsheet,
   ArrowRight,
   Clock,
-  AlertCircle,
-  Award,
-  Layers,
-  Sparkles
+  Award
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { formatTimestampDisplay } from '../../utils/dateTime';
+import { StatCard, Card, Button, Badge } from '../ui';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -43,8 +40,6 @@ export const DashboardView: React.FC = () => {
   const totalHakim = tenantJudges.length;
 
   const lengkapCount = tenantParticipants.filter((p) => getParticipantProgress(p.id) === 'Lengkap').length;
-  const ongoingCount = tenantParticipants.filter((p) => getParticipantProgress(p.id) === 'Berlangsung').length;
-  const pendingCount = tenantParticipants.filter((p) => getParticipantProgress(p.id) === 'Belum Dimulai').length;
   const waitingOtherCount = tenantParticipants.filter((p) => getParticipantProgress(p.id) === 'Menunggu Hakim Lain').length;
 
   const completionPercentage =
@@ -52,7 +47,6 @@ export const DashboardView: React.FC = () => {
 
   // Real ongoing participant actively being scored or latest active
   const ongoingParticipant = React.useMemo(() => {
-    // 1. Participant currently with 'Berlangsung' progress or status
     const inProgPart = tenantParticipants.find(
       (p) =>
         getParticipantProgress(p.id) === 'Berlangsung' ||
@@ -61,7 +55,6 @@ export const DashboardView: React.FC = () => {
     );
     if (inProgPart) return inProgPart;
 
-    // 2. Participant with active assessment currently in progress
     const activeInProgAsm = assessments.find(
       (a) =>
         (!currentTenant.id || a.tenantId === currentTenant.id) &&
@@ -72,19 +65,16 @@ export const DashboardView: React.FC = () => {
       if (match) return match;
     }
 
-    // 3. Participant with status 'Menunggu Hakim Lain'
     const waitingPart = tenantParticipants.find(
       (p) => getParticipantProgress(p.id) === 'Menunggu Hakim Lain'
     );
     if (waitingPart) return waitingPart;
 
-    // 4. Participant currently selected in context
     if (selectedParticipantId) {
       const selPart = tenantParticipants.find((p) => p.id === selectedParticipantId);
       if (selPart) return selPart;
     }
 
-    // 5. Participant with latest assessment finalized or updated
     const latestAsm = assessments
       .filter((a) => !currentTenant.id || a.tenantId === currentTenant.id)
       .slice()
@@ -94,7 +84,6 @@ export const DashboardView: React.FC = () => {
       if (match) return match;
     }
 
-    // 6. First participant in tenant
     return tenantParticipants[0] || null;
   }, [tenantParticipants, assessments, currentTenant.id, getParticipantProgress, selectedParticipantId]);
 
@@ -106,77 +95,44 @@ export const DashboardView: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* 4 Stat Cards Row derived dynamically */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Peserta */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Peserta Terdaftar</span>
-            <Users className="w-4 h-4" />
-          </div>
-          <div className="mt-3">
-            <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
-              {totalUniqueParticipants}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">
-              {totalStageParticipations} partisipasi babak
-            </p>
-          </div>
-        </div>
-
-        {/* Grup */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Grup / Kafilah</span>
-            <Building className="w-4 h-4" />
-          </div>
-          <div className="mt-3">
-            <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
-              {totalKafilah}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">Utusan daerah aktif</p>
-          </div>
-        </div>
-
-        {/* Hakim (Scoped strictly to currentTenant) */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Dewan Hakim</span>
-            <Gavel className="w-4 h-4" />
-          </div>
-          <div className="mt-3">
-            <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
-              {totalHakim}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">Hakim penilai di event ini</p>
-          </div>
-        </div>
-
-        {/* Penilaian Selesai */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-500">Penilaian Lengkap</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-          </div>
-          <div className="flex items-baseline gap-2 mt-3">
-            <span className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
-              {lengkapCount}
-            </span>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-              {completionPercentage}%
-            </span>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            {waitingOtherCount > 0 ? `${waitingOtherCount} menunggu hakim lain` : 'Semua hakim sinkron'}
-          </p>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Peserta Terdaftar"
+          value={totalUniqueParticipants}
+          subtitle={`${totalStageParticipations} partisipasi babak`}
+          icon={<Users />}
+          tone="emerald"
+        />
+        <StatCard
+          label="Grup / Kafilah"
+          value={totalKafilah}
+          subtitle="Utusan daerah aktif"
+          icon={<Building />}
+          tone="sky"
+        />
+        <StatCard
+          label="Dewan Hakim"
+          value={totalHakim}
+          subtitle="Hakim penilai di event ini"
+          icon={<Gavel />}
+          tone="amber"
+        />
+        <StatCard
+          label="Penilaian Lengkap"
+          value={lengkapCount}
+          badge={<Badge variant="success">{completionPercentage}%</Badge>}
+          subtitle={waitingOtherCount > 0 ? `${waitingOtherCount} menunggu hakim lain` : 'Semua hakim sinkron'}
+          icon={<CheckCircle2 />}
+          tone="emerald"
+        />
       </div>
 
       {/* Active Session & Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Active Participant Scoring Banner */}
-        <div className="lg:col-span-2 bg-gradient-to-br from-emerald-800 to-emerald-950 text-white rounded-2xl p-6 shadow-md flex flex-col justify-between">
+        {/* Active Participant Scoring Banner (Hero Card: rounded-xl / 20px) */}
+        <div className="lg:col-span-2 bg-gradient-to-br from-emerald-800 to-emerald-950 text-white rounded-xl p-6 shadow-md flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 mb-3">
               <span className="inline-flex items-center gap-1.5 text-xs font-bold bg-white/10 px-2.5 py-0.5 rounded-full text-emerald-200 border border-white/15">
@@ -187,7 +143,7 @@ export const DashboardView: React.FC = () => {
 
             {ongoingParticipant ? (
               <div className="space-y-1">
-                <p className="text-xs text-emerald-300 font-mono">
+                <p className="text-xs text-emerald-300 font-mono tabular-nums">
                   NOMOR UNDIAN #{ongoingParticipant.lotteryNumber} · {ongoingParticipant.participantId}
                 </p>
                 <h3 className="text-2xl font-extrabold text-white">
@@ -212,16 +168,18 @@ export const DashboardView: React.FC = () => {
           <div className="pt-6 flex flex-wrap items-center gap-3">
             {ongoingParticipant ? (
               <button
+                type="button"
                 onClick={handleOpenActiveScoring}
-                className="inline-flex items-center gap-2 bg-white text-emerald-950 font-bold text-xs px-4 py-2.5 rounded-xl hover:bg-emerald-50 active:scale-95 transition-all shadow-sm cursor-pointer"
+                className="inline-flex items-center gap-2 h-10 bg-white text-emerald-950 font-bold text-xs px-4 rounded-md hover:bg-emerald-50 transition-all shadow-sm cursor-pointer"
               >
                 <span>Buka Lembar Mushaf & Penilaian</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             ) : null}
             <button
+              type="button"
               onClick={() => setCurrentView('penilaian_hakim')}
-              className="inline-flex items-center gap-2 bg-emerald-900/60 hover:bg-emerald-900 text-white font-medium text-xs px-4 py-2.5 rounded-xl border border-emerald-700/60 transition-all cursor-pointer"
+              className="inline-flex items-center gap-2 h-10 bg-emerald-900/60 hover:bg-emerald-900 text-white font-semibold text-xs px-4 rounded-md border border-emerald-700/60 transition-all cursor-pointer"
             >
               Lihat Daftar Antrean Peserta
             </button>
@@ -229,47 +187,51 @@ export const DashboardView: React.FC = () => {
         </div>
 
         {/* Quick Progression Navigation Card */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
+        <Card className="flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-slate-800 font-bold text-sm mb-3">
               <Award className="w-4 h-4 text-emerald-700" />
               <span>Alur Musabaqah & Kelulusan</span>
             </div>
-            <p className="text-xs text-slate-500 leading-relaxed mb-4">
+            <p className="text-xs text-slate-600 leading-relaxed mb-4">
               Setelah babak penyisihan selesai, admin dapat memfinalisasi peringkat peserta dan meloloskan peserta terbaik (Top-N) ke babak Semifinal atau Final.
             </p>
 
             <div className="space-y-2">
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
+              <div className="p-2.5 rounded-md bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
                 <span className="font-medium text-slate-700">Babak Aktif:</span>
                 <span className="font-bold text-emerald-800 font-mono">Penyisihan</span>
               </div>
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
+              <div className="p-2.5 rounded-md bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
                 <span className="font-medium text-slate-700">Peserta Lengkap:</span>
-                <span className="font-bold text-slate-900 font-mono">{lengkapCount} / {totalUniqueParticipants}</span>
+                <span className="font-bold text-slate-900 font-mono tabular-nums">{lengkapCount} / {totalUniqueParticipants}</span>
               </div>
             </div>
           </div>
 
           <div className="pt-4 space-y-2">
-            <button
+            <Button
+              variant="primary"
+              size="md"
+              fullWidth
               onClick={() => setCurrentView('hasil_kelulusan')}
-              className="w-full py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
             >
               Buka Hasil & Kelulusan Babak
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              size="md"
+              fullWidth
               onClick={() => setCurrentView('stage_management')}
-              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-all"
             >
               Konfigurasi Babak & Kuota
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       </div>
 
       {/* Activity Logs Table */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5">
+      <Card>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-slate-400" />
@@ -290,7 +252,6 @@ export const DashboardView: React.FC = () => {
           {(() => {
             const list: Array<{ id: string; title: string; description: string; timestamp: string }> = [];
 
-            // 1. Prioritize real finalized/in-progress assessments from dewan hakim
             assessments
               .filter((a) => !currentTenant.id || a.tenantId === currentTenant.id)
               .slice()
@@ -312,7 +273,6 @@ export const DashboardView: React.FC = () => {
                 });
               });
 
-            // 2. Activity logs from operational context
             activityLogs
               .filter((l) => !currentTenant.id || l.tenantId === currentTenant.id)
               .forEach((l) => {
@@ -326,7 +286,6 @@ export const DashboardView: React.FC = () => {
                 }
               });
 
-            // 3. Fallback when fresh empty state
             if (list.length === 0) {
               list.push({
                 id: 'default-log-1',
@@ -339,20 +298,20 @@ export const DashboardView: React.FC = () => {
             return list.slice(0, 5).map((log, idx) => (
               <div
                 key={`${log.id}-${idx}`}
-                className="p-3 rounded-lg bg-slate-50 border border-slate-200/70 flex items-start justify-between gap-3 text-xs"
+                className="p-3 rounded-md bg-slate-50 border border-slate-200/80 flex items-start justify-between gap-3 text-xs"
               >
                 <div>
                   <p className="font-bold text-slate-800">{log.title}</p>
                   <p className="text-slate-600 mt-0.5">{log.description}</p>
                 </div>
-                <span className="text-xs font-mono text-slate-400 shrink-0">
+                <span className="text-xs font-mono tabular-nums text-slate-400 shrink-0">
                   {formatTimestampDisplay(log.timestamp)}
                 </span>
               </div>
             ));
           })()}
         </div>
-      </div>
+      </Card>
     </div>
   );
 };

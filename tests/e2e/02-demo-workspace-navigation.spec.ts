@@ -75,4 +75,153 @@ test.describe('E2E: Navigasi Workspace Demo Lokal & Antarmuka Responsif', () => 
     // Verifikasi kembali ke workspace operasional tenant
     await expect(page.getByText(/LPTQ Provinsi Jawa Barat/i).first()).toBeVisible();
   });
+
+  test('04. Verifikasi Fitur PWA: Manifest, Menu Instal Aplikasi, dan Indikator Offline Header', async ({ page, context }) => {
+    // 1. Verifikasi meta tag PWA & link apple-touch-icon di <head>
+    const themeColor = await page.locator('meta[name="theme-color"]').getAttribute('content');
+    expect(themeColor).toBe('#065f46');
+    const appleCapable = await page.locator('meta[name="apple-mobile-web-app-capable"]').getAttribute('content');
+    expect(appleCapable).toBe('yes');
+    const appleTouchHref = await page.locator('link[rel="apple-touch-icon"]').getAttribute('href');
+    expect(appleTouchHref).toContain('apple-touch-icon.png');
+
+    // 2. Buka menu pengguna di footer sidebar dan verifikasi tombol "Instal Aplikasi"
+    await page.getByRole('button', { name: /Ganti/i }).first().click();
+    const installBtn = page.getByTestId('pwa-install-btn');
+    await expect(installBtn).toBeVisible();
+    await expect(installBtn).toContainText('Instal Aplikasi');
+
+    // Klik "Instal Aplikasi" untuk membuka petunjuk instalasi iOS/Browser
+    await installBtn.click();
+    await expect(page.getByTestId('pwa-ios-guide')).toBeVisible();
+    await expect(page.getByText(/Tambahkan ke Layar Utama/i)).toBeVisible();
+
+    // Tutup modal menu pengguna
+    await page.getByRole('button', { name: 'Tutup', exact: true }).click();
+
+    // 3. Simulasikan koneksi terputus (offline) dan verifikasi badge Offline di TopHeader
+    await context.setOffline(true);
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    const offlineBadge = page.getByTestId('header-offline-badge');
+    await expect(offlineBadge).toBeVisible();
+    await expect(offlineBadge).toContainText(/Offline/i);
+    await expect(offlineBadge).toContainText(/menunggu sinkron/i);
+
+    // Kembalikan ke status online
+    await context.setOffline(false);
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await expect(offlineBadge).toBeHidden();
+  });
+
+  test('05. Superadmin: Menu SEO dan Meta Situs, Konfigurasi Favicon, Pratinjau Tab, Dialog Konfirmasi noindex, dan Audit Log', async ({ page }) => {
+    // Beralih ke akun Superadmin
+    await page.getByRole('button', { name: /Ganti/i }).first().click();
+    await page.getByText(/Nasaruddin/i).first().click();
+    await expect(page.getByText(/Dashboard Superadmin MTQ Digital/i).first()).toBeVisible();
+
+    // Klik menu "SEO dan Meta Situs" di sidebar Superadmin
+    await page.getByRole('button', { name: 'SEO dan Meta Situs', exact: true }).first().click();
+    await expect(page.getByRole('heading', { name: /SEO dan Meta Situs/i })).toBeVisible();
+
+    // Verifikasi document.title menggunakan title_template
+    await expect(page).toHaveTitle(/SEO dan Meta Situs — Manajemen MTQ/i);
+
+    // Verifikasi konfigurasi Favicon & pratinjau tab browser
+    await expect(page.getByTestId('seo-favicon-section')).toBeVisible();
+    const faviconInput = page.getByTestId('seo-input-favicon');
+    await expect(faviconInput).toBeVisible();
+    await expect(page.getByTestId('seo-upload-favicon-btn')).toBeVisible();
+    await expect(page.getByTestId('seo-favicon-preview-img')).toBeVisible();
+    await faviconInput.fill('/icon.svg');
+
+    // Ubah Judul Bawaan & periksa penghitung karakter dan kartu pratinjau Google
+    const defaultTitleInput = page.getByTestId('seo-input-default-title');
+    await defaultTitleInput.fill('MTQ Nasional Digital 2026 — LPTQ Resmi');
+    await expect(page.getByTestId('seo-title-counter')).toContainText('38 / 70 karakter');
+    await expect(page.getByTestId('seo-preview-google-card')).toContainText('MTQ Nasional Digital 2026 — LPTQ Resmi');
+
+    // Pilih robots = noindex,nofollow dan klik Simpan -> muncul ConfirmDialog
+    await page.getByTestId('seo-select-robots').selectOption('noindex,nofollow');
+    await page.getByTestId('seo-save-btn').click();
+    await expect(page.getByText(/Konfirmasi Menonaktifkan Indeksasi Mesin Pencari/i)).toBeVisible();
+
+    // Konfirmasi penyimpanan
+    await page.getByRole('button', { name: /Ya, Simpan dengan noindex/i }).click();
+    await expect(page.getByTestId('seo-form-success')).toContainText(/berhasil diperbarui/i);
+
+    // Periksa tercatat di Audit Log Platform
+    await page.getByRole('button', { name: /Audit Log Platform/i }).first().click();
+    await expect(page.getByText('SITE_SETTINGS_UPDATED').first()).toBeVisible();
+  });
+
+  test('06. Superadmin: Halaman Khusus Kesehatan Sistem (Health Check), Ringkasan Status, Accordion 9 Pemeriksaan, Checklist Manual, dan Periksa Ulang', async ({ page }) => {
+    // Beralih ke akun Superadmin
+    await page.getByRole('button', { name: /Ganti/i }).first().click();
+    await page.getByText(/Nasaruddin/i).first().click();
+    await expect(page.getByText(/Dashboard Superadmin MTQ Digital/i).first()).toBeVisible();
+
+    // Verifikasi bahwa health dashboard tidak ditaruh di dashboard, tetapi memiliki tombol tautan ke halaman khusus
+    await expect(page.getByRole('button', { name: /Buka Kesehatan Sistem/i })).toBeVisible();
+
+    // Navigasi ke halaman khusus Kesehatan Sistem melalui menu sidebar
+    await page.getByRole('button', { name: 'Kesehatan Sistem (Health Check)', exact: true }).first().click();
+    await expect(page.getByRole('heading', { name: /Kesehatan Sistem \(Health Check\)/i })).toBeVisible();
+
+    // Verifikasi seksi Health Dashboard tampil beserta waktu WIB dan 3 kartu ringkasan
+    const healthSection = page.getByTestId('platform-health-dashboard');
+    await expect(healthSection).toBeVisible();
+    await expect(page.getByTestId('health-last-checked')).toContainText('WIB');
+    await expect(page.getByTestId('health-summary-critical')).toBeVisible();
+    await expect(page.getByTestId('health-summary-warning')).toBeVisible();
+    await expect(page.getByTestId('health-summary-ok')).toBeVisible();
+
+    // Buka salah satu accordion pemeriksaan (schema_version) & periksa riwayat versi 20261118
+    await page.getByTestId('health-toggle-schema_version').click();
+    const schemaDetail = page.getByTestId('health-detail-schema_version');
+    await expect(schemaDetail).toBeVisible();
+    await expect(schemaDetail).toContainText('20261118');
+
+    // Klik salah satu pemeriksaan manual & verifikasi tersimpan
+    const manualSignupCheckbox = page.getByTestId('manual-check-self_signup_disabled');
+    await expect(manualSignupCheckbox).toBeVisible();
+    await manualSignupCheckbox.check();
+    await expect(manualSignupCheckbox).toBeChecked();
+
+    // Klik tombol "Periksa Ulang"
+    await page.getByTestId('health-recheck-btn').click();
+    await expect(page.getByTestId('health-last-checked')).toContainText('WIB');
+  });
+
+  test('07. Superadmin: Isolasi Menu Tenant dan Jalur Masuk Supervisi Terkendali dengan Alasan', async ({ page }) => {
+    // Beralih ke akun Superadmin
+    await page.getByRole('button', { name: /Ganti/i }).first().click();
+    await page.getByText(/Nasaruddin/i).first().click();
+    await expect(page.getByText(/Dashboard Superadmin MTQ Digital/i).first()).toBeVisible();
+
+    // Verifikasi secara default menu operasional tenant TIDAK muncul di sidebar
+    await expect(page.getByRole('button', { name: 'Dashboard Platform' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Kesehatan Sistem (Health Check)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'SEO dan Meta Situs' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Master Data & Rubrik' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Bank Soal & Maqra' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Grup & Peserta' })).toHaveCount(0);
+
+    // Klik tombol Supervisi Workspace pada salah satu tenant
+    await page.getByRole('button', { name: /Supervisi Workspace/i }).first().click();
+    await expect(page.getByText(/Supervisi Workspace Tenant/i)).toBeVisible();
+
+    // Konfirmasi masuk workspace tenant dengan alasan
+    await page.getByRole('button', { name: /Masuk Workspace Tenant/i }).click();
+
+    // Verifikasi banner supervisi aktif dan menu operasional tenant muncul
+    await expect(page.getByText(/Mode Supervisi/i).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Master Data & Rubrik' })).toBeVisible();
+
+    // Keluar dari mode supervisi dan kembali ke platform
+    await page.getByRole('button', { name: /Kembali ke Platform/i }).first().click();
+    await expect(page.getByRole('button', { name: 'Dashboard Platform' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Master Data & Rubrik' })).toHaveCount(0);
+  });
 });
+
+

@@ -12,12 +12,14 @@ import {
   Trophy,
   X,
   FileCheck2,
-  RefreshCw
+  RefreshCw,
+  Search
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Participant } from '../../types/mtq';
 import { RankingService } from '../../services/rankingService';
 import { supabaseDataService } from '../../services/supabaseDataService';
+import { ConfirmDialog, Modal, Badge, Button, Select, Textarea, Input, Card } from '../ui';
 
 export const HasilKelulusanView: React.FC = () => {
   const {
@@ -101,8 +103,9 @@ export const HasilKelulusanView: React.FC = () => {
     }
   }, [defaultRunningStage?.name]);
 
-  // Selected branch filter for multi-branch isolation
+  // Selected branch filter for multi-branch isolation & participant search query
   const [selectedBranch, setSelectedBranch] = useState<string>('Semua Cabang');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Active stage participations for current tenant & stage
   const currentStageParticipations = useMemo(() => {
@@ -545,6 +548,21 @@ export const HasilKelulusanView: React.FC = () => {
 
   const qualifiedParticipants = evaluatedParticipants.filter((p) => p.isQualified);
 
+  const filteredEvaluatedParticipants = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return evaluatedParticipants;
+    return evaluatedParticipants.filter((item) => {
+      const p = item.participant;
+      const lottery = String(item.participation?.lotteryNumber || p.lotteryNumber || '').toLowerCase();
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.participantId.toLowerCase().includes(q) ||
+        p.kafilahName.toLowerCase().includes(q) ||
+        lottery.includes(q)
+      );
+    });
+  }, [evaluatedParticipants, searchQuery]);
+
   // Manual Override Handler
   const handleOpenOverride = (p: Participant, currentQualified: boolean) => {
     setOverrideModalParticipant(p);
@@ -609,60 +627,28 @@ export const HasilKelulusanView: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
-            Hasil Babak & Kelulusan (Kualifikasi)
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            {currentTenant.name} · Verifikasi penilaian juri, penetapan peringkat, dan pelolosan peserta ke babak berikutnya
-          </p>
-        </div>
-
-        {/* Stage & Branch Selector Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={selectedBranch}
-            onChange={(e) => setSelectedBranch(e.target.value)}
-            aria-label="Pilih Cabang Lomba"
-            className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 bg-white shadow-xs outline-none"
-          >
-            {branchOptions.map((br) => (
-              <option key={br} value={br}>
-                {br}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={selectedStageName}
-            onChange={(e) => {
-              setSelectedStageName(e.target.value);
-              setAdvancementSuccessMessage('');
-            }}
-            aria-label="Pilih Babak"
-            className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 bg-white shadow-xs outline-none"
-          >
-            {uniqueStages.map((stg) => (
-              <option key={stg.id} value={stg.name}>
-                Babak {stg.name}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div>
+        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+          Hasil Babak & Kelulusan (Kualifikasi)
+        </h1>
+        <p className="text-xs text-slate-500 mt-1">
+          {currentTenant.name} · Verifikasi penilaian juri, penetapan peringkat, dan pelolosan peserta ke babak berikutnya
+        </p>
       </div>
 
       {/* Alerts for feedback */}
       {advancementSuccessMessage && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs text-emerald-900 shadow-xs">
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between text-xs text-emerald-900 shadow-sm">
           <div className="flex items-center gap-2.5">
             <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
             <p className="font-semibold">{advancementSuccessMessage}</p>
           </div>
           <button
+            type="button"
             onClick={() => setAdvancementSuccessMessage('')}
+            aria-label="Tutup pesan sukses"
             className="p-1 text-emerald-700 hover:text-emerald-900 cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -671,13 +657,15 @@ export const HasilKelulusanView: React.FC = () => {
       )}
 
       {advancementErrorMessage && (
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between text-xs text-rose-900 shadow-xs">
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg flex items-center justify-between text-xs text-rose-900 shadow-sm">
           <div className="flex items-center gap-2.5">
             <AlertTriangle className="w-5 h-5 text-rose-700 shrink-0" />
             <p className="font-semibold">{advancementErrorMessage}</p>
           </div>
           <button
+            type="button"
             onClick={() => setAdvancementErrorMessage('')}
+            aria-label="Tutup pesan kesalahan"
             className="p-1 text-rose-700 hover:text-rose-900 cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -685,37 +673,15 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
-      {/* Stage Overall Status Banner (Shown ONLY when incomplete participants exist, blocking reason exists, or boundary tie exists) */}
-      {(!allAssessmentsFinalized || hasBoundaryTie) && (
-        <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-sm text-slate-900">{stageStatusBadge.label}</span>
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5">{stageStatusBadge.description}</p>
-          </div>
-
-          {!allAssessmentsFinalized && (
-            <button
-              onClick={() => setCurrentView('rekap_nilai')}
-              className="self-start sm:self-auto text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors shrink-0 border border-slate-200 cursor-pointer"
-            >
-              Tinjau di Rekap Nilai →
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Stage Summary Cards */}
+      {/* 1. Three KPI Summary Cards at the Top */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Card 1: Status Penilaian */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+        <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-medium text-slate-500">Status Penilaian Babak</span>
             <ShieldCheck className="w-4 h-4 text-slate-400" />
           </div>
           <div className="flex items-baseline gap-2 mt-3">
-            <span className="text-2xl font-bold text-slate-900 font-mono">
+            <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
               {rankedParticipants.filter((item) => item.isFullyFinalized).length} / {evaluatedParticipants.length}
             </span>
             <span className="text-xs text-slate-500">Peserta Lengkap</span>
@@ -737,14 +703,13 @@ export const HasilKelulusanView: React.FC = () => {
           </p>
         </div>
 
-        {/* Card 2: Kuota Kualifikasi */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+        <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-medium text-slate-500">Kuota Kelulusan Babak</span>
             <Trophy className="w-4 h-4 text-emerald-700" />
           </div>
           <div className="flex items-baseline gap-2 mt-3">
-            <span className="text-2xl font-bold text-slate-900 font-mono">
+            <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
               Top {quota}
             </span>
             <span className="text-xs text-slate-500">Peserta Terbaik</span>
@@ -754,14 +719,13 @@ export const HasilKelulusanView: React.FC = () => {
           </p>
         </div>
 
-        {/* Card 3: Peserta Lolos */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+        <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-medium text-slate-500">Calon Peserta Lolos</span>
             <Users className="w-4 h-4 text-slate-400" />
           </div>
           <div className="flex items-baseline gap-2 mt-3">
-            <span className="text-2xl font-bold text-slate-900 font-mono">
+            <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
               {qualifiedParticipants.length}
             </span>
             <span className="text-xs text-slate-500">Peserta Terpilih</span>
@@ -776,9 +740,50 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       </div>
 
+      {/* 2. Dedicated Filter Section Below KPI Cards: Search Bar Nama -> Cabang -> Babak */}
+      <Card className="p-4 flex flex-wrap items-center gap-3">
+        <Input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Cari nama peserta, nomor undian, atau grup..."
+          leftIcon={<Search className="w-4 h-4" />}
+          containerClassName="flex-[2] min-w-[240px]"
+        />
+
+        <Select
+          value={selectedBranch}
+          onChange={(e) => setSelectedBranch(e.target.value)}
+          aria-label="Pilih Cabang Lomba"
+          containerClassName="flex-1 min-w-[180px]"
+        >
+          {branchOptions.map((br) => (
+            <option key={br} value={br}>
+              {br}
+            </option>
+          ))}
+        </Select>
+
+        <Select
+          value={selectedStageName}
+          onChange={(e) => {
+            setSelectedStageName(e.target.value);
+            setAdvancementSuccessMessage('');
+          }}
+          aria-label="Pilih Babak"
+          containerClassName="flex-1 min-w-[160px]"
+        >
+          {uniqueStages.map((stg) => (
+            <option key={stg.id} value={stg.name}>
+              Babak {stg.name}
+            </option>
+          ))}
+        </Select>
+      </Card>
+
       {/* Tie Alert Notice */}
       {hasBoundaryTie && (
-        <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 flex items-start gap-3 text-xs text-rose-900">
+        <div className="bg-rose-50 border border-rose-300 rounded-lg p-4 flex items-start gap-3 text-xs text-rose-900 shadow-sm">
           <AlertTriangle className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
           <div>
             <p className="font-extrabold text-sm">Perhatian: Nilai Seri pada Batas Kuota Kelulusan (Top {quota})!</p>
@@ -789,12 +794,12 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
       )}
 
-      {/* Championship Podium for Final Round when finalized (reads official stageSnapshots when available) */}
+      {/* Championship Podium for Final Round when finalized */}
       {!nextStage && currentStage?.isFinalized && rankedParticipants.length > 0 && (
-        <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-slate-900 rounded-2xl p-6 text-white shadow-lg space-y-5 border border-emerald-700/50">
+        <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-slate-900 rounded-xl p-6 text-white shadow-lg space-y-5 border border-emerald-700/50">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-800/80 pb-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold text-xl shadow-md">
+              <div className="w-10 h-10 rounded-md bg-amber-400 text-slate-950 flex items-center justify-center font-bold text-xl shadow-md">
                 🏆
               </div>
               <div>
@@ -853,23 +858,23 @@ export const HasilKelulusanView: React.FC = () => {
                 const medal = medals[idx] || '🏅';
                 const cardBg =
                   idx === 0
-                    ? 'bg-amber-500/20 border-amber-400/60 shadow-amber-500/10'
+                    ? 'bg-amber-500/20 border-amber-400/60'
                     : idx === 1
                     ? 'bg-slate-500/20 border-slate-300/40'
                     : 'bg-amber-700/20 border-amber-600/40';
                 return (
                   <div
                     key={`${item.id}-${idx}`}
-                    className={`rounded-xl border p-4 ${cardBg} backdrop-blur-xs flex flex-col items-center text-center space-y-2 shadow-sm`}
+                    className={`rounded-lg border p-4 ${cardBg} flex flex-col items-center text-center space-y-2 shadow-sm`}
                   >
                     <span className="text-2xl">{medal}</span>
                     <span className="font-bold text-xs uppercase tracking-wider text-amber-300">{displayTitle}</span>
                     <div className="font-extrabold text-base text-white">{item.name}</div>
                     <div className="text-xs text-emerald-200">{item.kafilahName}</div>
-                    <div className="text-xs font-mono text-emerald-300">
+                    <div className="text-xs font-mono tabular-nums text-emerald-300">
                       Undian #{item.lotteryNumber} · {item.participantCode}
                     </div>
-                    <div className="mt-2 px-3 py-1 rounded-lg bg-emerald-950/80 border border-emerald-600/50 text-sm font-black font-mono text-amber-300">
+                    <div className="mt-2 px-3 py-1 rounded-md bg-emerald-950/80 border border-emerald-600/50 text-sm font-black font-mono tabular-nums text-amber-300">
                       Skor Akhir: {item.score !== null && item.score !== undefined ? Number(item.score).toFixed(2) : '—'}
                     </div>
                   </div>
@@ -882,7 +887,7 @@ export const HasilKelulusanView: React.FC = () => {
 
       {/* P0-01: Per-Branch Isolated Group Cards when "Semua Cabang" has >1 branch */}
       {selectedBranch === 'Semua Cabang' && branchGroups.length > 1 && (
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
@@ -897,28 +902,27 @@ export const HasilKelulusanView: React.FC = () => {
             {branchGroups.map((grp) => (
               <div
                 key={`${grp.branchId || grp.branchName}`}
-                className="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between gap-3 shadow-2xs"
+                className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col justify-between gap-3 shadow-sm"
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-extrabold text-xs text-slate-900 truncate">{grp.branchName}</span>
-                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
-                      Kuota Top {grp.quota}
-                    </span>
+                    <Badge variant="neutral">Kuota Top {grp.quota}</Badge>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-slate-500 mt-1 font-mono tabular-nums">
                     {grp.evaluation.evaluatedParticipants.filter((p) => p.isFullyFinalized).length} /{' '}
                     {grp.evaluation.evaluatedParticipants.length} Peserta Lengkap ·{' '}
                     {grp.evaluation.evaluatedParticipants.filter((p) => p.isQualified).length} Calon Lolos
                   </p>
                 </div>
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth
                   onClick={() => setSelectedBranch(grp.branchName)}
-                  className="w-full py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-xs transition-colors cursor-pointer text-center"
                 >
                   Pilih & Kelola Cabang Ini →
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -926,10 +930,10 @@ export const HasilKelulusanView: React.FC = () => {
       )}
 
       {/* Qualification Results Table */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-4 md:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50">
           <div>
-            <h3 className="font-extrabold text-sm text-slate-900">
+            <h3 className="font-extrabold text-sm md:text-base text-slate-900">
               Peringkat & Kualifikasi Peserta Babak {selectedStageName}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -940,10 +944,9 @@ export const HasilKelulusanView: React.FC = () => {
           {/* Unified Action Button to confirm advancement OR finalize championship */}
           <div>
             {currentStage?.isFinalized ? (
-              <div className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 text-emerald-800 rounded-xl font-bold text-xs border border-emerald-300">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                <span>{nextStage ? 'Babak Ini Telah Difinalisasi' : 'Musabaqah & Juara Resmi Disahkan'}</span>
-              </div>
+              <Badge variant="success" icon={<CheckCircle2 className="w-3.5 h-3.5" />} className="py-1.5 px-3">
+                {nextStage ? 'Babak Ini Telah Difinalisasi' : 'Musabaqah & Juara Resmi Disahkan'}
+              </Badge>
             ) : (() => {
               const isMultiBranchBlocked = selectedBranch === 'Semua Cabang' && branchOptions.length > 2;
               const isButtonDisabled =
@@ -963,28 +966,27 @@ export const HasilKelulusanView: React.FC = () => {
 
               return (
                 <div className="flex flex-col items-end gap-1">
-                  <button
+                  <Button
+                    variant="primary"
+                    size="md"
                     disabled={isButtonDisabled}
                     onClick={() => !isButtonDisabled && setIsConfirmAdvancementOpen(true)}
                     title={helperReason || buttonLabel}
-                    className={
-                      isButtonDisabled
-                        ? 'inline-flex items-center gap-2 bg-slate-200 text-slate-400 font-bold text-xs px-4 py-2 rounded-xl cursor-not-allowed shadow-none'
-                        : 'inline-flex items-center gap-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer self-start sm:self-auto'
+                    leftIcon={
+                      isButtonDisabled ? (
+                        <Lock className="w-4 h-4" />
+                      ) : nextStage ? (
+                        <FileCheck2 className="w-4 h-4" />
+                      ) : (
+                        <Trophy className="w-4 h-4" />
+                      )
                     }
                   >
-                    {isButtonDisabled ? (
-                      <Lock className="w-4 h-4" />
-                    ) : nextStage ? (
-                      <FileCheck2 className="w-4 h-4" />
-                    ) : (
-                      <Trophy className="w-4 h-4" />
-                    )}
-                    <span>{buttonLabel}</span>
-                  </button>
+                    {buttonLabel}
+                  </Button>
                   {helperReason && (
                     <span
-                      className={`text-xs font-medium max-w-[300px] text-right ${
+                      className={`text-xs font-medium max-w-[320px] text-right ${
                         !allAssessmentsFinalized || isMultiBranchBlocked ? 'text-amber-700' : 'text-rose-700'
                       }`}
                     >
@@ -998,7 +1000,7 @@ export const HasilKelulusanView: React.FC = () => {
         </div>
 
         {!currentStage?.isFinalized && effectiveBranchName && (
-          <div className="px-5 py-2 border-b border-slate-100 text-xs text-slate-600">
+          <div className="px-5 py-2 border-b border-slate-100 text-xs text-slate-600 bg-white">
             {serverRankings
               ? 'Peringkat dihitung resmi oleh server (sumber kebenaran pengesahan).'
               : isLiveRanking
@@ -1007,35 +1009,51 @@ export const HasilKelulusanView: React.FC = () => {
           </div>
         )}
 
+        {/* Prominent Panel Keputusan Sidang Pleno: Nilai Seri */}
         {!currentStage?.isFinalized && criticalTieGroups.length > 0 && (
-          <div className="m-4 rounded-xl border border-rose-300 bg-rose-50 p-4 space-y-4">
-            <div>
-              <h4 className="text-sm font-extrabold text-rose-900">Keputusan Sidang Pleno: Nilai Seri</h4>
-              <p className="text-xs text-rose-800 mt-1">
-                Peserta berikut memiliki nilai identik pada seluruh kriteria tie-break
-                {nextStage ? ' di batas kuota kelulusan' : ' di posisi juara'}. Tentukan urutan hasil keputusan
-                pleno dan tuliskan alasannya (minimal 5 karakter). Keputusan dicatat di log audit server.
-              </p>
+          <div className="m-4 rounded-lg border-2 border-rose-300 bg-rose-50/90 p-4 md:p-5 space-y-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="danger">Wajib Diputuskan Sidang Pleno</Badge>
+                  <h4 className="text-sm md:text-base font-extrabold text-rose-950">
+                    Keputusan Sidang Pleno: Nilai Seri
+                  </h4>
+                </div>
+                <p className="text-xs text-rose-900 mt-1 leading-relaxed">
+                  Peserta berikut memiliki nilai identik pada seluruh kriteria tie-break
+                  {nextStage ? ' di batas kuota kelulusan' : ' di posisi juara'}. Tentukan urutan hasil keputusan
+                  pleno dan tuliskan alasannya (minimal 5 karakter). Keputusan dicatat di log audit server.
+                </p>
+              </div>
             </div>
             {criticalTieGroups.map((group) => {
               const valid = isTieGroupValid(group);
               const applied = Boolean(appliedTieGroups[group.rank]);
               return (
-                <div key={group.rank} className="rounded-lg border border-rose-200 bg-white p-3 space-y-3">
-                  <p className="text-xs font-bold text-slate-800">
-                    Seri pada peringkat #{group.rank} ({group.rows.length} peserta, nilai{' '}
-                    {group.rows[0]?.score !== null && group.rows[0]?.score !== undefined
-                      ? group.rows[0].score.toFixed(2)
-                      : '—'}
-                    )
-                  </p>
+                <div key={group.rank} className="rounded-md border border-rose-200 bg-white p-4 space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-slate-900">
+                      Seri pada peringkat #{group.rank} ({group.rows.length} peserta, nilai{' '}
+                      <span className="font-mono tabular-nums">
+                        {group.rows[0]?.score !== null && group.rows[0]?.score !== undefined
+                          ? group.rows[0].score.toFixed(2)
+                          : '—'}
+                      </span>
+                      )
+                    </p>
+                    {applied && <Badge variant="success">Keputusan Diterapkan</Badge>}
+                  </div>
                   <div className="space-y-2">
                     {group.rows.map((r) => {
                       const part = participants.find((pp) => pp.id === r.participantId);
                       return (
-                        <label key={r.participantId} className="flex items-center justify-between gap-3 text-sm">
-                          <span className="text-slate-800">
-                            #{stageLotteryOf(r.participantId) || part?.lotteryNumber || '-'} {part?.name || r.participantId}
+                        <label key={r.participantId} className="flex items-center justify-between gap-3 text-sm p-2 rounded-sm bg-slate-50 border border-slate-200/70">
+                          <span className="font-medium text-slate-800">
+                            <span className="font-mono tabular-nums font-bold">
+                              #{stageLotteryOf(r.participantId) || part?.lotteryNumber || '-'}
+                            </span>{' '}
+                            {part?.name || r.participantId}
                           </span>
                           <select
                             value={tieOrder[r.participantId] ?? ''}
@@ -1044,7 +1062,7 @@ export const HasilKelulusanView: React.FC = () => {
                               setTieOrder((prev) => ({ ...prev, [r.participantId]: Number(e.target.value) }))
                             }
                             aria-label={`Urutan keputusan pleno untuk ${part?.name || r.participantId}`}
-                            className="px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white"
+                            className="h-9 px-2.5 border border-slate-300 rounded-sm text-sm bg-white font-medium"
                           >
                             <option value="">Pilih urutan</option>
                             {group.rows.map((_, i) => (
@@ -1057,39 +1075,34 @@ export const HasilKelulusanView: React.FC = () => {
                       );
                     })}
                   </div>
-                  <textarea
+                  <Textarea
                     value={tieReasons[group.rank] || ''}
                     disabled={applied}
                     onChange={(e) => setTieReasons((prev) => ({ ...prev, [group.rank]: e.target.value }))}
                     placeholder="Alasan / dasar keputusan sidang pleno (mis. hasil penampilan ulang)"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
                     rows={2}
                   />
                   <div className="flex items-center justify-end gap-2">
                     {applied ? (
                       <>
                         <span className="text-xs font-bold text-emerald-700">Keputusan diterapkan</span>
-                        <button
-                          type="button"
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           onClick={() => setAppliedTieGroups((prev) => ({ ...prev, [group.rank]: false }))}
-                          className="text-xs font-bold text-slate-600 underline"
                         >
                           Ubah
-                        </button>
+                        </Button>
                       </>
                     ) : (
-                      <button
-                        type="button"
+                      <Button
+                        size="sm"
+                        variant="danger"
                         disabled={!valid}
                         onClick={() => handleApplyTieResolution(group)}
-                        className={
-                          valid
-                            ? 'px-3 py-1.5 rounded-lg bg-rose-700 text-white text-xs font-bold'
-                            : 'px-3 py-1.5 rounded-lg bg-slate-200 text-slate-400 text-xs font-bold cursor-not-allowed'
-                        }
                       >
                         Terapkan Keputusan Pleno
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -1099,9 +1112,9 @@ export const HasilKelulusanView: React.FC = () => {
         )}
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[760px] text-xs">
-            <thead>
-              <tr className="bg-slate-100/80 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
+          <table className="w-full text-left border-collapse min-w-[760px] text-sm">
+            <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
+              <tr>
                 <th className="px-5 py-3 w-16 text-center">Rank</th>
                 <th className="px-4 py-3 w-20">Undian</th>
                 <th className="px-5 py-3">Nama Peserta & Grup</th>
@@ -1112,23 +1125,25 @@ export const HasilKelulusanView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {evaluatedParticipants.length === 0 ? (
+              {filteredEvaluatedParticipants.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400">
-                    Belum ada peserta di babak {selectedStageName}.
+                  <td colSpan={7} className="p-8 text-center text-slate-400 text-xs">
+                    {searchQuery.trim()
+                      ? 'Tidak ada peserta yang sesuai dengan pencarian.'
+                      : `Belum ada peserta di babak ${selectedStageName}.`}
                   </td>
                 </tr>
               ) : (
-                evaluatedParticipants.map((item, idx) => {
+                filteredEvaluatedParticipants.map((item, idx) => {
                   const p = item.participant;
 
                   return (
                     <tr
                       key={`${p.id}-${idx}`}
-                      className="hover:bg-slate-50 transition-colors"
+                      className="even:bg-slate-50/40 hover:bg-emerald-50/40 transition-colors"
                     >
                       {/* Rank */}
-                      <td className="px-5 py-3.5 text-center font-mono font-bold text-xs text-slate-700">
+                      <td className="px-5 py-3.5 text-center font-mono tabular-nums font-bold text-sm text-slate-800">
                         {item.isFullyFinalized
                           ? `#${serverRankMap.get(p.id)?.rank ?? item.rank}`
                           : '—'}
@@ -1138,58 +1153,59 @@ export const HasilKelulusanView: React.FC = () => {
                       </td>
 
                       {/* Lottery */}
-                      <td className="px-4 py-3.5 font-mono font-bold text-slate-900">
+                      <td className="px-4 py-3.5 font-mono tabular-nums font-bold text-slate-900 text-sm">
                         #{item.participation?.lotteryNumber || p.lotteryNumber}
                       </td>
 
                       {/* Participant identity */}
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2">
-                          <p className="font-bold text-slate-900">{p.name}</p>
+                          <p className="font-bold text-slate-900 text-sm">{p.name}</p>
                           <button
+                            type="button"
                             onClick={() => {
                               setSelectedParticipantId(p.id);
                               setCurrentView('penilaian_dual_panel');
                             }}
-                            className="text-xs text-slate-500 hover:text-slate-900 hover:underline font-medium cursor-pointer"
+                            className="text-xs text-emerald-800 hover:text-emerald-950 hover:underline font-semibold cursor-pointer"
                             title="Buka Lembar Penilaian Peserta Ini"
                           >
                             [Buka]
                           </button>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {p.participantId} · {p.kafilahName}
+                          <span className="font-mono tabular-nums">{p.participantId}</span> · {p.kafilahName}
                         </p>
                         {item.tieBreakResolvedBy && (
-                          <p className="text-xs text-indigo-700 font-semibold mt-0.5 flex items-center gap-1">
+                          <p className="text-xs text-emerald-800 font-semibold mt-0.5 flex items-center gap-1">
                             <span>⚖️</span>
                             <span>{item.tieBreakResolvedBy}</span>
                           </p>
                         )}
                         {item.hasUnresolvedTieWithNext && (
-                          <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-xs font-bold">
-                            ⚠️ Nilai Seri Identik
-                          </span>
+                          <div className="mt-1">
+                            <Badge variant="danger">Nilai Seri Identik</Badge>
+                          </div>
                         )}
                         {item.isOverridden && (
-                          <p className="text-xs text-slate-500 mt-0.5 italic">
+                          <p className="text-xs text-slate-600 mt-0.5 italic">
                             Catatan Override: {item.overrideReason}
                           </p>
                         )}
                       </td>
 
-                      {/* Score: Distinguish valid vs provisional with subtle neutral shades */}
-                      <td className="px-4 py-3.5 text-right font-mono">
+                      {/* Score */}
+                      <td className="px-4 py-3.5 text-right font-mono tabular-nums">
                         {item.isFullyFinalized && item.averageFinalScore !== null ? (
                           <div>
                             <span className="font-extrabold text-sm text-slate-900">
                               {item.averageFinalScore.toFixed(2)}
                             </span>
-                            <span className="block text-xs font-medium text-slate-500">Resmi</span>
+                            <span className="block text-xs font-medium text-emerald-700">Resmi</span>
                           </div>
                         ) : (
                           <div>
-                            <span className="text-slate-600 font-bold text-xs">
+                            <span className="text-slate-600 font-bold text-sm">
                               {item.provisionalScore !== null
                                 ? item.provisionalScore.toFixed(2)
                                 : '—'}
@@ -1201,52 +1217,45 @@ export const HasilKelulusanView: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Completeness (Neutral text) */}
+                      {/* Completeness */}
                       <td className="px-4 py-3.5 text-center">
-                        <span className="text-xs font-medium text-slate-600">
+                        <span className="text-xs font-mono tabular-nums font-medium text-slate-700">
                           {item.finalizedJudgeCount} / {item.totalAssignedJudges} Juri Final
                         </span>
                       </td>
 
-                      {/* Qualification status (Subtle black-to-gray tones) */}
+                      {/* Qualification status with semantic Badge */}
                       <td className="px-4 py-3.5 text-center">
                         {item.isOverridden ? (
                           item.isQualified ? (
-                            <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 border border-slate-300">
-                              Override (Lolos)
-                            </span>
+                            <Badge variant="success">Override (Lolos)</Badge>
                           ) : (
-                            <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                              Override (Gugur)
-                            </span>
+                            <Badge variant="danger">Override (Gugur)</Badge>
                           )
                         ) : !allAssessmentsFinalized ? (
-                          <span className="inline-block text-xs text-slate-400">
-                            Menunggu Penilaian
-                          </span>
+                          <Badge variant="warning">Menunggu Penilaian</Badge>
                         ) : item.isQualified ? (
-                          <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-900 border border-slate-200">
-                            Lolos
-                          </span>
+                          <Badge variant="success">Lolos</Badge>
                         ) : (
-                          <span className="inline-block text-xs text-slate-500">
-                            Tidak Lolos
-                          </span>
+                          <Badge variant="neutral">Tidak Lolos</Badge>
                         )}
                       </td>
 
                       {/* Manual Override Action */}
                       <td className="px-5 py-3.5 text-right space-x-2">
-                        <button
+                        <Button
+                          size="sm"
+                          variant="secondary"
                           onClick={() => handleOpenOverride(p, item.isQualified)}
-                          className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 cursor-pointer"
                         >
                           {item.isQualified ? 'Gugurkan' : 'Loloskan'}
-                        </button>
+                        </Button>
                         {item.isOverridden && (
                           <button
+                            type="button"
                             onClick={() => handleResetOverride(p.id)}
-                            className="p-1 text-slate-400 hover:text-rose-700 rounded"
+                            aria-label="Reset override ke peringkat asli"
+                            className="p-1.5 text-slate-400 hover:text-rose-700 rounded-sm cursor-pointer"
                             title="Reset Override ke Peringkat Asli"
                           >
                             <RefreshCw className="w-3.5 h-3.5 inline" />
@@ -1263,144 +1272,116 @@ export const HasilKelulusanView: React.FC = () => {
       </div>
 
       {/* Manual Override Dialog with Mandatory Reason */}
-      {overrideModalParticipant && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
-            <h3 className="font-extrabold text-base text-slate-900 mb-2">
-              Penyesuaian Kualifikasi (Manual Override)
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed mb-4">
-              Ubah status kelulusan peserta <strong>{overrideModalParticipant.name}</strong> secara manual. Alasan resmi keputusan dewan juri wajib diisi.
+      <Modal
+        isOpen={Boolean(overrideModalParticipant)}
+        onClose={() => setOverrideModalParticipant(null)}
+        title="Penyesuaian Kualifikasi (Manual Override)"
+        subtitle="Alasan resmi keputusan dewan juri wajib diisi"
+      >
+        {overrideModalParticipant && (
+          <form onSubmit={handleSaveOverride} className="space-y-4 text-xs">
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Ubah status kelulusan peserta <strong>{overrideModalParticipant.name}</strong> secara manual.
             </p>
-
-            <form onSubmit={handleSaveOverride} className="space-y-4 text-xs">
-              <div>
-                <label className="font-bold text-slate-600 block mb-1">
-                  Status Kelulusan Baru:
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setTempOverrideValue(true)}
-                    className={`flex-1 py-2 rounded-lg font-bold border ${
-                      tempOverrideValue
-                        ? 'bg-emerald-800 text-white border-emerald-800'
-                        : 'bg-white text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    Lolos ke Babak Berikutnya
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTempOverrideValue(false)}
-                    className={`flex-1 py-2 rounded-lg font-bold border ${
-                      !tempOverrideValue
-                        ? 'bg-rose-800 text-white border-rose-800'
-                        : 'bg-white text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    Tidak Lolos
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 block mb-1">
-                  Alasan / Berita Acara Dewan Hakim (Wajib):
-                </label>
-                <textarea
-                  value={tempReasonText}
-                  onChange={(e) => setTempReasonText(e.target.value)}
-                  required
-                  rows={3}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  placeholder="Contoh: Keputusan sidang pleno dewan hakim memenangkan tajwid jali pada poin seri..."
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t">
+            <div>
+              <label className="font-bold text-slate-700 block mb-1.5">
+                Status Kelulusan Baru:
+              </label>
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setOverrideModalParticipant(null)}
-                  className="px-4 py-2 border rounded-lg font-semibold"
+                  onClick={() => setTempOverrideValue(true)}
+                  className={`flex-1 h-10 rounded-md font-bold border cursor-pointer transition-colors ${
+                    tempOverrideValue
+                      ? 'bg-emerald-800 text-white border-emerald-800'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                  }`}
                 >
-                  Batal
+                  Lolos ke Babak Berikutnya
                 </button>
                 <button
-                  type="submit"
-                  className="px-4 py-2 bg-emerald-800 text-white rounded-lg font-bold"
+                  type="button"
+                  onClick={() => setTempOverrideValue(false)}
+                  className={`flex-1 h-10 rounded-md font-bold border cursor-pointer transition-colors ${
+                    !tempOverrideValue
+                      ? 'bg-rose-700 text-white border-rose-700'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                  }`}
                 >
-                  Simpan Override
+                  Tidak Lolos
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmation Modal to Advance Qualifiers OR Finalize Championship */}
-      {isConfirmAdvancementOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center gap-3 text-emerald-800 mb-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                {nextStage ? <Award className="w-5 h-5 text-emerald-800" /> : <Trophy className="w-5 h-5 text-amber-600" />}
-              </div>
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900">
-                  {nextStage ? 'Konfirmasi Pelolosan Babak' : 'Pengesahan Juara & Selesaikan Musabaqah'}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {nextStage ? `${selectedStageName} ➔ Babak ${nextStage.name}` : `Babak ${selectedStageName} (Puncak Kejuaraan)`}
-                </p>
-              </div>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed mb-4">
-              {nextStage ? (
-                <>Sebanyak <strong>{qualifiedParticipants.length} peserta</strong> di bawah ini akan diloloskan ke <strong>Babak {nextStage.name}</strong>:</>
-              ) : (
-                <>Dewan Hakim akan mengesahkan secara resmi hasil penilaian Babak {selectedStageName} dan menetapkan juara podium berikut:</>
-              )}
-            </p>
+            <Textarea
+              label="Alasan / Berita Acara Dewan Hakim (Wajib):"
+              value={tempReasonText}
+              onChange={(e) => setTempReasonText(e.target.value)}
+              required
+              rows={3}
+              placeholder="Contoh: Keputusan sidang pleno dewan hakim memenangkan tajwid jali pada poin seri..."
+            />
 
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 max-h-48 overflow-y-auto space-y-1 mb-4 text-xs">
-              {(nextStage ? qualifiedParticipants : evaluatedParticipants).map((item, idx) => (
-                <div key={`${item.participant.id}-${idx}`} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
-                  <span className="font-semibold text-slate-900">
-                    {idx + 1}. #{item.participation?.lotteryNumber || item.participant.lotteryNumber} {item.participant.name}
-                    {!nextStage && idx < 3 ? ` (${idx === 0 ? 'Juara 1' : idx === 1 ? 'Juara 2' : 'Juara 3'})` : ''}
-                  </span>
-                  <span className="font-mono text-emerald-800 font-bold">
-                    {item.displayScore !== null ? item.displayScore.toFixed(2) : '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <p className="text-xs text-slate-500 leading-relaxed mb-5">
-              {nextStage
-                ? `Peserta yang lolos akan memasuki Babak ${nextStage.name} dengan paket maqra dan lembar penilaian baru. Rekam jejak babak sebelumnya tetap tersimpan rapi.`
-                : 'Pengesahan ini bersifat final dan mengikat. Rekam jejak nilai, peringkat podium, dan riwayat seluruh babak akan dibekukan secara permanen.'}
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5">
-              <button
-                onClick={() => setIsConfirmAdvancementOpen(false)}
-                className="px-4 py-2 border rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
-              >
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+              <Button variant="secondary" onClick={() => setOverrideModalParticipant(null)}>
                 Batal
-              </button>
-              <button
-                onClick={handleConfirmAdvancement}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
-              >
-                {nextStage ? 'Ya, Loloskan Peserta' : 'Sahkan Juara Sekarang'}
-              </button>
+              </Button>
+              <Button type="submit" variant="primary">
+                Simpan Override
+              </Button>
             </div>
-          </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ConfirmDialog for Stage Advancement OR Championship Finalization */}
+      <ConfirmDialog
+        isOpen={isConfirmAdvancementOpen}
+        onClose={() => setIsConfirmAdvancementOpen(false)}
+        onConfirm={handleConfirmAdvancement}
+        variant="primary"
+        title={
+          nextStage
+            ? 'Konfirmasi Pelolosan Babak'
+            : 'Pengesahan Juara & Selesaikan Musabaqah'
+        }
+        description={
+          nextStage ? (
+            <>
+              Sebanyak <strong>{qualifiedParticipants.length} peserta</strong> di bawah ini akan diloloskan ke{' '}
+              <strong>Babak {nextStage.name}</strong>:
+            </>
+          ) : (
+            <>
+              Dewan Hakim akan mengesahkan secara resmi hasil penilaian Babak {selectedStageName} dan menetapkan juara podium berikut:
+            </>
+          )
+        }
+        confirmLabel={nextStage ? 'Ya, Loloskan Peserta' : 'Sahkan Juara Sekarang'}
+        cancelLabel="Batal"
+      >
+        <div className="bg-slate-50 border border-slate-200 rounded-md p-3 max-h-48 overflow-y-auto space-y-1 text-xs">
+          {(nextStage ? qualifiedParticipants : evaluatedParticipants).map((item, idx) => (
+            <div
+              key={`${item.participant.id}-${idx}`}
+              className="flex justify-between py-1 border-b border-slate-100 last:border-0"
+            >
+              <span className="font-semibold text-slate-900">
+                {idx + 1}. #{item.participation?.lotteryNumber || item.participant.lotteryNumber} {item.participant.name}
+                {!nextStage && idx < 3 ? ` (${idx === 0 ? 'Juara 1' : idx === 1 ? 'Juara 2' : 'Juara 3'})` : ''}
+              </span>
+              <span className="font-mono tabular-nums text-emerald-800 font-bold">
+                {item.displayScore !== null ? item.displayScore.toFixed(2) : '—'}
+              </span>
+            </div>
+          ))}
         </div>
-      )}
+        <p className="text-xs text-slate-500 leading-relaxed">
+          {nextStage
+            ? `Peserta yang lolos akan memasuki Babak ${nextStage.name} dengan paket maqra dan lembar penilaian baru. Rekam jejak babak sebelumnya tetap tersimpan rapi.`
+            : 'Pengesahan ini bersifat final dan mengikat. Rekam jejak nilai, peringkat podium, dan riwayat seluruh babak akan dibekukan secara permanen.'}
+        </p>
+      </ConfirmDialog>
     </div>
   );
 };

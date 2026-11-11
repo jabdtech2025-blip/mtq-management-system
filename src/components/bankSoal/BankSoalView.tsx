@@ -739,7 +739,7 @@ export const BankSoalView: React.FC = () => {
               type="button"
               onClick={() => setIsImportDropdownOpen(!isImportDropdownOpen)}
               data-testid="import-dropdown-btn"
-              className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl shadow-2xs transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5 text-emerald-700" />
               <span>Import</span>
@@ -747,7 +747,7 @@ export const BankSoalView: React.FC = () => {
             </button>
 
             {isImportDropdownOpen && (
-              <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in duration-100">
+              <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40">
                 <button
                   type="button"
                   data-testid="open-question-import-btn"
@@ -781,7 +781,7 @@ export const BankSoalView: React.FC = () => {
           <button
             onClick={handleOpenLotteryWorkflow}
             data-testid="open-lottery-modal-btn"
-            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs px-3.5 py-2 rounded-xl shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs px-3.5 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
           >
             <Dice5 className="w-3.5 h-3.5 text-emerald-700" />
             <span>Undian</span>
@@ -790,7 +790,7 @@ export const BankSoalView: React.FC = () => {
           <button
             onClick={handleOpenAdd}
             data-testid="add-question-btn"
-            className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah</span>
@@ -825,8 +825,8 @@ export const BankSoalView: React.FC = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200/80 shadow-2xs flex flex-wrap items-center gap-2.5">
-        <div className="relative flex-1 min-w-[220px]">
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-wrap items-center gap-3">
+        <div className="relative flex-[2] min-w-[240px]">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -846,7 +846,7 @@ export const BankSoalView: React.FC = () => {
         <select
           value={selectedBranch}
           onChange={(e) => setSelectedBranch(e.target.value)}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
+          className="flex-1 min-w-[170px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
         >
           <option value="Semua Cabang">Semua Cabang</option>
           {cabangList.map((c) => (
@@ -859,7 +859,7 @@ export const BankSoalView: React.FC = () => {
         <select
           value={selectedStage}
           onChange={(e) => setSelectedStage(e.target.value)}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
+          className="flex-1 min-w-[150px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
         >
           <option value="Semua Babak">Semua Babak</option>
           {stages.map((stg) => (
@@ -907,7 +907,7 @@ export const BankSoalView: React.FC = () => {
 
       {/* Tab 1: Questions Table */}
       {activeTab === 'daftar_soal' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[760px]">
               <thead>
@@ -1037,7 +1037,7 @@ export const BankSoalView: React.FC = () => {
 
       {/* Tab 2: Penetapan Soal Table (Satu Maqra Satu Baris) */}
       {activeTab === 'penetapan_soal' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[760px]">
               <thead>
@@ -1129,7 +1129,7 @@ export const BankSoalView: React.FC = () => {
       {activeTab === 'riwayat_undian' && (
         <div className="space-y-4">
           {lotteryDrawLogs.length === 0 ? (
-            <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs p-10 text-center text-slate-400 text-xs">
+            <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-10 text-center text-slate-400 text-xs">
               Belum ada riwayat eksekusi undian maqra pada penyelenggaraan ini.
             </div>
           ) : (
@@ -1161,7 +1161,7 @@ export const BankSoalView: React.FC = () => {
               .map((log) => (
                 <div
                   key={log.id}
-                  className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden"
+                  className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden"
                 >
                   {/* Header Card */}
                   <div className="px-5 py-3.5 bg-slate-50/70 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1255,8 +1255,8 @@ export const BankSoalView: React.FC = () => {
 
       {/* Mushaf Preview Modal */}
       {previewQuestion && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]">
+        <div className="fixed inset-0 bg-slate-950/75 flex items-center justify-center p-2 sm:p-4 z-50">
+          <div className="bg-white rounded-xl max-w-xl w-full shadow-lg border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]">
             <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
               <div className="min-w-0 pr-2">
                 <div className="flex items-center gap-2">
@@ -1330,7 +1330,7 @@ export const BankSoalView: React.FC = () => {
               </button>
               <button
                 onClick={handleAddQuestionToParticipant}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer"
               >
                 Tambahkan ke Peserta
               </button>
@@ -1495,7 +1495,7 @@ export const BankSoalView: React.FC = () => {
                 onClick={handleConfirmPersistDraw}
                 disabled={!lotteryDrawResults || lotteryDrawResults.length === 0}
                 data-testid="commit-lottery-draw-btn"
-                className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-40 text-white text-xs font-bold rounded-lg shadow-2xs"
+                className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-40 text-white text-xs font-bold rounded-lg shadow-sm"
               >
                 Terapkan & Simpan Hasil Undian
               </button>
@@ -1790,7 +1790,7 @@ export const BankSoalView: React.FC = () => {
               <button
                 type="submit"
                 form="question-form"
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-2xs"
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-sm"
               >
                 {editingQuestion ? 'Simpan Perubahan' : 'Tambah Maqra'}
               </button>

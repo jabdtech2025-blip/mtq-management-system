@@ -55,6 +55,7 @@ Pada proyek Supabase baru (atau instance PostgreSQL 16):
    - `20261115_lottery_reproducible.sql`
    - `20261116_integrity_hardening.sql`
    - `20261117_flow_consistency.sql`
+   - `20261118_site_settings_and_health.sql`
 3. (Opsional untuk lingkungan uji/demo) Jalankan data awal:
    - `supabase/seed.sql`
 4. Untuk mem-bootstrap akun Superadmin pertama kali secara aman (hanya dapat dijalankan satu kali):

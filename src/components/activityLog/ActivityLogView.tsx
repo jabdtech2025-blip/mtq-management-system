@@ -214,45 +214,45 @@ export const ActivityLogView: React.FC = () => {
     <div className="p-4 sm:p-5 max-w-7xl mx-auto space-y-3.5">
       {/* KPI Stats Cards - Monochrome White & Black per Enterprise Standard */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-600">Total Log Aktivitas</span>
             <History className="w-3.5 h-3.5 text-slate-400" />
           </div>
-          <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono">
+          <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono tabular-nums">
             {stats.total}
           </p>
           <p className="text-xs text-slate-500 mt-0.5">Seluruh rekaman sistem</p>
         </div>
 
-        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-600">Aktivitas Berhasil</span>
             <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" />
           </div>
-          <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono">
+          <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono tabular-nums">
             {stats.success}
           </p>
           <p className="text-xs text-slate-500 mt-0.5">Operasi sukses</p>
         </div>
 
-        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-600">Peringatan</span>
             <AlertTriangle className="w-3.5 h-3.5 text-slate-400" />
           </div>
-          <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono">
+          <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono tabular-nums">
             {stats.warnings}
           </p>
           <p className="text-xs text-slate-500 mt-0.5">Perlu perhatian</p>
         </div>
 
-        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-600">Error / Ditolak</span>
             <XCircle className="w-3.5 h-3.5 text-slate-400" />
           </div>
-          <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono">
+          <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono tabular-nums">
             {stats.errors}
           </p>
           <p className="text-xs text-slate-500 mt-0.5">Penolakan / kegagalan</p>
@@ -260,9 +260,9 @@ export const ActivityLogView: React.FC = () => {
       </div>
 
       {/* Filter Toolbar */}
-      <div className="p-2.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs flex flex-wrap items-center gap-2.5">
+      <div className="p-3 bg-white rounded-xl border border-slate-200/90 shadow-sm flex flex-wrap items-center gap-2.5">
         {/* Search */}
-        <div className="relative flex-1 min-w-[220px]">
+        <div className="relative flex-[2] min-w-[240px]">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -272,11 +272,11 @@ export const ActivityLogView: React.FC = () => {
               setCurrentPage(1);
             }}
             placeholder="Cari aktor, hakim, admin, aksi, sasaran, atau rincian error..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:bg-white transition-all"
+            className="w-full pl-8 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:bg-white transition-all"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 flex-1 sm:flex-none">
           {/* Status Filter */}
           <select
             value={filterOutcome}
@@ -284,7 +284,7 @@ export const ActivityLogView: React.FC = () => {
               setFilterOutcome(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
+            className="flex-1 sm:flex-none min-w-[140px] px-2.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
           >
             <option value="ALL">Semua Status</option>
             <option value="Success">Hanya Berhasil</option>
@@ -299,7 +299,7 @@ export const ActivityLogView: React.FC = () => {
               setFilterModule(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
+            className="flex-1 sm:flex-none min-w-[150px] px-2.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
           >
             <option value="ALL">Semua Modul</option>
             <option value="Penilaian">Penilaian</option>
@@ -329,7 +329,7 @@ export const ActivityLogView: React.FC = () => {
             type="button"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-2xs cursor-pointer transition-all"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-sm cursor-pointer transition-all"
           >
             <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin text-emerald-700' : ''}`} />
             <span>Segarkan</span>
@@ -339,7 +339,7 @@ export const ActivityLogView: React.FC = () => {
             type="button"
             onClick={handleExportCSV}
             disabled={filteredLogs.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white text-xs font-medium shadow-xs cursor-pointer transition-all"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white text-xs font-medium shadow-sm cursor-pointer transition-all"
           >
             <Download className="w-3 h-3" />
             <span>Ekspor CSV</span>
@@ -348,7 +348,7 @@ export const ActivityLogView: React.FC = () => {
       </div>
 
       {/* Horizontally Scrollable Log Table Without Text Truncation */}
-      <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200/90 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-max text-left border-collapse text-xs">
             <thead>
@@ -487,8 +487,8 @@ export const ActivityLogView: React.FC = () => {
 
       {/* Modal Lihat Detail Log Aktivitas */}
       {selectedLog && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-lg w-full shadow-lg border border-slate-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">Detail Log Aktivitas</h3>
@@ -497,6 +497,7 @@ export const ActivityLogView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSelectedLog(null)}
+                aria-label="Tutup detail log aktivitas"
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
               >
                 <X className="w-4 h-4" />
