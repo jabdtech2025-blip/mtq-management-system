@@ -20,17 +20,10 @@ export async function clearStorageAndOpenGate(page: Page) {
  * Helper untuk masuk ke Mode Simulasi Demo Lokal secara andal dan terisolasi.
  */
 export async function enterDemoSimulation(page: Page) {
-  await page.context().clearCookies();
-  await page.goto('/');
-  await page.evaluate(() => {
-    try {
-      localStorage.clear();
-      sessionStorage.clear();
-      localStorage.setItem('mtq_offline_demo_simulation_v4', 'true');
-    } catch {}
-  });
-  await page.goto('/');
-  await page.waitForLoadState('domcontentloaded');
+  await clearStorageAndOpenGate(page);
+
+  // Masuk lewat tombol resmi di layar login agar data demo awal (babak, peserta, hakim) ikut disiapkan
+  await page.getByRole('button', { name: /Coba Mode Demo/i }).click();
 
   // Pastikan dashboard dan sidebar berhasil dimuat dan stabil
   await expect(page.getByText('Manajemen MTQ').first()).toBeVisible({ timeout: 15000 });

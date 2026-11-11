@@ -1,89 +1,42 @@
 import { test, expect } from '@playwright/test';
 import { clearStorageAndOpenGate } from './helpers/auth';
 
-test.describe('E2E: Gerbang Autentikasi Produksi & Fitur Sign-Up Pengguna Baru', () => {
+// Form login hanya tampil bila VITE_SUPABASE_URL/ANON_KEY terpasang. Set E2E_SUPABASE_CONFIGURED=true
+// saat menjalankan E2E terhadap build yang tersambung ke Supabase agar tes form login ikut dijalankan.
+const SUPABASE_CONFIGURED = process.env.E2E_SUPABASE_CONFIGURED === 'true';
+
+test.describe('E2E: Gerbang Akses (Pendaftaran Mandiri Ditutup)', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorageAndOpenGate(page);
   });
 
-  test('01. Menampilkan Gerbang Login Bersih & Tombol Besar Mode Simulasi Lokal', async ({ page }) => {
-    // Verifikasi branding dan judul sistem
+  test('01. Menampilkan Gerbang Akses Bersih dengan Bahasa Operasional & Tombol Mode Demo', async ({ page }) => {
     await expect(page.getByText('Sistem Manajemen & Penilaian MTQ')).toBeVisible();
-    await expect(page.getByText(/Gerbang Keamanan Produksi MTQ/i)).toBeVisible();
-    await expect(page.getByText(/Wajib autentikasi Supabase Auth & verifikasi keanggotaan tenant aktif/i)).toBeVisible();
+    await expect(page.getByText(/Akses Terbatas Panitia & Dewan Hakim/i)).toBeVisible();
+    await expect(page.getByText(/Masuk dengan akun yang diberikan panitia penyelenggara/i)).toBeVisible();
 
-    // Verifikasi antarmuka login bersih: tidak menampilkan status teknis koneksi database atau peringatan gangguan
-    await expect(page.getByText(/Status Koneksi Supabase/i)).not.toBeVisible();
-    await expect(page.getByRole('button', { name: /Cek Koneksi/i })).not.toBeVisible();
-    await expect(page.getByText(/Evaluasi Tanpa Akun Database\?/i)).not.toBeVisible();
+    // Tidak ada istilah teknis atau status koneksi database di layar login
+    await expect(page.getByText(/Fail-Closed/i)).toHaveCount(0);
+    await expect(page.getByText(/Status Koneksi Supabase/i)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Cek Koneksi/i })).toHaveCount(0);
 
-    // Verifikasi tombol besar berwarna hijau muda "Mode Simulasi Lokal"
-    const demoSimBtn = page.getByRole('button', { name: 'Mode Simulasi Lokal', exact: true });
-    await expect(demoSimBtn).toBeVisible();
+    await expect(page.getByRole('button', { name: /Coba Mode Demo/i })).toBeVisible();
   });
 
-  test('02. Beralih Antara Tab "Masuk (Login)" dan "Daftar Akun Baru (Sign Up)"', async ({ page }) => {
-    const loginTab = page.getByRole('button', { name: /Masuk \(Login\)/i });
-    const signUpTab = page.getByRole('button', { name: /Daftar Akun Baru/i });
-
-    // Kondisi awal: Tab Login aktif
-    await expect(loginTab).toBeVisible();
-    await expect(signUpTab).toBeVisible();
-    await expect(page.getByRole('button', { name: /Masuk ke Workspace Produksi/i })).toBeVisible();
-
-    // Klik tab Daftar Akun Baru
-    await signUpTab.click();
-    await expect(page.getByText(/Pendaftaran akan membuat akun autentikasi resmi di/i)).toBeVisible();
-    await expect(page.getByPlaceholder('Contoh: H. Ahmad Fauzi, M.Ag')).toBeVisible();
-    await expect(page.getByPlaceholder('Minimal 8 karakter')).toBeVisible();
-    await expect(page.getByPlaceholder('Ulangi kata sandi')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Daftarkan Akun Baru/i })).toBeVisible();
-
-    // Klik kembali ke tab Masuk
-    await loginTab.click();
-    await expect(page.getByRole('button', { name: /Masuk ke Workspace Produksi/i })).toBeVisible();
+  test('02. Pendaftaran Akun Mandiri Tidak Tersedia', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /Daftar Akun Baru/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Daftarkan Akun Baru/i })).toHaveCount(0);
+    await expect(page.getByPlaceholder('Ulangi kata sandi')).toHaveCount(0);
   });
 
-  test('03. Validasi Form Sign-Up: Kata Sandi Kurang dari 8 Karakter & Konfirmasi Tidak Cocok', async ({ page }) => {
-    // Beralih ke Sign-Up
-    await page.getByRole('button', { name: /Daftar Akun Baru/i }).click();
+  test('03. Alur "Lupa Kata Sandi?" dan Kembali ke Form Login', async ({ page }) => {
+    test.skip(!SUPABASE_CONFIGURED, 'Form login hanya tampil saat Supabase dikonfigurasi (E2E_SUPABASE_CONFIGURED=true).');
 
-    const nameInput = page.getByPlaceholder('Contoh: H. Ahmad Fauzi, M.Ag');
-    const emailInput = page.getByPlaceholder('nama@instansi.mtq.id');
-    const passwordInput = page.getByPlaceholder('Minimal 8 karakter');
-    const confirmInput = page.getByPlaceholder('Ulangi kata sandi');
-    const submitBtn = page.getByRole('button', { name: /Daftarkan Akun Baru/i });
-
-    // Isi nama dan email valid, tetapi password pendek (< 8)
-    await nameInput.fill('Ust. Fajar Ramadhan');
-    await emailInput.fill('fajar@jabar.mtq.id');
-    await passwordInput.fill('12345');
-    await confirmInput.fill('12345');
-
-    // HTML5 minlength validation mencegah submit atau menampilkan error
-    await submitBtn.click();
-    const isPasswordInvalid = await passwordInput.evaluate((el: HTMLInputElement) => !el.checkValidity());
-    expect(isPasswordInvalid).toBe(true);
-
-    // Sekarang isi kata sandi >= 8 tapi konfirmasi berbeda
-    await passwordInput.fill('Password123!');
-    await confirmInput.fill('PasswordLain!');
-    await submitBtn.click();
-
-    // Verifikasi pesan error feedback
-    await expect(page.getByText(/Konfirmasi kata sandi tidak cocok/i)).toBeVisible();
-  });
-
-  test('04. Alur "Lupa Kata Sandi?" dan Kembali ke Form Login', async ({ page }) => {
-    // Klik "Lupa Kata Sandi?"
     await page.getByRole('button', { name: /Lupa Kata Sandi\?/i }).click();
-
-    // Form reset kata sandi muncul
     await expect(page.getByText(/Kirim Tautan Pemulihan Kata Sandi/i)).toBeVisible();
     await expect(page.getByRole('button', { name: /Kirim Tautan Reset/i })).toBeVisible();
 
-    // Klik "Kembali Login"
     await page.getByRole('button', { name: /Kembali Login/i }).click();
-    await expect(page.getByRole('button', { name: /Masuk ke Workspace Produksi/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Lupa Kata Sandi\?/i })).toBeVisible();
   });
 });

@@ -14,7 +14,7 @@ test.describe('E2E: Navigasi Workspace Demo Lokal & Antarmuka Responsif', () => 
     await expect(page.getByText(/H\. Rachmat Hidayat/i).first()).toBeVisible();
 
     // Verifikasi indikator isolasi mode demo
-    await expect(page.getByText(/Mode Simulasi/i).first()).toBeVisible();
+    await expect(page.getByText('Mode Demo', { exact: true }).first()).toBeVisible();
   });
 
   test('02. Navigasi Melalui Seluruh Modul Operasional MTQ', async ({ page }) => {
@@ -25,7 +25,7 @@ test.describe('E2E: Navigasi Workspace Demo Lokal & Antarmuka Responsif', () => 
 
     // 2. Navigasi ke Grup & Peserta
     await page.getByRole('button', { name: /Grup & Peserta/i }).first().click();
-    await expect(page.getByText(/Grup & Peserta MTQ/i).first()).toBeVisible();
+    await expect(page.getByText(/& Peserta MTQ/i).first()).toBeVisible();
 
     // 3. Navigasi ke Bank Soal & Maqra
     await page.getByRole('button', { name: /Bank Soal & Maqra/i }).first().click();
@@ -37,7 +37,7 @@ test.describe('E2E: Navigasi Workspace Demo Lokal & Antarmuka Responsif', () => 
 
     // 5. Navigasi ke Monitoring Penilaian
     await page.getByRole('button', { name: /Monitoring Penilaian/i }).first().click();
-    await expect(page.getByText(/Mode Pemantauan Penilaian Dewan Hakim/i).first()).toBeVisible();
+    await expect(page.getByText(/Monitoring Penilaian Dewan Hakim/i).first()).toBeVisible();
 
     // 6. Navigasi ke Rekap Nilai Real-Time
     await page.getByRole('button', { name: /Rekap Nilai Real-Time/i }).first().click();

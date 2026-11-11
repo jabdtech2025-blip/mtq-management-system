@@ -426,6 +426,10 @@ export const HasilKelulusanView: React.FC = () => {
 
   const championCount = currentStage?.championCount || 3;
 
+  // S4: nomor undian yang berlaku di babak ini (hasil undian babak), bukan nomor pendaftaran awal
+  const stageLotteryOf = (participantId: string) =>
+    evaluatedParticipants.find((e) => e.participant.id === participantId)?.participation?.lotteryNumber;
+
   const criticalTieGroups = useMemo(() => {
     if (!serverRankings) return [];
     const groups = new Map<number, ServerRankRow[]>();
@@ -833,7 +837,7 @@ export const HasilKelulusanView: React.FC = () => {
                       id: item.participant.id,
                       name: item.participant.name,
                       kafilahName: item.participant.kafilahName,
-                      lotteryNumber: item.participant.lotteryNumber,
+                      lotteryNumber: item.participation?.lotteryNumber || item.participant.lotteryNumber,
                       participantCode: item.participant.participantId,
                       score: item.displayScore,
                       rank: item.championRank || idx + 1,
@@ -1031,7 +1035,7 @@ export const HasilKelulusanView: React.FC = () => {
                       return (
                         <label key={r.participantId} className="flex items-center justify-between gap-3 text-sm">
                           <span className="text-slate-800">
-                            #{part?.lotteryNumber || '-'} {part?.name || r.participantId}
+                            #{stageLotteryOf(r.participantId) || part?.lotteryNumber || '-'} {part?.name || r.participantId}
                           </span>
                           <select
                             value={tieOrder[r.participantId] ?? ''}
@@ -1135,7 +1139,7 @@ export const HasilKelulusanView: React.FC = () => {
 
                       {/* Lottery */}
                       <td className="px-4 py-3.5 font-mono font-bold text-slate-900">
-                        #{p.lotteryNumber}
+                        #{item.participation?.lotteryNumber || p.lotteryNumber}
                       </td>
 
                       {/* Participant identity */}
@@ -1364,7 +1368,7 @@ export const HasilKelulusanView: React.FC = () => {
               {(nextStage ? qualifiedParticipants : evaluatedParticipants).map((item, idx) => (
                 <div key={`${item.participant.id}-${idx}`} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
                   <span className="font-semibold text-slate-900">
-                    {idx + 1}. #{item.participant.lotteryNumber} {item.participant.name}
+                    {idx + 1}. #{item.participation?.lotteryNumber || item.participant.lotteryNumber} {item.participant.name}
                     {!nextStage && idx < 3 ? ` (${idx === 0 ? 'Juara 1' : idx === 1 ? 'Juara 2' : 'Juara 3'})` : ''}
                   </span>
                   <span className="font-mono text-emerald-800 font-bold">

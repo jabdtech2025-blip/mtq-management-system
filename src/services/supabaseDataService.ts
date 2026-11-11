@@ -2738,7 +2738,7 @@ export const supabaseDataService = {
       draw_mode: log.drawMode || 'both',
       notes: log.notes || null,
       created_at: log.createdAt
-    });
+    }, { onConflict: 'id', ignoreDuplicates: true });
     if (error) {
       return { success: false, mode: 'supabase_live', message: error.message };
     }
@@ -2890,56 +2890,20 @@ export const supabaseDataService = {
       return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
     }
 
-    try {
-      const { data: spRows } = await client
-        .from('stage_participations')
-        .select('id')
-        .eq('participant_id', participantId)
-        .eq('tenant_id', tenantId);
-      const spIds = (spRows || []).map((r: { id: string }) => String(r.id)).filter(Boolean);
-
-      if (spIds.length > 0) {
-        const { data: finalizedAss } = await client
-          .from('judge_assessments')
-          .select('id')
-          .in('stage_participation_id', spIds)
-          .eq('status', 'finalized')
-          .limit(1);
-        if (finalizedAss && finalizedAss.length > 0) {
-          return {
-            success: false,
-            mode: 'supabase_live',
-            message: 'Peserta tidak dapat dihapus karena telah memiliki lembar penilaian yang sudah difinalisasi.'
-          };
-        }
-
-        await client
-          .from('judge_assessments')
-          .delete()
-          .in('stage_participation_id', spIds)
-          .eq('tenant_id', tenantId);
-        await client
-          .from('assigned_maqras')
-          .delete()
-          .in('stage_participation_id', spIds)
-          .eq('tenant_id', tenantId);
-        await client
-          .from('stage_participations')
-          .delete()
-          .in('id', spIds)
-          .eq('tenant_id', tenantId);
-      }
-
-      const { error } = await client
-        .from('participants')
-        .delete()
-        .eq('id', participantId)
-        .eq('tenant_id', tenantId);
-      if (error) return { success: false, mode: 'supabase_live', message: error.message };
-      return { success: true, mode: 'supabase_live', message: 'Peserta berhasil dihapus dari database.' };
-    } catch (err: any) {
-      return { success: false, mode: 'supabase_live', message: err?.message || 'Gagal menghapus peserta.' };
+    // S6: penghapusan transaksional di server (peserta + babak + maqra), ditolak bila sudah ada lembar nilai
+    const { data, error } = await client.rpc('delete_participant_safe', {
+      p_tenant_id: tenantId,
+      p_participant_id: participantId
+    });
+    if (error) {
+      return { success: false, mode: 'supabase_live', message: error.message };
     }
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message: 'Peserta berhasil dihapus.',
+      data
+    };
   },
 
   async updateParticipantRecord(
@@ -3250,26 +3214,12 @@ export const supabaseDataService = {
       return { success: false, mode: 'local_offline_fallback', message: 'Mode lokal aktif.' };
     }
 
-    try {
-      // Bersihkan entitas anak yang memiliki constraint RESTRICT terlebih dahulu
-      await client.from('judge_assessments').delete().eq('tenant_id', tenantId);
-      await client.from('assigned_maqras').delete().eq('tenant_id', tenantId);
-      await client.from('stage_participations').delete().eq('tenant_id', tenantId);
-      await client.from('judge_assignments').delete().eq('tenant_id', tenantId);
-      await client.from('questions').delete().eq('tenant_id', tenantId);
-      await client.from('participants').delete().eq('tenant_id', tenantId);
-      await client.from('stages').delete().eq('tenant_id', tenantId);
-      await client.from('kafilahs').delete().eq('tenant_id', tenantId);
-      await client.from('competition_rule_configs').delete().eq('tenant_id', tenantId);
-      await client.from('error_categories').delete().eq('tenant_id', tenantId);
-      await client.from('branches').delete().eq('tenant_id', tenantId);
-      await client.from('levels').delete().eq('tenant_id', tenantId);
-      await client.from('tenant_memberships').delete().eq('tenant_id', tenantId);
-    } catch {}
-
-    const { error } = await client.from('tenants').delete().eq('id', tenantId);
-    if (error) return { success: false, mode: 'supabase_live', message: error.message };
-    return { success: true, mode: 'supabase_live', message: 'Penyelenggara MTQ berhasil dihapus dari database.' };
+    // S6: penghapusan transaksional di server; ditolak bila tenant sudah punya riwayat penilaian/undian/audit
+    const { data, error } = await client.rpc('delete_tenant_safe', { p_tenant_id: tenantId });
+    if (error) {
+      return { success: false, mode: 'supabase_live', message: error.message };
+    }
+    return { success: true, mode: 'supabase_live', message: 'Penyelenggara berhasil dihapus.', data };
   },
 
   async deleteUser(userId: string): Promise<RpcServiceResult> {

@@ -2176,18 +2176,29 @@ GRANT EXECUTE ON FUNCTION public.advance_stage_qualifiers(UUID, UUID, UUID[], JS
 -- ==============================================================================
 
 -- 3.1 Status Verifikasi Berkas Peserta
+-- T7 (Audit Lanjutan): backfill 'Diverifikasi' HANYA dijalankan sekali, saat kolom pertama kali dibuat.
+-- Menjalankan ulang migrasi ini tidak boleh memverifikasi otomatis pendaftar baru yang masih 'Diajukan'.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'participants' AND column_name = 'verification_status'
+    ) THEN
+        ALTER TABLE public.participants
+          ADD COLUMN verification_status VARCHAR(20) NOT NULL DEFAULT 'Diajukan'
+            CHECK (verification_status IN ('Diajukan', 'Diverifikasi', 'Ditolak'));
+
+        -- Backfill peserta lama yang sudah ada sebelum migrasi menjadi 'Diverifikasi'
+        UPDATE public.participants
+        SET verification_status = 'Diverifikasi'
+        WHERE verification_status = 'Diajukan';
+    END IF;
+END $$;
+
 ALTER TABLE public.participants
-  ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20) NOT NULL DEFAULT 'Diajukan'
-    CHECK (verification_status IN ('Diajukan', 'Diverifikasi', 'Ditolak')),
   ADD COLUMN IF NOT EXISTS verification_note TEXT NULL,
   ADD COLUMN IF NOT EXISTS verified_by UUID NULL REFERENCES public.profiles(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ NULL;
-
--- Backfill peserta lama yang sudah ada sebelum migrasi menjadi 'Diverifikasi'
-UPDATE public.participants
-SET verification_status = 'Diverifikasi',
-    verified_at = COALESCE(verified_at, now())
-WHERE verification_status = 'Diajukan';
 
 CREATE OR REPLACE FUNCTION public.verify_participant(
     p_tenant_id UUID,

@@ -298,7 +298,7 @@ export const SuperadminUsersView: React.FC = () => {
               {filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-5 py-8 text-center text-slate-500">
-                    Belum ada akun pada tabel <code className="font-mono bg-slate-100 px-1 rounded">public.profiles</code> yang sesuai filter. Gunakan tombol <strong>Tambah Akun Baru</strong> atau fitur <strong>Daftar Akun Baru</strong> pada halaman login.
+                    Belum ada akun pada tabel <code className="font-mono bg-slate-100 px-1 rounded">public.profiles</code> yang sesuai filter. Gunakan tombol <strong>Tambah Akun Baru</strong> untuk mengundang akun. Pendaftaran mandiri dari halaman login dinonaktifkan.
                   </td>
                 </tr>
               ) : (

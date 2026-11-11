@@ -9,7 +9,7 @@ test.describe('E2E: Lembar Penilaian Dewan Hakim, Dual Panel & Anotasi Mushaf', 
   test('01. Membuka Daftar Peserta Penilaian dan Memilih Dewan Hakim', async ({ page }) => {
     // Navigasi ke modul Penilaian Dewan Hakim
     await page.getByRole('button', { name: /Monitoring Penilaian/i }).first().click();
-    await expect(page.getByText(/Mode Pemantauan Penilaian Dewan Hakim/i).first()).toBeVisible();
+    await expect(page.getByText(/Monitoring Penilaian Dewan Hakim/i).first()).toBeVisible();
 
     // Verifikasi statistik penugasan penilaian
     await expect(page.getByText(/Total Ditugaskan/i).first()).toBeVisible();
