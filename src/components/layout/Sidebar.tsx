@@ -154,7 +154,7 @@ export const Sidebar: React.FC = () => {
               <h1 className="text-sm font-bold text-slate-900 tracking-tight leading-snug">
                 Manajemen MTQ
               </h1>
-              <p className="text-[11px] text-slate-500 font-medium">Musabaqah Digital</p>
+              <p className="text-xs text-slate-500 font-medium">Musabaqah Digital</p>
             </div>
           </div>
 
@@ -170,7 +170,7 @@ export const Sidebar: React.FC = () => {
 
         {/* Role Tag */}
         <div className="px-4 pt-3 pb-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
             {currentUser.role === 'superadmin'
               ? 'Menu Superadmin'
               : currentUser.role === 'judge'
@@ -217,7 +217,7 @@ export const Sidebar: React.FC = () => {
               <p className="text-xs font-bold text-slate-800 truncate" title={currentUser.name}>
                 {currentUser.name.split(',')[0]}
               </p>
-              <p className="text-[10px] text-emerald-800 font-semibold truncate capitalize">
+              <p className="text-xs text-emerald-800 font-semibold truncate capitalize">
                 {currentUser.role === 'superadmin'
                   ? 'Superadmin'
                   : currentUser.role === 'judge'
@@ -226,7 +226,7 @@ export const Sidebar: React.FC = () => {
               </p>
             </div>
           </div>
-          <span className="text-[10px] font-bold text-slate-400 hover:text-emerald-700 shrink-0 px-1 py-0.5 rounded bg-slate-100">
+          <span className="text-xs font-bold text-slate-400 hover:text-emerald-700 shrink-0 px-1 py-0.5 rounded bg-slate-100">
             Ganti
           </span>
         </button>

@@ -28,7 +28,7 @@ export const SuperadminDashboardView: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+          <span className="text-xs font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
             Platform Multi-Tenant
           </span>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1">
@@ -58,7 +58,7 @@ export const SuperadminDashboardView: React.FC = () => {
             <Building className="w-4 h-4 text-purple-600" />
           </div>
           <p className="text-3xl font-bold text-slate-900 mt-3 font-mono">{totalTenants}</p>
-          <p className="text-[11px] text-slate-400 mt-1">LPTQ Provinsi terdaftar</p>
+          <p className="text-xs text-slate-400 mt-1">LPTQ Provinsi terdaftar</p>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
@@ -67,7 +67,7 @@ export const SuperadminDashboardView: React.FC = () => {
             <Users className="w-4 h-4 text-blue-600" />
           </div>
           <p className="text-3xl font-bold text-slate-900 mt-3 font-mono">{totalUsers}</p>
-          <p className="text-[11px] text-slate-400 mt-1">Seluruh wilayah & dewan juri</p>
+          <p className="text-xs text-slate-400 mt-1">Seluruh wilayah & dewan juri</p>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
@@ -76,7 +76,7 @@ export const SuperadminDashboardView: React.FC = () => {
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
           </div>
           <p className="text-3xl font-bold text-slate-900 mt-3 font-mono">{totalJudges}</p>
-          <p className="text-[11px] text-slate-400 mt-1">Hakim penilai bersertifikasi</p>
+          <p className="text-xs text-slate-400 mt-1">Hakim penilai bersertifikasi</p>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
@@ -85,7 +85,7 @@ export const SuperadminDashboardView: React.FC = () => {
             <Users className="w-4 h-4 text-amber-600" />
           </div>
           <p className="text-3xl font-bold text-slate-900 mt-3 font-mono">{totalAdmins}</p>
-          <p className="text-[11px] text-slate-400 mt-1">Admin wilayah aktif</p>
+          <p className="text-xs text-slate-400 mt-1">Admin wilayah aktif</p>
         </div>
       </div>
 
@@ -105,13 +105,13 @@ export const SuperadminDashboardView: React.FC = () => {
                   <span className="font-mono text-xs font-bold text-purple-900 bg-purple-50 px-2 py-0.5 rounded">
                     {t.code}
                   </span>
-                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
                     {t.status}
                   </span>
                 </div>
                 <h4 className="font-extrabold text-base text-slate-900 mt-2.5">{t.name}</h4>
                 <p className="text-xs text-slate-500 mt-1">{t.eventName}</p>
-                <p className="text-[11px] text-slate-400 mt-2">
+                <p className="text-xs text-slate-400 mt-2">
                   Wilayah: {t.region} · Periode: {t.period}
                 </p>
               </div>
@@ -162,7 +162,7 @@ export const SuperadminDashboardView: React.FC = () => {
                 </p>
                 <p className="text-slate-500 mt-0.5">{log.summary}</p>
               </div>
-              <span className="text-[10px] font-mono text-slate-400 shrink-0">
+              <span className="text-xs font-mono text-slate-400 shrink-0">
                 {log.timestamp}
               </span>
             </div>

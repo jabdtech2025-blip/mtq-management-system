@@ -38,7 +38,7 @@ export const SuperadminAuditView: React.FC = () => {
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
             Audit Log Platform Global
           </h1>
-          <span className="text-[11px] font-semibold text-purple-800 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+          <span className="text-xs font-semibold text-purple-800 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
             Pusat Pengawasan Sistem
           </span>
         </div>
@@ -79,7 +79,7 @@ export const SuperadminAuditView: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[800px] text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
                 <th className="px-5 py-3 w-40">Waktu (WIB)</th>
                 <th className="px-4 py-3">Aktor Pengguna</th>
                 <th className="px-4 py-3">Tindakan & Tenant</th>
@@ -91,15 +91,15 @@ export const SuperadminAuditView: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {filteredLogs.map((log, idx) => (
                 <tr key={`${log.id}-${idx}`} className="hover:bg-slate-50/70">
-                  <td className="px-5 py-3.5 font-mono text-slate-500 text-[11px] whitespace-nowrap">
+                  <td className="px-5 py-3.5 font-mono text-slate-500 text-xs whitespace-nowrap">
                     {formatDateTimeWIB(log.timestamp)}
                   </td>
                   <td className="px-4 py-3.5 font-bold text-slate-900">{log.actor}</td>
                   <td className="px-4 py-3.5">
-                    <span className="font-mono text-[11px] font-bold text-purple-900 bg-purple-50 px-2 py-0.5 rounded">
+                    <span className="font-mono text-xs font-bold text-purple-900 bg-purple-50 px-2 py-0.5 rounded">
                       {log.action}
                     </span>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{log.tenantName}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{log.tenantName}</p>
                   </td>
                   <td className="px-4 py-3.5 font-medium text-slate-800">{log.target}</td>
                   <td className="px-5 py-3.5 text-slate-600 leading-relaxed max-w-xs">
@@ -107,7 +107,7 @@ export const SuperadminAuditView: React.FC = () => {
                   </td>
                   <td className="px-4 py-3.5 text-center">
                     <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
                         log.outcome === 'Success'
                           ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                           : log.outcome === 'Warning'

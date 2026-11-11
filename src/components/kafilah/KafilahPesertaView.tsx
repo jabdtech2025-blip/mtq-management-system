@@ -215,7 +215,7 @@ export const KafilahPesertaView: React.FC = () => {
 
   const openAddParticipantModal = (preselectedKafilah?: Kafilah) => {
     const defaultKafilah = preselectedKafilah || selectedKafilah || activeKafilahs[0] || kafilahs[0];
-    const defaultCabang = activeCabangList[0]?.name || cabangList[0]?.name || 'Tilawah Dewasa Putra';
+    const defaultCabang = activeCabangList[0]?.name || cabangList[0]?.name || '';
     const defaultJenjang = activeJenjangList[0]?.name || jenjangList[0]?.name || 'Dewasa';
     const defaultStage = activeStages[0]?.name || stages[0]?.name || 'Penyisihan';
     const nextSeq = String(participants.length + 1).padStart(3, '0');
@@ -325,7 +325,7 @@ export const KafilahPesertaView: React.FC = () => {
       levelId: matchedLevel?.id,
       levelName: partLevelName || activeJenjangList[0]?.name || 'Dewasa',
       branchId: matchedBranch?.id,
-      branchName: partBranchName || activeCabangList[0]?.name || 'Tilawah Dewasa Putra',
+      branchName: partBranchName || activeCabangList[0]?.name || '',
       stageId: matchedStage?.id,
       stageName: partStageName || activeStages[0]?.name || 'Penyisihan',
       questionId: '',
@@ -748,11 +748,11 @@ export const KafilahPesertaView: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-5">
                       <p className="font-medium text-slate-800">{k.contactPerson}</p>
-                      <p className="text-[11px] text-slate-400 font-mono">{k.contactPhone}</p>
+                      <p className="text-xs text-slate-400 font-mono">{k.contactPhone}</p>
                     </td>
                     <td className="py-3.5 px-5 text-center">
                       <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
                           k.status === 'Aktif'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : 'bg-slate-100 text-slate-600 border-slate-200'
@@ -826,12 +826,12 @@ export const KafilahPesertaView: React.FC = () => {
                           </span>
                           <span className="font-bold text-slate-900 text-sm">{p.name}</span>
                         </div>
-                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                        <p className="text-xs text-slate-500 font-mono mt-0.5">
                           {p.participantId} · {p.branchName}
                         </p>
                       </div>
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold border ${
                           verStatus === 'Diverifikasi'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : verStatus === 'Ditolak'
@@ -845,11 +845,11 @@ export const KafilahPesertaView: React.FC = () => {
 
                     <div className="text-xs text-slate-600 grid grid-cols-2 gap-1.5 bg-slate-50 p-2.5 rounded-lg">
                       <div>
-                        <span className="text-[10px] text-slate-400 block">{groupLabel}</span>
+                        <span className="text-xs text-slate-400 block">{groupLabel}</span>
                         <span className="font-semibold text-slate-800">{p.kafilahName}</span>
                       </div>
                       <div>
-                        <span className="text-[10px] text-slate-400 block">Instansi / Asal</span>
+                        <span className="text-xs text-slate-400 block">Instansi / Asal</span>
                         <span className="font-medium text-slate-800">
                           {p.originInstitution || p.originCity || '-'}
                         </span>
@@ -878,7 +878,7 @@ export const KafilahPesertaView: React.FC = () => {
                                   text: res.message
                                 });
                               }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold"
                             >
                               <UserCheck className="w-3.5 h-3.5" />
                               <span>Verifikasi</span>
@@ -892,7 +892,7 @@ export const KafilahPesertaView: React.FC = () => {
                                 setRejectNote(p.verificationNote || '');
                                 setRejectError('');
                               }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-[11px] font-bold"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-xs font-bold"
                             >
                               <X className="w-3.5 h-3.5" />
                               <span>Tolak</span>
@@ -939,7 +939,7 @@ export const KafilahPesertaView: React.FC = () => {
                         </td>
                         <td className="py-3 px-4">
                           <div className="font-bold text-slate-900">{p.name}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">{p.participantId}</div>
+                          <div className="text-xs text-slate-400 font-mono">{p.participantId}</div>
                         </td>
                         <td className="py-3 px-4 text-slate-700 font-medium">
                           {p.fatherName || '-'}
@@ -947,7 +947,7 @@ export const KafilahPesertaView: React.FC = () => {
                         <td className="py-3 px-4 text-slate-700">
                           <p className="font-medium text-slate-800">{p.originInstitution || '-'}</p>
                           {(p.originCity || p.originRegion) && (
-                            <p className="text-[11px] text-slate-400">
+                            <p className="text-xs text-slate-400">
                               {[p.originCity, p.originRegion].filter(Boolean).join(', ')}
                             </p>
                           )}
@@ -956,7 +956,7 @@ export const KafilahPesertaView: React.FC = () => {
                         <td className="py-3 px-4 font-medium text-slate-800">{p.branchName}</td>
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           <span
-                            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold border ${
                               verStatus === 'Diverifikasi'
                                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                 : verStatus === 'Ditolak'
@@ -968,7 +968,7 @@ export const KafilahPesertaView: React.FC = () => {
                             {verStatus}
                           </span>
                           {p.verificationNote && (
-                            <div className="text-[10px] text-slate-400 max-w-[140px] truncate mx-auto mt-0.5">
+                            <div className="text-xs text-slate-400 max-w-[140px] truncate mx-auto mt-0.5">
                               {p.verificationNote}
                             </div>
                           )}
@@ -1122,7 +1122,7 @@ export const KafilahPesertaView: React.FC = () => {
                         </td>
                         <td className="py-2.5 px-3 font-medium text-slate-900">
                           <div>{p.name}</div>
-                          <div className="text-[10px] text-slate-500">
+                          <div className="text-xs text-slate-500">
                             {[p.fatherName ? `Ayah: ${p.fatherName}` : '', p.originInstitution, p.originCity]
                               .filter(Boolean)
                               .join(' · ')}
@@ -1131,14 +1131,14 @@ export const KafilahPesertaView: React.FC = () => {
                         <td className="py-2.5 px-3 text-slate-600">
                           <div className="font-semibold text-slate-800">{p.branchName}</div>
                           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span className="text-[10px] text-emerald-800 font-semibold font-mono">
+                            <span className="text-xs text-emerald-800 font-semibold font-mono">
                               Babak: {p.stageName}
                             </span>
                           </div>
                         </td>
                         <td className="py-2.5 px-3 text-center">
                           <span
-                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${
+                            className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${
                               p.status === 'Final'
                                 ? 'bg-emerald-50 text-emerald-700'
                                 : p.status === 'Berlangsung'
@@ -1153,14 +1153,14 @@ export const KafilahPesertaView: React.FC = () => {
                           <div className="inline-flex items-center gap-1">
                             <button
                               onClick={() => setDetailParticipant(p)}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-emerald-700 hover:bg-slate-100 px-2 py-1 rounded transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-emerald-700 hover:bg-slate-100 px-2 py-1 rounded transition-colors cursor-pointer"
                             >
                               <Eye className="w-3 h-3" />
                               <span>Detail</span>
                             </button>
                             <button
                               onClick={() => handleOpenEditParticipant(p)}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-emerald-700 hover:bg-slate-100 px-2 py-1 rounded transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-emerald-700 hover:bg-slate-100 px-2 py-1 rounded transition-colors cursor-pointer"
                             >
                               <Edit3 className="w-3 h-3" />
                               <span>Edit</span>
@@ -1173,7 +1173,7 @@ export const KafilahPesertaView: React.FC = () => {
                                   text: res.message
                                 });
                               }}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1 text-xs font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded transition-colors cursor-pointer"
                             >
                               <Trash2 className="w-3 h-3" />
                               <span>Hapus</span>
@@ -1228,79 +1228,79 @@ export const KafilahPesertaView: React.FC = () => {
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">1. No Urut Administrasi</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">1. No Urut Administrasi</span>
               <span className="font-mono font-bold text-slate-900 mt-0.5 block">
                 {detailParticipant.adminSequenceNumber || '-'}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">2. ID Peserta</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">2. ID Peserta</span>
               <span className="font-mono font-bold text-emerald-800 mt-0.5 block">
                 {detailParticipant.participantId}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">3. Nama Peserta</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">3. Nama Peserta</span>
               <span className="font-bold text-slate-900 mt-0.5 block">{detailParticipant.name}</span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">4. Nama Ayah</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">4. Nama Ayah</span>
               <span className="font-semibold text-slate-800 mt-0.5 block">
                 {detailParticipant.fatherName || '-'}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">5. Jenis Kelamin</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">5. Jenis Kelamin</span>
               <span className="font-semibold text-slate-800 mt-0.5 block">{detailParticipant.gender}</span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">6. Kota Asal</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">6. Kota Asal</span>
               <span className="font-semibold text-slate-800 mt-0.5 block">
                 {detailParticipant.originCity || '-'}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">7. Daerah Asal</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">7. Daerah Asal</span>
               <span className="font-semibold text-slate-800 mt-0.5 block">
                 {detailParticipant.originRegion || '-'}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">8. Asal Pesantren / Sekolah</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">8. Asal Pesantren / Sekolah</span>
               <span className="font-semibold text-slate-800 mt-0.5 block">
                 {detailParticipant.originInstitution || '-'}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">9. Grup / Kafilah</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">9. Grup / Kafilah</span>
               <span className="font-semibold text-slate-900 mt-0.5 block">
                 {detailParticipant.kafilahName}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">10. Cabang Lomba</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">10. Cabang Lomba</span>
               <span className="font-semibold text-slate-900 mt-0.5 block">
                 {detailParticipant.branchName}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">12. Babak Aktif</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">12. Babak Aktif</span>
               <span className="font-mono font-bold text-emerald-800 mt-0.5 block">
                 {detailParticipant.stageName}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">13. Status Peserta</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">13. Status Peserta</span>
               <span className="font-bold text-slate-900 mt-0.5 block">{detailParticipant.status}</span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">14. Nomor Tampil / Undian</span>
+              <span className="text-xs font-bold uppercase text-slate-400 block">14. Nomor Tampil / Undian</span>
               <span className="font-mono font-bold text-slate-900 mt-0.5 block">
                 {detailParticipant.lotteryNumber || '-'}
               </span>
             </div>
             <div className="sm:col-span-2 p-3 rounded-xl bg-emerald-50/60 border border-emerald-200">
-              <span className="text-[10px] font-bold uppercase text-emerald-800 block">
+              <span className="text-xs font-bold uppercase text-emerald-800 block">
                 15. Soal / Maqra yang Ditugaskan ({detailParticipant.stageName})
               </span>
               <span className="font-semibold text-slate-900 mt-0.5 block">
@@ -1567,7 +1567,7 @@ export const KafilahPesertaView: React.FC = () => {
               </div>
             </div>
 
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600">
               <span className="font-bold text-slate-800">15. Soal / Maqra Ditugaskan: </span>
               {editingParticipant
                 ? editingParticipant.assignedMaqra || 'Belum Ditetapkan'
@@ -1635,7 +1635,7 @@ export const KafilahPesertaView: React.FC = () => {
                   <p className="text-xs font-bold text-slate-900">
                     {importFileName || 'Pilih file Excel (.xlsx / .xls) sesuai Template Peserta'}
                   </p>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-xs text-slate-500">
                     Pastikan nama Grup/Kafilah, Cabang, Jenjang, dan Babak sesuai dengan sheet Referensi Master Data.
                   </p>
                 </div>
@@ -1699,7 +1699,7 @@ export const KafilahPesertaView: React.FC = () => {
                       Pratinjau Peserta Valid ({importValidation.validRows.length})
                     </div>
                     <div className="max-h-48 overflow-y-auto">
-                      <table className="w-full text-left text-[11px]">
+                      <table className="w-full text-left text-xs">
                         <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
                           <tr>
                             <th className="py-1.5 px-3">ID</th>

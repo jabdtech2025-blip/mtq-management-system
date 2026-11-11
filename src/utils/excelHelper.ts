@@ -1,4 +1,10 @@
-import ExcelJS from 'exceljs';
+import type ExcelJS from 'exceljs';
+
+// exceljs (~1 MB) dimuat hanya saat fitur import/ekspor Excel dipakai, bukan saat aplikasi dibuka.
+async function loadExcelJS(): Promise<typeof ExcelJS> {
+  const mod = await import('exceljs');
+  return ((mod as unknown as { default?: typeof ExcelJS }).default ?? (mod as unknown as typeof ExcelJS));
+}
 import {
   CabangItem,
   JenjangItem,
@@ -252,7 +258,8 @@ export async function parseWorkbookToRows(
     uint8.byteOffset + uint8.byteLength
   ) as ArrayBuffer;
 
-  const workbook = new ExcelJS.Workbook();
+  const ExcelLib = await loadExcelJS();
+  const workbook = new ExcelLib.Workbook();
   await workbook.xlsx.load(exactArrayBuffer);
 
   const worksheet = workbook.worksheets[0];
@@ -804,12 +811,12 @@ async function triggerWorkbookDownload(
 /**
  * Mengunduh Template Excel (.xlsx) untuk Import Peserta.
  */
-export function downloadParticipantExcelTemplate(context: {
+export async function downloadParticipantExcelTemplate(context: {
   kafilahs: Kafilah[];
   cabangList: CabangItem[];
   jenjangList: JenjangItem[];
   stages: StageItem[];
-}): void {
+}): Promise<void> {
   const sampleKafilah =
     context.kafilahs.find((k) => k.status === 'Aktif')?.name || 'Kafilah Kota Surabaya';
   const sampleBranch =
@@ -834,7 +841,8 @@ export function downloadParticipantExcelTemplate(context: {
     },
   ];
 
-  const wb = new ExcelJS.Workbook();
+  const ExcelLib = await loadExcelJS();
+  const wb = new ExcelLib.Workbook();
   appendObjectsToWorksheet(wb, 'Template_Peserta', templateData);
 
   const masterRefRows = [
@@ -860,11 +868,11 @@ export function downloadParticipantExcelTemplate(context: {
 /**
  * Mengunduh Template Excel (.xlsx) untuk Import Bank Soal (Maqra).
  */
-export function downloadQuestionExcelTemplate(context: {
+export async function downloadQuestionExcelTemplate(context: {
   cabangList: CabangItem[];
   jenjangList: JenjangItem[];
   stages: StageItem[];
-}): void {
+}): Promise<void> {
   const sampleBranch =
     context.cabangList.find((c) => c.status === 'Aktif')?.name || 'Tilawah Dewasa Putra';
   const sampleStage = context.stages[0]?.name || 'Penyisihan';
@@ -886,7 +894,8 @@ export function downloadQuestionExcelTemplate(context: {
     },
   ];
 
-  const wb = new ExcelJS.Workbook();
+  const ExcelLib = await loadExcelJS();
+  const wb = new ExcelLib.Workbook();
   appendObjectsToWorksheet(wb, 'Template_Bank_Soal', templateData);
 
   const masterRefRows = [
@@ -909,10 +918,10 @@ export function downloadQuestionExcelTemplate(context: {
 /**
  * Mengunduh laporan baris gagal/error hasil validasi import dalam format Excel (.xlsx).
  */
-export function downloadImportErrorReport<TData>(
+export async function downloadImportErrorReport<TData>(
   rows: Array<ImportRowValidationResult<TData> | ImportRowErrorSummary>,
   filename = 'Laporan_Error_Import_MTQ.xlsx'
-): void {
+): Promise<void> {
   const reportData = rows
     .filter((r) => ('isValid' in r ? !r.isValid : true))
     .map((r) => {
@@ -934,7 +943,8 @@ export function downloadImportErrorReport<TData>(
       };
     });
 
-  const wb = new ExcelJS.Workbook();
+  const ExcelLib = await loadExcelJS();
+  const wb = new ExcelLib.Workbook();
   appendObjectsToWorksheet(
     wb,
     'Laporan_Error',

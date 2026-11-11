@@ -365,7 +365,7 @@ export const RekapNilaiView: React.FC = () => {
           <table className="w-full text-left border-collapse min-w-[950px]">
             <thead>
               {/* Top Grouped Header */}
-              <tr className="bg-slate-100/80 text-slate-600 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
+              <tr className="bg-slate-100/80 text-slate-600 border-b border-slate-200 text-xs font-bold uppercase tracking-wider">
                 <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 px-4 py-2.5 border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
                   Identitas Peserta
                 </th>
@@ -379,7 +379,7 @@ export const RekapNilaiView: React.FC = () => {
                     className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50"
                   >
                     <span className="block text-slate-800">{j.name.split(',')[0]}</span>
-                    <span className="text-[10px] text-slate-400 font-normal lowercase tracking-normal">
+                    <span className="text-xs text-slate-400 font-normal lowercase tracking-normal">
                       {j.field}
                     </span>
                   </th>
@@ -393,7 +393,7 @@ export const RekapNilaiView: React.FC = () => {
               </tr>
 
               {/* Secondary Subheaders with Centered Text */}
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[10px] font-semibold uppercase">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-xs font-semibold uppercase">
                 <th className="sticky left-0 z-20 bg-slate-50 px-4 py-2 w-16">Undian</th>
                 <th className="sticky left-16 z-20 bg-slate-50 px-4 py-2 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">Nama & Grup</th>
                 <th className="px-1.5 py-2 border-r border-slate-200 text-center w-20 max-w-[80px]">Maqra / Soal</th>
@@ -484,18 +484,18 @@ export const RekapNilaiView: React.FC = () => {
                         </td>
                         <td className="sticky left-16 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
                           <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
+                          <p className="text-xs text-slate-500 mt-0.5">
                             {p.participantId} · {p.kafilahName}
                           </p>
                         </td>
                         <td className="px-3 py-3 border-r border-slate-200 text-center">
-                          <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                          <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                             Maqra Belum Ditetapkan
                           </span>
                         </td>
                         {activeJudges.map((j, jIdx) => (
                           <React.Fragment key={`${j.id}-${jIdx}`}>
-                            <td className="px-2.5 py-3 text-center font-mono text-[11px] text-slate-400 border-r border-slate-200">
+                            <td className="px-2.5 py-3 text-center font-mono text-xs text-slate-400 border-r border-slate-200">
                               -
                             </td>
                             <td className="px-2.5 py-3 text-center font-mono text-slate-300 border-r border-slate-200">
@@ -507,7 +507,7 @@ export const RekapNilaiView: React.FC = () => {
                           --
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className="text-[11px] font-medium text-amber-700">
+                          <span className="text-xs font-medium text-amber-700">
                             {overallProgress}
                           </span>
                         </td>
@@ -542,7 +542,7 @@ export const RekapNilaiView: React.FC = () => {
                         </td>
                         <td className="sticky left-16 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
                           <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
+                          <p className="text-xs text-slate-500 mt-0.5">
                             {p.participantId} · {p.kafilahName}
                           </p>
                         </td>
@@ -555,7 +555,7 @@ export const RekapNilaiView: React.FC = () => {
                           const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
                           return (
                             <React.Fragment key={`${j.id}-${jIdx}`}>
-                              <td className="px-2.5 py-3 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
+                              <td className="px-2.5 py-3 text-center font-mono text-xs text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
                                 {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
                               </td>
                               <td className="px-2.5 py-3 text-center font-mono font-bold border-r border-slate-200 tabular-nums w-24 min-w-[96px] whitespace-nowrap">
@@ -573,7 +573,7 @@ export const RekapNilaiView: React.FC = () => {
                             <div>
                               <span className="text-sm">{avgScore.toFixed(2)}</span>
                               {!isSingleFinalized && (
-                                <span className="block text-[9px] text-slate-500 font-normal">
+                                <span className="block text-xs text-slate-500 font-normal">
                                   Sementara
                                 </span>
                               )}
@@ -641,7 +641,7 @@ export const RekapNilaiView: React.FC = () => {
                               <p className="font-bold text-slate-900 leading-tight">
                                 {p.name}
                               </p>
-                              <p className="text-[11px] text-slate-500 mt-0.5">
+                              <p className="text-xs text-slate-500 mt-0.5">
                                 {p.participantId} · {p.kafilahName}
                               </p>
                             </td>
@@ -658,7 +658,7 @@ export const RekapNilaiView: React.FC = () => {
                               const asm = getJudgeAssessment(p.id, j.id, p.stageName, q.questionId);
                               return (
                                 <React.Fragment key={`${j.id}-${jIdx}`}>
-                                  <td className="px-2.5 py-2.5 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
+                                  <td className="px-2.5 py-2.5 text-center font-mono text-xs text-slate-500 tabular-nums border-r border-slate-200 w-24 min-w-[96px]">
                                     {asm ? `-${asm.totalDeductions.toFixed(2)}` : '-'}
                                   </td>
                                   <td className="px-2.5 py-2.5 text-center font-mono font-bold border-r border-slate-200 tabular-nums w-24 min-w-[96px] whitespace-nowrap">
@@ -691,7 +691,7 @@ export const RekapNilaiView: React.FC = () => {
                             {/* Status Maqra */}
                             <td className="px-4 py-2.5 text-center">
                               <span
-                                className={`text-[11px] font-semibold ${
+                                className={`text-xs font-semibold ${
                                   isMaqraFinalized
                                     ? 'text-emerald-700'
                                     : maqraStatus === 'Berlangsung'
@@ -724,11 +724,11 @@ export const RekapNilaiView: React.FC = () => {
                       <tr className="bg-emerald-50/40 border-b-2 border-slate-300 text-xs font-semibold">
                         <td
                           colSpan={2}
-                          className="sticky left-0 z-10 bg-emerald-50/90 px-4 py-2 text-slate-700 font-bold text-[11px] uppercase tracking-wide border-r border-slate-200"
+                          className="sticky left-0 z-10 bg-emerald-50/90 px-4 py-2 text-slate-700 font-bold text-xs uppercase tracking-wide border-r border-slate-200"
                         >
                           Akumulasi Peserta #{p.lotteryNumber}
                         </td>
-                        <td className="px-3 py-2 text-center text-emerald-950 font-bold text-[11px] border-r border-slate-200">
+                        <td className="px-3 py-2 text-center text-emerald-950 font-bold text-xs border-r border-slate-200">
                           Total Maqra {stageQuestions.length}
                         </td>
                         {activeJudges.map((j, jIdx) => {
@@ -743,7 +743,7 @@ export const RekapNilaiView: React.FC = () => {
 
                           return (
                             <React.Fragment key={`${j.id}-${jIdx}`}>
-                              <td className="px-2.5 py-2 text-center text-slate-400 font-mono text-[10px] border-r border-slate-200">
+                              <td className="px-2.5 py-2 text-center text-slate-400 font-mono text-xs border-r border-slate-200">
                                 Σ Maqra
                               </td>
                               <td className="px-2.5 py-2 text-center font-mono font-extrabold text-emerald-950 border-r border-slate-200">
@@ -829,7 +829,7 @@ export const RekapNilaiView: React.FC = () => {
               <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between bg-slate-50">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/70 px-2.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
+                    <span className="text-xs font-bold text-emerald-800 bg-emerald-100/70 px-2.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
                       Rincian Penilaian Juri
                     </span>
                     <span className="text-slate-300">·</span>
@@ -855,7 +855,7 @@ export const RekapNilaiView: React.FC = () => {
               {/* Maqra Navigation Tabs if Multi-Maqra */}
               {participantQuestions.length > 1 && (
                 <div className="flex items-center gap-2 px-4 sm:px-5 py-2.5 bg-slate-100/80 border-b border-slate-200 overflow-x-auto">
-                  <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider shrink-0 mr-1">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 mr-1">
                     Pilih Maqra:
                   </span>
                   {participantQuestions.map((q, idx) => {
@@ -870,7 +870,7 @@ export const RekapNilaiView: React.FC = () => {
                             : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
                         }`}
                       >
-                        <span className="font-mono text-[10px] opacity-75">Maqra {idx + 1}:</span>
+                        <span className="font-mono text-xs opacity-75">Maqra {idx + 1}:</span>
                         <span>[{q.code}] {q.title}</span>
                       </button>
                     );
@@ -887,7 +887,7 @@ export const RekapNilaiView: React.FC = () => {
                     </span>
                     <span className="font-semibold text-slate-800">{activeQuestion.title}</span>
                   </div>
-                  <span className="text-slate-600 text-[11px] font-medium">
+                  <span className="text-slate-600 text-xs font-medium">
                     {activeQuestion.surahName ? `QS. ${activeQuestion.surahName}: ${activeQuestion.startAyah || 1} - ${activeQuestion.endAyah || 1}` : ''}
                     {activeQuestion.pageStart ? ` · Halaman ${activeQuestion.pageStart}` : ''}
                   </span>
@@ -897,19 +897,19 @@ export const RekapNilaiView: React.FC = () => {
               {/* Summary Metrics Cards */}
               <div className="grid grid-cols-3 gap-3 p-4 sm:p-5 bg-white border-b border-slate-100">
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                  <span className="text-[11px] text-slate-500 block font-medium">Hakim Bertugas</span>
+                  <span className="text-xs text-slate-500 block font-medium">Hakim Bertugas</span>
                   <span className="font-mono font-bold text-base text-slate-900 mt-0.5 block tabular-nums">
                     {activeJudges.length} Dewan Hakim
                   </span>
                 </div>
                 <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200/80">
-                  <span className="text-[11px] text-emerald-800 block font-medium">Status Penilaian Maqra</span>
+                  <span className="text-xs text-emerald-800 block font-medium">Status Penilaian Maqra</span>
                   <span className="font-mono font-bold text-base text-emerald-900 mt-0.5 block tabular-nums">
                     {finalizedJudges} dari {activeJudges.length} Selesai
                   </span>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                  <span className="text-[11px] text-slate-500 block font-medium">Rata-Rata Maqra Ini</span>
+                  <span className="text-xs text-slate-500 block font-medium">Rata-Rata Maqra Ini</span>
                   <span className="font-mono font-bold text-base text-emerald-900 mt-0.5 block tabular-nums">
                     {avgScore} {validJudgeScores.length < activeJudges.length && validJudgeScores.length > 0 ? '(Sementara)' : ''}
                   </span>
@@ -921,7 +921,7 @@ export const RekapNilaiView: React.FC = () => {
                 <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
-                      <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+                      <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
                         <th className="px-4 py-2.5">Dewan Hakim & Bidang</th>
                         <th className="px-4 py-2.5">Rincian Kesalahan</th>
                         <th className="px-3 py-2.5 text-center">Pengurangan</th>
@@ -947,9 +947,9 @@ export const RekapNilaiView: React.FC = () => {
                           <tr key={`${j.id}-${jIdx}`} className="hover:bg-slate-50/70 transition-colors">
                             <td className="px-4 py-3 align-top">
                               <p className="font-bold text-slate-900">{j.name}</p>
-                              <p className="text-[11px] text-slate-500 mt-0.5">{j.field}</p>
+                              <p className="text-xs text-slate-500 mt-0.5">{j.field}</p>
                               {asm?.annotations && asm.annotations.length > 0 && (
-                                <span className="inline-block text-[10px] text-slate-400 mt-1 font-mono">
+                                <span className="inline-block text-xs text-slate-400 mt-1 font-mono">
                                   {asm.annotations.length} anotasi mushaf
                                 </span>
                               )}
@@ -973,7 +973,7 @@ export const RekapNilaiView: React.FC = () => {
                                     return (
                                       <div
                                         key={`${catId}-${catIdx}`}
-                                        className="flex items-center justify-between text-[11px] gap-2"
+                                        className="flex items-center justify-between text-xs gap-2"
                                       >
                                         <span className="text-slate-700 font-medium">
                                           {categoryName}:
@@ -999,7 +999,7 @@ export const RekapNilaiView: React.FC = () => {
                             <td className="px-4 py-3 align-top text-center">
                               {isFinal ? (
                                 <div>
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                  <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                                     <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                     <span>Terkunci</span>
                                   </span>
@@ -1014,7 +1014,7 @@ export const RekapNilaiView: React.FC = () => {
                                           questionId: activeQuestionId
                                         })
                                       }
-                                      className="mt-1.5 block mx-auto text-[9px] font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded cursor-pointer transition-colors shadow-2xs"
+                                      className="mt-1.5 block mx-auto text-xs font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded cursor-pointer transition-colors shadow-2xs"
                                       title="Buka kembali lembar nilai untuk koreksi dewan hakim"
                                     >
                                       Buka Kunci
@@ -1022,12 +1022,12 @@ export const RekapNilaiView: React.FC = () => {
                                   )}
                                 </div>
                               ) : inProgress ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                                   <Clock className="w-3 h-3 text-amber-600" />
                                   <span>Menilai</span>
                                 </span>
                               ) : (
-                                <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
                                   Menunggu
                                 </span>
                               )}
@@ -1042,7 +1042,7 @@ export const RekapNilaiView: React.FC = () => {
 
               {/* Modal Footer */}
               <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
-                <span className="text-[11px] text-slate-500">
+                <span className="text-xs text-slate-500">
                   Tersimpan di browser (Lokal Prototipe)
                 </span>
                 <button
@@ -1064,7 +1064,7 @@ export const RekapNilaiView: React.FC = () => {
                     </div>
                     <div>
                       <h4 className="font-extrabold text-sm text-slate-900">Buka Kunci Lembar Penilaian</h4>
-                      <p className="text-[11px] text-slate-500">Kebijakan Koreksi & Rekam Jejak Audit</p>
+                      <p className="text-xs text-slate-500">Kebijakan Koreksi & Rekam Jejak Audit</p>
                     </div>
                   </div>
                   <p className="text-xs text-slate-600 leading-relaxed">

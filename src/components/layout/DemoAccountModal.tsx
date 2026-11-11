@@ -114,7 +114,7 @@ export const DemoAccountModal: React.FC = () => {
                   ? 'Sesi Autentikasi & Keamanan Supabase'
                   : 'Mode Simulasi Demo Lokal & Persona Evaluasi'}
               </h3>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-xs text-slate-500">
                 {isLiveProductionMode
                   ? 'Identitas & peran dikunci berdasarkan sesi Supabase Auth dan RLS'
                   : 'Simulasi peran lokal terisolasi untuk pengujian antarmuka'}
@@ -144,7 +144,7 @@ export const DemoAccountModal: React.FC = () => {
                 type="button"
                 onClick={handleRefreshCheck}
                 disabled={isLoading}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-semibold text-slate-700 cursor-pointer"
               >
                 <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
                 Uji Koneksi DB
@@ -154,7 +154,7 @@ export const DemoAccountModal: React.FC = () => {
             <div className="text-xs text-slate-700 space-y-1">
               <p className="font-semibold text-slate-900">{connectionInfo.statusLabel}</p>
               {connectionInfo.state === 'schema_missing' && (
-                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 text-[11px] text-amber-900">
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 text-xs text-amber-900">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-bold">Skema SQL Belum Dijalankan</p>
@@ -167,7 +167,7 @@ export const DemoAccountModal: React.FC = () => {
                 </div>
               )}
               {connectionInfo.lastError && connectionInfo.state !== 'schema_missing' && (
-                <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded-lg">
+                <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded-lg">
                   Detail: {connectionInfo.lastError}
                 </p>
               )}
@@ -184,7 +184,7 @@ export const DemoAccountModal: React.FC = () => {
                         <p className="text-xs font-bold text-emerald-950 truncate">
                           {authenticatedProfile.name} ({currentUser.role})
                         </p>
-                        <p className="text-[11px] text-emerald-800 truncate">
+                        <p className="text-xs text-emerald-800 truncate">
                           {authenticatedProfile.email} · Sesi Auth Aktif
                         </p>
                       </div>
@@ -195,7 +195,7 @@ export const DemoAccountModal: React.FC = () => {
                         await signOutSupabase();
                         setIsDemoAccountModalOpen(false);
                       }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 hover:bg-emerald-100 text-[11px] font-bold shrink-0 cursor-pointer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 hover:bg-emerald-100 text-xs font-bold shrink-0 cursor-pointer"
                     >
                       <LogOut className="w-3 h-3" />
                       Keluar
@@ -203,7 +203,7 @@ export const DemoAccountModal: React.FC = () => {
                   </div>
                 ) : (
                   <form onSubmit={handleSupabaseSignIn} className="space-y-2">
-                    <p className="text-[11px] font-bold text-slate-700">
+                    <p className="text-xs font-bold text-slate-700">
                       Login Akun Supabase Auth (Produksi / RLS):
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -225,14 +225,14 @@ export const DemoAccountModal: React.FC = () => {
                     <div className="flex items-center justify-between gap-2">
                       {authFeedback ? (
                         <span
-                          className={`text-[11px] font-medium ${
+                          className={`text-xs font-medium ${
                             authFeedback.type === 'success' ? 'text-emerald-700' : 'text-rose-700'
                           }`}
                         >
                           {authFeedback.text}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-500">
+                        <span className="text-xs text-slate-500">
                           Gunakan akun yang terdaftar pada Supabase Auth.
                         </span>
                       )}
@@ -298,7 +298,7 @@ export const DemoAccountModal: React.FC = () => {
                       exitOfflineDemoSimulation();
                       setIsDemoAccountModalOpen(false);
                     }}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-800 hover:bg-emerald-900 text-white text-[11px] font-bold shrink-0 cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold shrink-0 cursor-pointer"
                   >
                     Mode Produksi
                   </button>
@@ -307,7 +307,7 @@ export const DemoAccountModal: React.FC = () => {
 
               {/* Group 1: Superadmin */}
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
                   Persona Simulasi: Superadmin Platform
                 </p>
                 <div className="space-y-1.5">
@@ -329,13 +329,13 @@ export const DemoAccountModal: React.FC = () => {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-slate-900">{u.name}</p>
-                            <p className="text-[11px] text-slate-500">
+                            <p className="text-xs text-slate-500">
                               {u.email} · Akses Multi-Tenant & Audit
                             </p>
                           </div>
                         </div>
                         {u.id === currentUser.id && (
-                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          <span className="flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
                             <Check className="w-3 h-3" />
                             Aktif
                           </span>
@@ -347,7 +347,7 @@ export const DemoAccountModal: React.FC = () => {
 
               {/* Group 2: Admin MTQ */}
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
                   Persona Simulasi: Administrator Event MTQ
                 </p>
                 <div className="space-y-1.5">
@@ -369,13 +369,13 @@ export const DemoAccountModal: React.FC = () => {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-slate-900">{u.name}</p>
-                            <p className="text-[11px] text-slate-500">
+                            <p className="text-xs text-slate-500">
                               LPTQ Provinsi Jawa Barat · Pengelola Data, Babak & Kelulusan
                             </p>
                           </div>
                         </div>
                         {u.id === currentUser.id && (
-                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          <span className="flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
                             <Check className="w-3 h-3" />
                             Aktif
                           </span>
@@ -387,7 +387,7 @@ export const DemoAccountModal: React.FC = () => {
 
               {/* Group 3: Dewan Hakim */}
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
                   Persona Simulasi: Dewan Hakim Penilai
                 </p>
                 <div className="space-y-1.5">
@@ -409,13 +409,13 @@ export const DemoAccountModal: React.FC = () => {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-slate-900">{u.name}</p>
-                            <p className="text-[11px] text-slate-500">
+                            <p className="text-xs text-slate-500">
                               {u.judgeCategory} · {u.judgeField}
                             </p>
                           </div>
                         </div>
                         {u.id === currentUser.id && (
-                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          <span className="flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
                             <Check className="w-3 h-3" />
                             Aktif
                           </span>

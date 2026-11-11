@@ -524,7 +524,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 {isAdminMode ? 'Pemantauan Penilaian Hakim' : 'Lembar Penilaian Dewan Hakim'}
               </h1>
               {isAdminMode && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">
+                <span className="hidden sm:inline-flex items-center gap-1 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">
                   <ShieldCheck className="w-3 h-3 text-emerald-700" />
                   Mode Pantau
                 </span>
@@ -849,7 +849,7 @@ export const PenilaianDualPanelView: React.FC = () => {
           </div>
 
           {/* Bottom Bar Info */}
-          <div className="h-7 bg-slate-50 border-t border-slate-200 px-3 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
+          <div className="h-7 bg-slate-50 border-t border-slate-200 px-3 flex items-center justify-between text-xs text-slate-500 shrink-0">
             <span className="truncate">
               Standar Mushaf Madinah 15 Baris · {activeQuestionObj?.title || currentParticipant.assignedMaqra}
             </span>
@@ -869,7 +869,7 @@ export const PenilaianDualPanelView: React.FC = () => {
               <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200 text-center">
                 <AlertTriangle className="w-5 h-5 text-amber-700 mx-auto mb-1.5" />
                 <p className="text-xs font-bold text-amber-900">Maqra Belum Ditetapkan</p>
-                <p className="text-[11px] text-amber-700 mt-0.5">
+                <p className="text-xs text-amber-700 mt-0.5">
                   Peserta belum memiliki maqra yang ditetapkan pada Babak {activeStageName}. Penilaian tidak dapat dilakukan.
                 </p>
               </div>
@@ -878,7 +878,7 @@ export const PenilaianDualPanelView: React.FC = () => {
             {/* Multi-Question Selector Toolbar (when participant has >1 assigned maqra in this stage) */}
             {participantAssignedQuestions.length > 1 && (
               <div className="space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
                   Pilih Soal yang Sedang Dinilai:
                 </span>
                 <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200">
@@ -900,7 +900,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                         <span>{qLabel}</span>
                         {q.surahName && (
                           <span
-                            className={`block text-[10px] font-normal truncate ${
+                            className={`block text-xs font-normal truncate ${
                               isActive ? 'text-emerald-100' : 'text-slate-500'
                             }`}
                           >
@@ -917,7 +917,7 @@ export const PenilaianDualPanelView: React.FC = () => {
             {/* Participant Quick Info (Green styling) */}
             <div className="bg-gradient-to-br from-emerald-800 to-emerald-950 text-white rounded-xl shadow-xs border border-emerald-700/30 p-3.5 sm:p-4">
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="font-semibold text-emerald-200 uppercase tracking-wider text-[10px]">
+                <span className="font-semibold text-emerald-200 uppercase tracking-wider text-xs">
                   Peserta Sedang Dinilai
                 </span>
                 <span className="font-mono font-bold text-emerald-900 bg-white/90 px-2 py-0.5 rounded border border-white/40 tabular-nums text-xs">
@@ -940,7 +940,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
             {/* Live Score Display (Gray styling, without judge name and lock status) */}
             <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-3.5 sm:p-4 shadow-2xs">
-              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Nilai Akhir Hakim
               </p>
               <div className="flex items-baseline gap-1 mt-0.5">
@@ -949,13 +949,13 @@ export const PenilaianDualPanelView: React.FC = () => {
                 </span>
                 <span className="text-xs sm:text-sm text-slate-500 font-medium">/ 100</span>
               </div>
-              <p className="text-[11px] text-slate-500 font-mono mt-0.5 tabular-nums">
+              <p className="text-xs text-slate-500 font-mono mt-0.5 tabular-nums">
                 Total Pengurangan: -{totalDeductions.toFixed(2)} poin
               </p>
               {currentAssessment?.fieldScores && Object.keys(currentAssessment.fieldScores).length > 0 && (
                 <div className="grid grid-cols-2 gap-1.5 mt-2.5 pt-2 border-t border-slate-200/80">
                   {Object.entries(currentAssessment.fieldScores).map(([field, score]) => (
-                    <div key={field} className="flex justify-between items-center text-[10px] bg-white px-2 py-0.5 rounded border border-slate-200">
+                    <div key={field} className="flex justify-between items-center text-xs bg-white px-2 py-0.5 rounded border border-slate-200">
                       <span className="text-slate-600 font-medium">{field}</span>
                       <span className="font-mono font-bold text-slate-900">{score.toFixed(1)}</span>
                     </div>
@@ -970,7 +970,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                   Rubrik Pengurangan Kesalahan
                 </h3>
-                <span className="text-[10px] text-slate-500 font-medium">
+                <span className="text-xs text-slate-500 font-medium">
                   {isAdminMode
                     ? 'Mode Pantau'
                     : isFinalized
@@ -983,7 +983,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 {activeErrorCategories.length === 0 ? (
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center text-xs text-slate-500">
                     <p className="font-semibold text-slate-700">Belum Ada Kategori Kesalahan Terhubung</p>
-                    <p className="text-[11px] mt-1 text-slate-500">
+                    <p className="text-xs mt-1 text-slate-500">
                       {assignedFieldName
                         ? `Tidak ada kategori kesalahan untuk bidang "${assignedFieldName}". Hubungkan kategori kesalahan ke bidang ini di Master Data.`
                         : 'Belum ada kategori kesalahan yang dikonfigurasi pada database.'}
@@ -1008,11 +1008,11 @@ export const PenilaianDualPanelView: React.FC = () => {
                             <span className="text-xs font-bold text-slate-900 break-words leading-tight">
                               {cat.name}
                             </span>
-                            <span className="text-[10px] font-mono font-medium text-slate-500 tabular-nums">
+                            <span className="text-xs font-mono font-medium text-slate-500 tabular-nums">
                               (-{cat.defaultDeduction.toFixed(2)}/err)
                             </span>
                           </div>
-                          <p className="text-[10px] text-slate-500 leading-normal line-clamp-1 mt-0.5" title={cat.scope}>
+                          <p className="text-xs text-slate-500 leading-normal line-clamp-1 mt-0.5" title={cat.scope}>
                             {cat.scope}
                           </p>
                         </div>
@@ -1022,7 +1022,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                             <span className="font-mono font-bold text-sm text-slate-900 block tabular-nums">
                               {count}
                             </span>
-                            <span className="text-[10px] font-mono font-semibold text-rose-600 block tabular-nums">
+                            <span className="text-xs font-mono font-semibold text-rose-600 block tabular-nums">
                               -{pts}
                             </span>
                           </div>
@@ -1086,7 +1086,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 <p className="text-xs font-bold text-slate-900">
                   Mode Pemantauan Admin (Hanya Baca)
                 </p>
-                <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                <p className="text-xs text-slate-500 mt-0.5 truncate">
                   Dewan hakim: {activeJudgeName}
                 </p>
               </div>
@@ -1096,7 +1096,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 <p className="text-xs font-bold text-emerald-900">
                   Penilaian Berhasil Dikunci
                 </p>
-                <p className="text-[10px] text-emerald-700 mt-0.5">
+                <p className="text-xs text-emerald-700 mt-0.5">
                   Difinalisasi pada: {currentAssessment?.finalizedAt || lastSyncTime}
                 </p>
               </div>
@@ -1105,7 +1105,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 <p className="text-xs font-bold text-slate-700">
                   Maqra Belum Ditetapkan
                 </p>
-                <p className="text-[10px] text-slate-500 mt-0.5">
+                <p className="text-xs text-slate-500 mt-0.5">
                   Tetapkan soal terlebih dahulu untuk memulai penilaian.
                 </p>
               </div>
@@ -1151,7 +1151,7 @@ export const PenilaianDualPanelView: React.FC = () => {
               <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold mb-3">
                 <p>{finalizeError}</p>
                 {finalizeError.toLowerCase().includes('v_rule') && (
-                  <p className="mt-1 text-[11px] font-normal text-rose-700">
+                  <p className="mt-1 text-xs font-normal text-rose-700">
                     💡 <strong>Solusi:</strong> Fungsi database di Supabase perlu diperbarui dengan migrasi terbaru. Buka <strong>SQL Editor</strong> di dasbor Supabase Anda, jalankan skrip migrasi perbaikan <code className="font-mono bg-rose-100 px-1 py-0.5 rounded">supabase/migrations/20261111_fix_v_rule_unassigned.sql</code>, lalu coba simpan kembali.
                   </p>
                 )}
@@ -1179,7 +1179,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                   <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-bold">Konfirmasi Nilai Sempurna ({startingScore.toFixed(2)})</p>
-                    <p className="mt-0.5 text-[11px] leading-relaxed">
+                    <p className="mt-0.5 text-xs leading-relaxed">
                       Lembar penilaian ini mencatat 0 pengurangan kesalahan. Silakan centang konfirmasi di bawah ini untuk memfinalisasi nilai sempurna.
                     </p>
                   </div>

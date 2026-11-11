@@ -11,6 +11,7 @@ import {
   X
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
+import { formatTimestampDisplay } from '../../utils/dateTime';
 
 interface NormalizedLogEntry {
   id: string;
@@ -215,46 +216,46 @@ export const ActivityLogView: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-slate-600">Total Log Aktivitas</span>
+            <span className="text-xs font-medium text-slate-600">Total Log Aktivitas</span>
             <History className="w-3.5 h-3.5 text-slate-400" />
           </div>
           <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono">
             {stats.total}
           </p>
-          <p className="text-[10px] text-slate-500 mt-0.5">Seluruh rekaman sistem</p>
+          <p className="text-xs text-slate-500 mt-0.5">Seluruh rekaman sistem</p>
         </div>
 
         <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-slate-600">Aktivitas Berhasil</span>
+            <span className="text-xs font-medium text-slate-600">Aktivitas Berhasil</span>
             <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" />
           </div>
           <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono">
             {stats.success}
           </p>
-          <p className="text-[10px] text-slate-500 mt-0.5">Operasi sukses</p>
+          <p className="text-xs text-slate-500 mt-0.5">Operasi sukses</p>
         </div>
 
         <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-slate-600">Peringatan</span>
+            <span className="text-xs font-medium text-slate-600">Peringatan</span>
             <AlertTriangle className="w-3.5 h-3.5 text-slate-400" />
           </div>
           <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono">
             {stats.warnings}
           </p>
-          <p className="text-[10px] text-slate-500 mt-0.5">Perlu perhatian</p>
+          <p className="text-xs text-slate-500 mt-0.5">Perlu perhatian</p>
         </div>
 
         <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-slate-600">Error / Ditolak</span>
+            <span className="text-xs font-medium text-slate-600">Error / Ditolak</span>
             <XCircle className="w-3.5 h-3.5 text-slate-400" />
           </div>
           <p className="text-lg sm:text-xl font-semibold text-slate-900 mt-1.5 font-mono">
             {stats.errors}
           </p>
-          <p className="text-[10px] text-slate-500 mt-0.5">Penolakan / kegagalan</p>
+          <p className="text-xs text-slate-500 mt-0.5">Penolakan / kegagalan</p>
         </div>
       </div>
 
@@ -271,7 +272,7 @@ export const ActivityLogView: React.FC = () => {
               setCurrentPage(1);
             }}
             placeholder="Cari aktor, hakim, admin, aksi, sasaran, atau rincian error..."
-            className="w-full pl-8 pr-3 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:bg-white transition-all"
+            className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:bg-white transition-all"
           />
         </div>
 
@@ -283,7 +284,7 @@ export const ActivityLogView: React.FC = () => {
               setFilterOutcome(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-2.5 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
+            className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
           >
             <option value="ALL">Semua Status</option>
             <option value="Success">Hanya Berhasil</option>
@@ -298,7 +299,7 @@ export const ActivityLogView: React.FC = () => {
               setFilterModule(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-2.5 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
+            className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
           >
             <option value="ALL">Semua Modul</option>
             <option value="Penilaian">Penilaian</option>
@@ -318,7 +319,7 @@ export const ActivityLogView: React.FC = () => {
                 setFilterModule('ALL');
                 setCurrentPage(1);
               }}
-              className="text-[11px] font-medium text-slate-500 hover:text-rose-600 px-2 py-1.5 cursor-pointer transition-colors"
+              className="text-xs font-medium text-slate-500 hover:text-rose-600 px-2 py-1.5 cursor-pointer transition-colors"
             >
               Reset
             </button>
@@ -328,7 +329,7 @@ export const ActivityLogView: React.FC = () => {
             type="button"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-medium text-slate-700 shadow-2xs cursor-pointer transition-all"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-2xs cursor-pointer transition-all"
           >
             <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin text-emerald-700' : ''}`} />
             <span>Segarkan</span>
@@ -338,7 +339,7 @@ export const ActivityLogView: React.FC = () => {
             type="button"
             onClick={handleExportCSV}
             disabled={filteredLogs.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white text-[11px] font-medium shadow-xs cursor-pointer transition-all"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white text-xs font-medium shadow-xs cursor-pointer transition-all"
           >
             <Download className="w-3 h-3" />
             <span>Ekspor CSV</span>
@@ -349,9 +350,9 @@ export const ActivityLogView: React.FC = () => {
       {/* Horizontally Scrollable Log Table Without Text Truncation */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-max text-left border-collapse text-[11px]">
+          <table className="w-full min-w-max text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px]">
+              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold uppercase text-xs">
                 <th className="py-2.5 px-3.5 whitespace-nowrap">Waktu</th>
                 <th className="py-2.5 px-3.5 whitespace-nowrap">Aktor / Pengguna</th>
                 <th className="py-2.5 px-3 whitespace-nowrap">Modul</th>
@@ -367,7 +368,7 @@ export const ActivityLogView: React.FC = () => {
                   <td colSpan={7} className="py-10 text-center text-slate-400">
                     <History className="w-6 h-6 mx-auto mb-1.5 text-slate-300" />
                     <p className="font-medium text-slate-700 text-xs">Tidak ada riwayat aktivitas</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
+                    <p className="text-xs text-slate-500 mt-0.5">
                       Belum ada log yang sesuai dengan filter pencarian Anda.
                     </p>
                   </td>
@@ -383,8 +384,8 @@ export const ActivityLogView: React.FC = () => {
                       className="hover:bg-slate-50/60 transition-colors"
                     >
                       {/* Timestamp */}
-                      <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-[10px] text-slate-500">
-                        {log.timestamp}
+                      <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-xs text-slate-500">
+                        {formatTimestampDisplay(log.timestamp)}
                       </td>
 
                       {/* Actor (plain text without avatar or event subtitle) */}
@@ -394,7 +395,7 @@ export const ActivityLogView: React.FC = () => {
 
                       {/* Module */}
                       <td className="py-2.5 px-3 whitespace-nowrap">
-                        <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
+                        <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
                           {log.module}
                         </span>
                       </td>
@@ -403,31 +404,31 @@ export const ActivityLogView: React.FC = () => {
                       <td className="py-2.5 px-3.5 whitespace-nowrap font-medium text-slate-900">
                         <span>{log.action}</span>
                         {log.target && (
-                          <span className="ml-2 text-[10px] font-mono text-slate-500">
+                          <span className="ml-2 text-xs font-mono text-slate-500">
                             (Target: {log.target})
                           </span>
                         )}
                       </td>
 
                       {/* Summary */}
-                      <td className="py-2.5 px-3.5 whitespace-nowrap text-slate-600 text-[11px]">
+                      <td className="py-2.5 px-3.5 whitespace-nowrap text-slate-600 text-xs">
                         {log.summary}
                       </td>
 
                       {/* Outcome Status */}
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
                         {isErr ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-900 border border-slate-300">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-900 border border-slate-300">
                             <XCircle className="w-2.5 h-2.5 text-slate-700" />
                             <span>{log.outcome}</span>
                           </span>
                         ) : isWarn ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-50 text-slate-800 border border-slate-200">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-50 text-slate-800 border border-slate-200">
                             <AlertTriangle className="w-2.5 h-2.5 text-slate-600" />
                             <span>{log.outcome}</span>
                           </span>
                         ) : (
-                          <span className="text-[11px] font-medium text-slate-700">
+                          <span className="text-xs font-medium text-slate-700">
                             {log.outcome}
                           </span>
                         )}
@@ -438,7 +439,7 @@ export const ActivityLogView: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setSelectedLog(log)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-[10px] font-medium text-slate-700 cursor-pointer transition-colors"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 cursor-pointer transition-colors"
                         >
                           <Eye className="w-3 h-3 text-slate-500" />
                           <span>Lihat Detail</span>
@@ -454,7 +455,7 @@ export const ActivityLogView: React.FC = () => {
 
         {/* Pagination Footer */}
         {totalPages > 1 && (
-          <div className="px-3 py-2 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500 bg-slate-50/50">
+          <div className="px-3 py-2 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 bg-slate-50/50">
             <span>
               Menampilkan {(currentPage - 1) * pageSize + 1} -{' '}
               {Math.min(currentPage * pageSize, filteredLogs.length)} dari {filteredLogs.length} entri
@@ -491,7 +492,7 @@ export const ActivityLogView: React.FC = () => {
             <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">Detail Log Aktivitas</h3>
-                <p className="text-[11px] text-slate-500 font-mono mt-0.5">{selectedLog.id}</p>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">{selectedLog.id}</p>
               </div>
               <button
                 type="button"
@@ -505,15 +506,15 @@ export const ActivityLogView: React.FC = () => {
             <div className="p-5 space-y-3.5 text-xs">
               <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
                 <div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block">
+                  <span className="text-xs uppercase tracking-wider text-slate-400 font-medium block">
                     Waktu Kejadian
                   </span>
                   <span className="font-mono text-slate-800 font-medium mt-0.5 block">
-                    {selectedLog.timestamp}
+                    {formatTimestampDisplay(selectedLog.timestamp)}
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block">
+                  <span className="text-xs uppercase tracking-wider text-slate-400 font-medium block">
                     Status
                   </span>
                   <span className="font-medium text-slate-900 mt-0.5 block">
@@ -521,7 +522,7 @@ export const ActivityLogView: React.FC = () => {
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block">
+                  <span className="text-xs uppercase tracking-wider text-slate-400 font-medium block">
                     Aktor / Pengguna
                   </span>
                   <span className="font-medium text-slate-900 mt-0.5 block">
@@ -529,7 +530,7 @@ export const ActivityLogView: React.FC = () => {
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block">
+                  <span className="text-xs uppercase tracking-wider text-slate-400 font-medium block">
                     Modul Sistem
                   </span>
                   <span className="font-medium text-slate-800 mt-0.5 block">
@@ -539,13 +540,13 @@ export const ActivityLogView: React.FC = () => {
               </div>
 
               <div>
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block mb-1">
+                <span className="text-xs uppercase tracking-wider text-slate-400 font-medium block mb-1">
                   Aksi / Peristiwa
                 </span>
                 <div className="p-3 rounded-lg border border-slate-200 bg-white font-medium text-slate-900">
                   {selectedLog.action}
                   {selectedLog.target && (
-                    <span className="block text-[11px] font-mono text-slate-500 mt-1">
+                    <span className="block text-xs font-mono text-slate-500 mt-1">
                       Sasaran / Target: {selectedLog.target}
                     </span>
                   )}
@@ -553,7 +554,7 @@ export const ActivityLogView: React.FC = () => {
               </div>
 
               <div>
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium block mb-1">
+                <span className="text-xs uppercase tracking-wider text-slate-400 font-medium block mb-1">
                   Rincian Lengkap Aktivitas
                 </span>
                 <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 leading-relaxed whitespace-pre-wrap break-words">

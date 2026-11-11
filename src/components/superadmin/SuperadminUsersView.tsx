@@ -200,7 +200,7 @@ export const SuperadminUsersView: React.FC = () => {
             <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
               Manajemen Akun Global
             </h1>
-            <span className="text-[11px] font-semibold text-purple-800 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+            <span className="text-xs font-semibold text-purple-800 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
               Superadmin Platform
             </span>
           </div>
@@ -285,7 +285,7 @@ export const SuperadminUsersView: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[780px] text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
                 <th className="px-5 py-3">Nama Pengguna</th>
                 <th className="px-4 py-3">Username & Email</th>
                 <th className="px-4 py-3">Peran</th>
@@ -309,15 +309,15 @@ export const SuperadminUsersView: React.FC = () => {
                     <tr key={`${u.id}-${u.tenantId || ''}-${idx}`} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3.5">
                         <p className="font-bold text-slate-900">{u.name}</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">{u.judgeCategory || ''}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{u.judgeCategory || ''}</p>
                       </td>
                       <td className="px-4 py-3.5 font-mono text-slate-600">
                         <p>{u.username}</p>
-                        <p className="text-[10px] text-slate-400">{u.email || '-'}</p>
+                        <p className="text-xs text-slate-400">{u.email || '-'}</p>
                       </td>
                       <td className="px-4 py-3.5">
                         <span
-                          className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                          className={`inline-block px-2.5 py-0.5 rounded text-xs font-bold ${
                             u.role === 'superadmin'
                               ? 'bg-purple-100 text-purple-800'
                               : u.role === 'admin'
@@ -344,7 +344,7 @@ export const SuperadminUsersView: React.FC = () => {
                       <td className="px-4 py-3.5">
                         <div className="space-y-1">
                           <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
                               provStatus === 'Aktif'
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                 : provStatus === 'Menunggu Verifikasi' || provStatus === 'Mengundang...'
@@ -362,7 +362,7 @@ export const SuperadminUsersView: React.FC = () => {
                             <span>{provStatus}</span>
                           </span>
                           {u.provisioningMessage && (
-                            <p className="text-[10px] text-slate-500 max-w-xs leading-snug">
+                            <p className="text-xs text-slate-500 max-w-xs leading-snug">
                               {u.provisioningMessage}
                             </p>
                           )}
@@ -372,7 +372,7 @@ export const SuperadminUsersView: React.FC = () => {
                         {provStatus === 'Gagal / Perlu Tindakan Admin' && (
                           <button
                             onClick={() => handleRetryProvisioning(u.id)}
-                            className="px-2 py-1 text-[10px] font-bold bg-amber-100 text-amber-900 hover:bg-amber-200 rounded"
+                            className="px-2 py-1 text-xs font-bold bg-amber-100 text-amber-900 hover:bg-amber-200 rounded"
                             title="Coba Ulang Provisioning"
                           >
                             Coba Ulang
@@ -381,7 +381,7 @@ export const SuperadminUsersView: React.FC = () => {
                         {u.email && isLiveSupabaseMode && (
                           <button
                             onClick={() => handleSendPasswordReset(u.email)}
-                            className="px-2 py-1 text-[10px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded"
+                            className="px-2 py-1 text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded"
                             title="Kirim Email Reset Kata Sandi"
                           >
                             Reset Sandi
@@ -568,7 +568,7 @@ export const SuperadminUsersView: React.FC = () => {
                     placeholder="Isi kata sandi untuk langsung membuat akun login"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                   />
-                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                     Jika diisi, sistem akan langsung mendaftarkan akun di <code>auth.users</code> dan <code>public.profiles</code> dengan kata sandi ini tanpa mengeluarkan sesi Superadmin Anda.
                   </p>
                 </div>

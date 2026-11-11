@@ -507,6 +507,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261114_audit_fixes.sql'),
     'utf-8'
   );
+  const lottery20261115Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261115_lottery_reproducible.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -621,6 +625,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(maqra20261112Sql);
       await pg.exec(isolation20261113Sql);
       await pg.exec(auditFixes20261114Sql);
+      await pg.exec(lottery20261115Sql);
       await pg.exec(`
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
         GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
@@ -2925,6 +2930,102 @@ export async function runSupabaseTests(): Promise<{
     );
 
     // =========================================================================
+    // 71b. SERI PENUH JUARA 2 vs JUARA 3 DI BABAK FINAL & URUTAN KEPUTUSAN PLENO
+    // =========================================================================
+    const finalTieStageId = generateUuid();
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, champion_count, status, is_finalized)
+      VALUES ('${finalTieStageId}', '${tenantJabarId}', '${f2BranchId}', 'Final Seri Podium F2', 34, 3, 3, 'Aktif', false);
+      INSERT INTO judge_assignments (id, tenant_id, judge_profile_id, stage_id, branch_id, judge_field, status)
+      VALUES ('${generateUuid()}', '${tenantJabarId}', '${judge1UserId}', '${finalTieStageId}', '${f2BranchId}', 'Tajwid', 'Aktif');
+    `);
+    const podiumSpecs = [
+      { lot: '31', name: 'Finalis Juara Satu', score: 98.0, fs: { Tajwid: 30, Lagu: 25, Fashahah: 28, Suara: 15 } },
+      { lot: '32', name: 'Finalis Seri A', score: 95.0, fs: { Tajwid: 29, Lagu: 24, Fashahah: 27, Suara: 15 } },
+      { lot: '33', name: 'Finalis Seri B', score: 95.0, fs: { Tajwid: 29, Lagu: 24, Fashahah: 27, Suara: 15 } },
+      { lot: '34', name: 'Finalis Keempat', score: 90.0, fs: { Tajwid: 27, Lagu: 22, Fashahah: 26, Suara: 15 } }
+    ];
+    const podiumIds: string[] = [];
+    for (const spec of podiumSpecs) {
+      const pId = generateUuid();
+      const spId = generateUuid();
+      const amId = generateUuid();
+      podiumIds.push(pId);
+      await pg.exec(`
+        INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status)
+        VALUES ('${pId}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', 'POD-${spec.lot}', '${spec.name}', 'Putra', '${spec.lot}', 'Berlangsung');
+        INSERT INTO stage_participations (id, tenant_id, participant_id, stage_id, lottery_number, status)
+        VALUES ('${spId}', '${tenantJabarId}', '${pId}', '${finalTieStageId}', '${spec.lot}', 'Lengkap');
+        INSERT INTO assigned_maqras (id, tenant_id, stage_participation_id, question_id)
+        VALUES ('${amId}', '${tenantJabarId}', '${spId}', '${questionPenyisihanId}');
+        INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, error_counts, field_scores, total_deductions, final_score)
+        VALUES ('${generateUuid()}', '${tenantJabarId}', '${spId}', '${amId}', '${judge1UserId}', '${f2RubricId}', 'in_progress', false, '{}'::jsonb, '${JSON.stringify(spec.fs)}'::jsonb, ${100 - spec.score}, ${spec.score});
+        BEGIN;
+        SELECT set_config('mtq.rpc_finalize_active', 'true', true);
+        UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${spId}'::uuid;
+        COMMIT;
+      `);
+    }
+    const [champ1Id, tieAId, tieBId] = podiumIds;
+    const podiumRankRes = await supabaseDataService.computeStageRankingsRpc(finalTieStageId);
+    const podiumRows = ((podiumRankRes.data as any)?.rankings || []) as Array<any>;
+    const tieARow = podiumRows.find((r) => r.participant_id === tieAId);
+    const tieBRow = podiumRows.find((r) => r.participant_id === tieBId);
+
+    const podiumBlockedRes = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: finalTieStageId,
+      nextStageId: null,
+      qualifiedParticipantIds: [],
+      overrideReasons: {}
+    });
+    // Pleno memutuskan Seri B (nomor undian lebih besar) menjadi Juara 2, membuktikan nomor undian tidak menentukan
+    const podiumResolvedRes = await supabaseDataService.advanceStageQualifiersRpc({
+      stageId: finalTieStageId,
+      nextStageId: null,
+      qualifiedParticipantIds: [],
+      overrideReasons: {
+        [tieAId]: 'Keputusan pleno seri peringkat #2: hasil penampilan ulang',
+        [tieBId]: 'Keputusan pleno seri peringkat #2: hasil penampilan ulang'
+      },
+      tieResolution: { [tieBId]: 1, [tieAId]: 2 }
+    });
+    const podiumChampQ = await pg.query<{ participant_id: string; champion_rank: number | null }>(`
+      SELECT participant_id::text, champion_rank FROM stage_participations WHERE stage_id = '${finalTieStageId}'::uuid;
+    `);
+    const champOf = (pid: string) => podiumChampQ.rows.find((r) => r.participant_id === pid)?.champion_rank;
+
+    assert(
+      '71b. Seri Penuh Juara 2 vs 3 di Babak Final: server menandai keduanya is_tied dengan peringkat #2 yang sama, pengesahan ditolak tanpa keputusan pleno, dan setelah keputusan pleno Juara 2/3 mengikuti urutan pleno (bukan nomor undian)',
+      podiumRankRes.success === true &&
+        tieARow?.is_tied === true &&
+        tieBRow?.is_tied === true &&
+        tieARow?.rank === 2 &&
+        tieBRow?.rank === 2 &&
+        podiumBlockedRes.success === false &&
+        Boolean(podiumBlockedRes.message?.includes('UNRESOLVED_CRITICAL_TIE')) &&
+        podiumResolvedRes.success === true &&
+        Number(champOf(champ1Id)) === 1 &&
+        Number(champOf(tieBId)) === 2 &&
+        Number(champOf(tieAId)) === 3,
+      `ranks: ${podiumRows.map((r) => `${r.lottery_number}:#${r.rank}:${r.is_tied}`).join(',')}, blocked: ${podiumBlockedRes.message}, resolved: ${podiumResolvedRes.success} ${podiumResolvedRes.message || ''}, champ: ${JSON.stringify(podiumChampQ.rows)}`
+    );
+
+    // 71c. Nilai bidang non-angka di field_scores tidak menyebabkan error (dianggap NULL)
+    const fieldScoreQ = await pg.query<{ bad: string | null; good: string | null; alias: string | null; missing: string | null }>(`
+      SELECT
+        get_field_score('{"Tajwid": "abc"}'::jsonb, 'Tajwid')::text AS bad,
+        get_field_score('{"Tajwid": 29.5}'::jsonb, 'Tajwid')::text AS good,
+        get_field_score('{"TJW": 28}'::jsonb, 'Tajwid')::text AS alias,
+        get_field_score('{}'::jsonb, 'Lagu')::text AS missing;
+    `);
+    const fsRow = fieldScoreQ.rows[0];
+    assert(
+      '71c. get_field_score Tahan Data Kotor: nilai non-angka dan bidang hilang menghasilkan NULL tanpa error, alias kode bidang (TJW) terbaca',
+      fsRow?.bad === null && Number(fsRow?.good) === 29.5 && Number(fsRow?.alias) === 28 && fsRow?.missing === null,
+      `row: ${JSON.stringify(fsRow)}`
+    );
+
+    // =========================================================================
     // 72. FASE 2.3 & 2.5: BABAK FINAL (`champion_rank`, `champion_title = 'Juara N'`, `is_qualified = FALSE`, SNAPSHOT `branch_id IS NULL`)
     // =========================================================================
     const f2FinalNullBranchStageId = generateUuid();
@@ -3193,6 +3294,66 @@ export async function runSupabaseTests(): Promise<{
         manualOverrideBlockedRes.success === false &&
         (manualOverrideBlockedRes.message?.includes('LOTTERY_OVERRIDE_REASON_REQUIRED') || false),
       `drawSuccess: ${serverDrawRes.success}, seedSha: ${drawLogCheck.rows[0]?.seed_sha256}, overrideMsg: ${manualOverrideBlockedRes.message}`
+    );
+
+    // =========================================================================
+    // 75b. UNDIAN DAPAT DIREPRODUKSI DARI SEED (`verify_lottery_draw`)
+    // =========================================================================
+    const reproPartIds = [generateUuid(), generateUuid(), generateUuid(), generateUuid(), generateUuid()];
+    const reproStageId = generateUuid();
+    await pg.exec(`
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order, qualification_quota, status, is_finalized)
+      VALUES ('${reproStageId}', '${tenantJabarId}', '${f2BranchId}', 'Babak Uji Reproduksi Undian', 52, 1, 'Aktif', false);
+      INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status, verification_status)
+      VALUES
+        ${reproPartIds
+          .map(
+            (pid, i) =>
+              `('${pid}', '${tenantJabarId}', '${kafilahBandungId}', '${f2BranchId}', 'RPR-0${i + 1}', 'Peserta Reproduksi ${i + 1}', 'Putra', 'RPR-0${i + 1}', 'Menunggu', 'Diverifikasi')`
+          )
+          .join(',\n        ')};
+    `);
+    const reproDrawRes = await supabaseDataService.drawLotteryServerRpc({
+      tenantId: tenantJabarId,
+      stageId: reproStageId,
+      branchId: f2BranchId,
+      drawMode: 'lottery_number',
+      questionsPerParticipant: 1,
+      participantIds: reproPartIds
+    });
+    const reproLog = await pg.query<{ id: string; seed_hex: string; seed_sha256: string; participant_ids: string[] }>(`
+      SELECT id, seed_hex, seed_sha256, participant_ids FROM lottery_draw_logs
+      WHERE stage_id = '${reproStageId}'::uuid ORDER BY created_at DESC LIMIT 1;
+    `);
+    const reproRow = reproLog.rows[0];
+    // Hitung ulang urutan secara independen dari seed (tanpa memanggil fungsi undian)
+    const independentOrder = await pg.query<{ pid: string }>(`
+      SELECT pid FROM unnest(ARRAY[${reproPartIds.map((p) => `'${p}'`).join(',')}]::text[]) AS pid
+      ORDER BY encode(sha256(convert_to('${reproRow?.seed_hex}' || ':' || pid || ':', 'UTF8')), 'hex'), pid::uuid;
+    `);
+    const independentSha = await pg.query<{ sha: string }>(
+      `SELECT encode(sha256(convert_to('${reproRow?.seed_hex}', 'UTF8')), 'hex') AS sha;`
+    );
+    await pg.exec(`SELECT set_config('request.jwt.claim.sub', '${adminUserId}', false);`);
+    const verifyRes = await pg.query<{ res: any }>(`SELECT verify_lottery_draw('${reproRow?.id}'::uuid) AS res;`);
+    await pg.exec(`SELECT set_config('request.jwt.claim.sub', '', false);`);
+    const verifyObj = verifyRes.rows[0]?.res || {};
+    const migrationHasNoRandom = !/random\(\)|md5\(/.test(
+      lottery20261115Sql.slice(lottery20261115Sql.indexOf('CREATE OR REPLACE FUNCTION public.draw_lottery_server'))
+    );
+
+    assert(
+      '75b. Undian Server Dapat Direproduksi: urutan peserta dihitung ulang secara independen dari seed_hex identik dengan hasil tercatat, seed_sha256 adalah SHA-256 asli, verify_lottery_draw memvalidasi, dan tidak ada random()/md5 di draw_lottery_server',
+      reproDrawRes.success === true &&
+        independentOrder.rows.map((r) => r.pid).join(',') === (reproRow?.participant_ids || []).join(',') &&
+        independentSha.rows[0]?.sha === reproRow?.seed_sha256 &&
+        reproRow?.seed_sha256?.length === 64 &&
+        verifyObj.participant_order_valid === true &&
+        verifyObj.seed_sha256_valid === true &&
+        migrationHasNoRandom,
+      `drawOk: ${reproDrawRes.success} ${reproDrawRes.message || ''}, recorded: ${(reproRow?.participant_ids || []).join(',')}, independent: ${independentOrder.rows
+        .map((r) => r.pid)
+        .join(',')}, verify: ${JSON.stringify(verifyObj)}`
     );
 
     // =========================================================================

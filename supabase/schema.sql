@@ -5434,6 +5434,16 @@ ALTER TABLE public.lottery_draw_logs
   ADD COLUMN IF NOT EXISTS draw_mode VARCHAR(30) NOT NULL DEFAULT 'both'
     CHECK (draw_mode IN ('lottery_number', 'maqra', 'both'));
 
+CREATE OR REPLACE FUNCTION public.lottery_sort_key(p_seed TEXT, p_a TEXT, p_b TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+STRICT
+SET search_path = public, pg_temp
+AS $$
+    SELECT encode(sha256(convert_to(p_seed || ':' || p_a || ':' || p_b, 'UTF8')), 'hex');
+$$;
+
 CREATE OR REPLACE FUNCTION public.draw_lottery_server(
     p_tenant_id UUID,
     p_stage_id UUID,
@@ -5503,6 +5513,7 @@ BEGIN
         RAISE EXCEPTION 'STAGE_ALREADY_FINALIZED: Pengundian ditolak karena Babak "%" telah difinalisasi secara resmi.', v_stage.name;
     END IF;
 
+    -- Blokir pengundian ulang apabila sudah ada lembar penilaian pada babak ini
     IF EXISTS (
         SELECT 1
         FROM public.judge_assessments ja
@@ -5526,6 +5537,7 @@ BEGIN
         SELECT name INTO v_level_name FROM public.levels WHERE id = p_level_id AND tenant_id = p_tenant_id;
     END IF;
 
+    -- Periksa apakah ada peserta dalam cakupan undian yang belum berstatus 'Diverifikasi'
     SELECT p.id, p.name, p.verification_status
     INTO v_unverified
     FROM public.participants p
@@ -5550,20 +5562,23 @@ BEGIN
         RAISE EXCEPTION 'PARTICIPANT_NOT_VERIFIED: Peserta "%" belum diverifikasi berkasnya (status: %). Hanya peserta berstatus Diverifikasi yang dapat mengikuti undian.', v_unverified.name, v_unverified.verification_status;
     END IF;
 
+    -- Benih acak kriptografis di server. gen_random_bytes (pgcrypto) bila tersedia;
+    -- jika tidak, gen_random_uuid() bawaan PostgreSQL 13+ (juga CSPRNG). Tidak ada fallback deterministik.
     BEGIN
         EXECUTE 'SELECT encode(gen_random_bytes(16), ''hex'')' INTO v_seed_hex;
-    EXCEPTION WHEN OTHERS THEN
-        v_seed_hex := md5(gen_random_uuid()::text || clock_timestamp()::text || random()::text);
+    EXCEPTION WHEN undefined_function THEN
+        v_seed_hex := replace(gen_random_uuid()::text, '-', '');
     END;
+    IF v_seed_hex IS NULL OR length(v_seed_hex) < 32 THEN
+        RAISE EXCEPTION 'LOTTERY_SEED_UNAVAILABLE: Benih acak server tidak dapat dibangkitkan.';
+    END IF;
 
-    BEGIN
-        EXECUTE 'SELECT encode(digest($1, ''sha256''), ''hex'')' INTO v_seed_sha256 USING v_seed_hex;
-    EXCEPTION WHEN OTHERS THEN
-        v_seed_sha256 := md5('sha256-a:' || v_seed_hex) || md5('sha256-b:' || v_seed_hex);
-    END;
+    -- SHA-256 asli (fungsi bawaan PostgreSQL 11+), dicatat agar benih dapat diverifikasi publik
+    v_seed_sha256 := encode(sha256(convert_to(v_seed_hex, 'UTF8')), 'hex');
 
     PERFORM set_config('mtq.rpc_audit_active', 'true', true);
 
+    -- Acak urutan peserta secara deterministik dari benih (dapat direproduksi via verify_lottery_draw)
     FOR v_part IN
         SELECT p.*
         FROM public.participants p
@@ -5582,7 +5597,7 @@ BEGIN
                   AND (p_level_id IS NULL OR p.level_id = p_level_id)
               )
           )
-        ORDER BY md5(v_seed_hex || p.id::text || random()::text)
+        ORDER BY public.lottery_sort_key(v_seed_hex, p.id::text, ''), p.id
     LOOP
         v_idx := v_idx + 1;
         v_target_count := v_target_count + 1;
@@ -5624,6 +5639,8 @@ BEGIN
         v_picked_q_codes := ARRAY[]::text[];
 
         IF p_draw_mode IN ('maqra', 'both') THEN
+            -- Pilih p_questions_per_participant soal aktif yang sesuai 3D (cabang + jenjang + babak),
+            -- prioritaskan soal yang belum terpakai pada batch ini (sampling without replacement sebelum daur ulang)
             SELECT
                 ARRAY_AGG(sub.id ORDER BY sub.ord),
                 ARRAY_AGG((sub.code || ' - ' || sub.title) ORDER BY sub.ord)
@@ -5636,7 +5653,8 @@ BEGIN
                     ROW_NUMBER() OVER (
                         ORDER BY
                             CASE WHEN q.id = ANY(v_used_q_ids) THEN 1 ELSE 0 END ASC,
-                            md5(v_seed_hex || v_part.id::text || q.id::text || random()::text) ASC
+                            public.lottery_sort_key(v_seed_hex, v_part.id::text, q.id::text) ASC,
+                            q.id ASC
                     ) AS ord
                 FROM public.questions q
                 WHERE q.tenant_id = p_tenant_id
@@ -5690,6 +5708,7 @@ BEGIN
             WHERE id = v_part.id
               AND tenant_id = p_tenant_id;
         ELSE
+            -- Jika hanya mengundi nomor tampil, pertahankan daftar maqra yang sudah ada untuk catatan log
             SELECT
                 COALESCE(ARRAY_AGG(q.id), ARRAY[]::uuid[]),
                 COALESCE(ARRAY_AGG(q.code || ' - ' || q.title), ARRAY[]::text[])
@@ -5805,9 +5824,48 @@ BEGIN
 END $$;
 
 
+CREATE OR REPLACE FUNCTION public.verify_lottery_draw(p_draw_log_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_log RECORD;
+    v_expected TEXT[];
+    v_sha_ok BOOLEAN;
+BEGIN
+    SELECT * INTO v_log FROM public.lottery_draw_logs WHERE id = p_draw_log_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Log undian tidak ditemukan.';
+    END IF;
+    IF NOT (v_log.tenant_id IN (SELECT public.get_user_tenants()) OR public.is_superadmin()) THEN
+        RAISE EXCEPTION 'Otorisasi ditolak: Log undian berada di luar tenant Anda.';
+    END IF;
+    IF v_log.seed_hex IS NULL THEN
+        RETURN jsonb_build_object('verifiable', false, 'reason', 'Log ini dibuat sebelum undian dapat direproduksi (tanpa seed).');
+    END IF;
 
+    SELECT ARRAY_AGG(pid ORDER BY public.lottery_sort_key(v_log.seed_hex, pid, ''), pid::uuid)
+    INTO v_expected
+    FROM unnest(v_log.participant_ids) AS pid;
 
+    v_sha_ok := encode(sha256(convert_to(v_log.seed_hex, 'UTF8')), 'hex') = v_log.seed_sha256;
 
+    RETURN jsonb_build_object(
+        'verifiable', true,
+        'seed_sha256_valid', v_sha_ok,
+        'participant_order_valid', v_expected = v_log.participant_ids,
+        'expected_order', to_jsonb(v_expected),
+        'recorded_order', to_jsonb(v_log.participant_ids)
+    );
+END;
+$$;
 
-
-
+REVOKE EXECUTE ON FUNCTION public.lottery_sort_key(TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.lottery_sort_key(TEXT, TEXT, TEXT) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.draw_lottery_server(UUID, UUID, UUID, UUID, INT, VARCHAR, TEXT, UUID[], UUID[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.draw_lottery_server(UUID, UUID, UUID, UUID, INT, VARCHAR, TEXT, UUID[], UUID[]) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.verify_lottery_draw(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.verify_lottery_draw(UUID) TO authenticated;

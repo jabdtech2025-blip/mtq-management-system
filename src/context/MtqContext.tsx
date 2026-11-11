@@ -351,6 +351,7 @@ interface MtqContextType {
           qualifiedParticipantIds: string[];
           overrideReasons?: Record<string, string>;
           manualOverrides?: Record<string, boolean>;
+          tieResolution?: Record<string, number>;
         },
     nextStageName?: string,
     qualifiedParticipantIds?: string[],
@@ -6773,6 +6774,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           qualifiedParticipantIds: string[];
           overrideReasons?: Record<string, string>;
           manualOverrides?: Record<string, boolean>;
+          tieResolution?: Record<string, number>;
         },
     nextStageNameArg?: string,
     qualifiedParticipantIdsArg?: string[],
@@ -6783,6 +6785,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let qualifiedParticipantIds: string[] = [];
     let overrideReasons: Record<string, string> | undefined = undefined;
     let manualOverridesParam: Record<string, boolean> | undefined = undefined;
+    let tieResolutionParam: Record<string, number> | undefined = undefined;
     let branchIdParam: string | undefined = undefined;
     let branchNameParam: string | undefined = undefined;
     let stageIdParam: string | undefined = undefined;
@@ -6796,6 +6799,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       qualifiedParticipantIds = currentStageNameOrParams.qualifiedParticipantIds || [];
       overrideReasons = currentStageNameOrParams.overrideReasons;
       manualOverridesParam = currentStageNameOrParams.manualOverrides;
+      tieResolutionParam = currentStageNameOrParams.tieResolution;
       branchIdParam = currentStageNameOrParams.branchId;
       branchNameParam = currentStageNameOrParams.branchName;
       stageIdParam = currentStageNameOrParams.currentStageId;
@@ -7034,7 +7038,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     // 7. Execute Server RPC Transaction FIRST (including final championship where nextStageId = null!)
-    if (supabaseDataService.isLive() && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+    const isServerCommit =
+      supabaseDataService.isLive() && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated;
+    if (isServerCommit) {
       setSyncStatus('Mengesahkan hasil babak di server...');
       const rpcRankingsSnapshot = stageSnapshot.rankings.map((entry) => ({
         ...entry,
@@ -7053,7 +7059,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         overrideReasons: Object.fromEntries(
           Object.entries(overrideReasons || {}).map(([k, v]) => [toDeterministicUuid(k), v])
         ),
-        rankingsSnapshot: rpcRankingsSnapshot
+        rankingsSnapshot: rpcRankingsSnapshot,
+        tieResolution: Object.fromEntries(
+          Object.entries(tieResolutionParam || {}).map(([k, v]) => [toDeterministicUuid(k), v])
+        )
       });
 
       if (!rpcRes.success) {
@@ -7075,8 +7084,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // 8. Commit local state AFTER server transaction succeeded
-    setStageSnapshots((prev) => [...prev.filter((s) => s.id !== stageSnapshot.id), stageSnapshot]);
+    // 8. Commit local state AFTER server transaction succeeded.
+    // Mode live: snapshot resmi dibuat server; muat ulang dari database (bukan snapshot hitungan browser).
+    if (isServerCommit) {
+      void refreshSupabaseConnection();
+    } else {
+      setStageSnapshots((prev) => [...prev.filter((s) => s.id !== stageSnapshot.id), stageSnapshot]);
+    }
 
     const nowTime = getWibTime();
     const quota = currentStg.qualificationQuota;

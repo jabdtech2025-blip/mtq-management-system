@@ -12,6 +12,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { useMtq, ViewType } from '../../context/MtqContext';
+import { formatTimestampDisplay } from '../../utils/dateTime';
 
 export const TopHeader: React.FC = () => {
   const {
@@ -75,8 +76,9 @@ export const TopHeader: React.FC = () => {
     syncStatus.toLowerCase().includes('memproses') ||
     syncStatus.toLowerCase().includes('sinkronisasi realtime');
 
-  type HeaderConnectionState = 'Offline' | 'Syncing' | 'Unsynced' | 'Connected';
+  type HeaderConnectionState = 'Offline' | 'Syncing' | 'Unsynced' | 'Connected' | 'Mode Demo';
   const headerConnectionState: HeaderConnectionState = (() => {
+    if (!isLiveSupabaseMode) return 'Mode Demo';
     if (!isBrowserOnline) return 'Offline';
     if (isSyncingState) return 'Syncing';
     if (
@@ -96,6 +98,8 @@ export const TopHeader: React.FC = () => {
       ? 'bg-sky-500 animate-pulse'
       : headerConnectionState === 'Offline'
       ? 'bg-slate-400'
+      : headerConnectionState === 'Mode Demo'
+      ? 'bg-amber-400'
       : 'bg-amber-500';
 
   // Breadcrumb mapping for Enterprise AppShell
@@ -125,7 +129,7 @@ export const TopHeader: React.FC = () => {
       {isSuperadminWorkspaceMode && (
         <div className="bg-amber-900 text-amber-50 px-4 lg:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs border-b border-amber-700/60">
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-normal uppercase tracking-wider text-[10px]">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-normal uppercase tracking-wider text-xs">
               <Sparkles className="w-3 h-3" /> Mode Supervisi Tenant
             </span>
             <span className="font-normal text-amber-100">
@@ -179,7 +183,15 @@ export const TopHeader: React.FC = () => {
             className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200/80 bg-slate-50 text-xs font-normal text-slate-700 shadow-2xs"
           >
             <span className={`w-2 h-2 rounded-full ${dotColorClass}`} />
-            <span>{headerConnectionState}</span>
+            <span>
+              {headerConnectionState === 'Connected'
+                ? 'Tersambung'
+                : headerConnectionState === 'Syncing'
+                ? 'Menyinkronkan'
+                : headerConnectionState === 'Unsynced'
+                ? 'Belum Tersinkron'
+                : headerConnectionState}
+            </span>
           </div>
 
           {/* Notification Bell (placed to the right of connected) */}
@@ -202,7 +214,7 @@ export const TopHeader: React.FC = () => {
             >
               <Bell className="w-4 h-4" />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-rose-600 text-white rounded-full text-[10px] font-normal flex items-center justify-center leading-none shadow-xs animate-pulse">
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-rose-600 text-white rounded-full text-xs font-normal flex items-center justify-center leading-none shadow-xs animate-pulse">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
@@ -217,7 +229,7 @@ export const TopHeader: React.FC = () => {
                     <h3 className="text-xs font-normal text-slate-900">
                       Notifikasi Sistem
                     </h3>
-                    <span className="px-1.5 py-0.2 rounded text-[10px] font-normal bg-slate-200 text-slate-700">
+                    <span className="px-1.5 py-0.2 rounded text-xs font-normal bg-slate-200 text-slate-700">
                       {notifications.length}
                     </span>
                   </div>
@@ -225,7 +237,7 @@ export const TopHeader: React.FC = () => {
                     <button
                       type="button"
                       onClick={clearNotifications}
-                      className="inline-flex items-center gap-1 text-[11px] font-normal text-slate-500 hover:text-rose-600 cursor-pointer transition-colors"
+                      className="inline-flex items-center gap-1 text-xs font-normal text-slate-500 hover:text-rose-600 cursor-pointer transition-colors"
                       title="Hapus semua riwayat notifikasi lokal"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -264,18 +276,18 @@ export const TopHeader: React.FC = () => {
                           {icon}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-1">
-                              <p className="font-medium text-slate-800 text-[11px] truncate">
+                              <p className="font-medium text-slate-800 text-xs truncate">
                                 {item.title}
                               </p>
-                              <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                                {item.timestamp}
+                              <span className="text-xs text-slate-400 font-mono shrink-0">
+                                {formatTimestampDisplay(item.timestamp)}
                               </span>
                             </div>
-                            <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed break-words">
+                            <p className="text-xs text-slate-600 mt-0.5 leading-relaxed break-words">
                               {item.message}
                             </p>
                             {item.module && (
-                              <span className="inline-block mt-1 px-1.5 py-0.2 rounded bg-slate-100 text-[10px] font-normal text-slate-600">
+                              <span className="inline-block mt-1 px-1.5 py-0.2 rounded bg-slate-100 text-xs font-normal text-slate-600">
                                 {item.module}
                               </span>
                             )}

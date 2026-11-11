@@ -13,6 +13,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
+import { formatTimestampDisplay } from '../../utils/dateTime';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -26,7 +27,8 @@ export const DashboardView: React.FC = () => {
     selectedParticipantId,
     setSelectedParticipantId,
     activityLogs,
-    getParticipantProgress
+    getParticipantProgress,
+    questions
   } = useMtq();
 
   // Statistics dynamically derived and strictly scoped to currentTenant
@@ -117,7 +119,7 @@ export const DashboardView: React.FC = () => {
             <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
               {totalUniqueParticipants}
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-xs text-slate-400 mt-1">
               {totalStageParticipations} partisipasi babak
             </p>
           </div>
@@ -133,7 +135,7 @@ export const DashboardView: React.FC = () => {
             <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
               {totalKafilah}
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">Utusan daerah aktif</p>
+            <p className="text-xs text-slate-400 mt-1">Utusan daerah aktif</p>
           </div>
         </div>
 
@@ -147,7 +149,7 @@ export const DashboardView: React.FC = () => {
             <p className="text-3xl font-bold text-slate-900 tabular-nums font-mono">
               {totalHakim}
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">Hakim penilai di event ini</p>
+            <p className="text-xs text-slate-400 mt-1">Hakim penilai di event ini</p>
           </div>
         </div>
 
@@ -165,7 +167,7 @@ export const DashboardView: React.FC = () => {
               {completionPercentage}%
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
+          <p className="text-xs text-slate-400 mt-1">
             {waitingOtherCount > 0 ? `${waitingOtherCount} menunggu hakim lain` : 'Semua hakim sinkron'}
           </p>
         </div>
@@ -177,7 +179,7 @@ export const DashboardView: React.FC = () => {
         <div className="lg:col-span-2 bg-gradient-to-br from-emerald-800 to-emerald-950 text-white rounded-2xl p-6 shadow-md flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-white/10 px-2.5 py-0.5 rounded-full text-emerald-200 border border-white/15">
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold bg-white/10 px-2.5 py-0.5 rounded-full text-emerald-200 border border-white/15">
                 <span className={`w-2 h-2 rounded-full ${ongoingParticipant ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`}></span>
                 Sesi Penilaian Aktif
               </span>
@@ -297,7 +299,9 @@ export const DashboardView: React.FC = () => {
                 const part = tenantParticipants.find((p) => p.id === a.participantId);
                 const partName = part ? `${part.name} (#${part.lotteryNumber})` : a.participantId;
                 const statusLabel = a.status === 'finalized' ? 'Finalisasi Nilai Dewan Hakim' : 'Penyimpanan Lembar Penilaian';
-                const desc = `Hakim ${a.judgeName} (${a.judgeField}) - Nilai Akhir: ${a.finalScore.toFixed(2)} pts untuk ${partName}.`;
+                const maqraCode = a.questionId ? questions.find((q) => q.id === a.questionId)?.code : undefined;
+                const contextLabel = [maqraCode, a.stageName].filter(Boolean).join(' · ');
+                const desc = `Hakim ${a.judgeName} (${a.judgeField}) - Nilai Akhir: ${a.finalScore.toFixed(2)} pts untuk ${partName}${contextLabel ? ` · ${contextLabel}` : ''}.`;
                 const ts = a.finalizedAt || a.lastUpdated || 'Baru saja';
 
                 list.push({
@@ -341,8 +345,8 @@ export const DashboardView: React.FC = () => {
                   <p className="font-bold text-slate-800">{log.title}</p>
                   <p className="text-slate-600 mt-0.5">{log.description}</p>
                 </div>
-                <span className="text-[10px] font-mono text-slate-400 shrink-0">
-                  {log.timestamp}
+                <span className="text-xs font-mono text-slate-400 shrink-0">
+                  {formatTimestampDisplay(log.timestamp)}
                 </span>
               </div>
             ));

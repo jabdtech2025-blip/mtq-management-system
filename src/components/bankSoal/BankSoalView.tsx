@@ -469,7 +469,7 @@ export const BankSoalView: React.FC = () => {
 
   // Open Add Question
   const handleOpenAdd = () => {
-    const defaultCabang = activeCabangList[0]?.name || cabangList[0]?.name || 'Tilawah Dewasa Putra';
+    const defaultCabang = activeCabangList[0]?.name || cabangList[0]?.name || '';
     const defaultJenjang = activeJenjangList[0]?.name || jenjangList[0]?.name || 'Dewasa';
     const defaultStage = activeStages[0]?.name || stages[0]?.name || 'Penyisihan';
 
@@ -911,7 +911,7 @@ export const BankSoalView: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[760px]">
               <thead>
-                <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
+                <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-xs font-bold uppercase tracking-wider">
                   <th className="px-5 py-3 w-28">Kode Maqra</th>
                   <th className="px-5 py-3">Surah & Ayat</th>
                   <th className="px-4 py-3">Hal. Mushaf</th>
@@ -947,7 +947,7 @@ export const BankSoalView: React.FC = () => {
                         </td>
                         <td className="px-5 py-3.5">
                           <p className="font-bold text-slate-900">{q.title}</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
+                          <p className="text-xs text-slate-500 mt-0.5">
                             QS. {q.surahName} [{q.surahNumber}]: {q.startAyah} - {q.endAyah}
                           </p>
                         </td>
@@ -955,7 +955,7 @@ export const BankSoalView: React.FC = () => {
                           <span className="inline-flex items-center gap-1">
                             {pageDisplay}
                             {q.pageStart && q.pageEnd && q.pageEnd > q.pageStart && (
-                              <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded font-sans">
+                              <span className="text-xs text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded font-sans">
                                 {q.pageEnd - q.pageStart + 1} Hal
                               </span>
                             )}
@@ -966,7 +966,7 @@ export const BankSoalView: React.FC = () => {
                             {q.branchName || q.branchAndLevel}
                           </p>
                           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span className="text-[10px] text-emerald-800 font-mono font-semibold">
+                            <span className="text-xs text-emerald-800 font-mono font-semibold">
                               {q.stageName}
                             </span>
                           </div>
@@ -974,16 +974,16 @@ export const BankSoalView: React.FC = () => {
                         <td className="px-4 py-3.5">
                           <div className="flex flex-wrap items-center gap-1.5">
                             {q.status === 'Perlu Verifikasi' && (
-                              <span className="inline-block bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-[11px] font-semibold">
+                              <span className="inline-block bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-xs font-semibold">
                                 Perlu Verifikasi
                               </span>
                             )}
                             {assignedParts.length > 0 ? (
-                              <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
+                              <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">
                                 Sudah ({assignedParts.length})
                               </span>
                             ) : (
-                              <span className="inline-block bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                              <span className="inline-block bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full text-xs font-medium">
                                 Belum Ditetapkan
                               </span>
                             )}
@@ -1041,7 +1041,7 @@ export const BankSoalView: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[760px]">
               <thead>
-                <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider">
+                <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-xs font-bold uppercase tracking-wider">
                   <th className="px-5 py-3 w-20">Undian</th>
                   <th className="px-5 py-3 min-w-[200px]">Nama Santri</th>
                   <th className="px-4 py-3 w-32">Kode Maqra</th>
@@ -1065,7 +1065,7 @@ export const BankSoalView: React.FC = () => {
                       </td>
                       <td className="px-5 py-3.5">
                         <p className="font-bold text-slate-900">{row.participantName}</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
+                        <p className="text-xs text-slate-500 mt-0.5">
                           {row.kafilahName} · <span className="text-slate-600 font-medium">{row.branchName}</span>
                         </p>
                       </td>
@@ -1078,17 +1078,17 @@ export const BankSoalView: React.FC = () => {
                         <p className="font-semibold text-slate-900">{row.questionTitle}</p>
                         <div className="flex items-center gap-2 mt-0.5">
                           {row.surahDisplay && (
-                            <span className="text-[11px] text-slate-500 font-medium">
+                            <span className="text-xs text-slate-500 font-medium">
                               {row.surahDisplay}
                             </span>
                           )}
-                          <span className="text-[11px] font-mono text-emerald-700 bg-slate-100 px-1.5 py-0.2 rounded">
+                          <span className="text-xs font-mono text-emerald-700 bg-slate-100 px-1.5 py-0.2 rounded">
                             {row.pageDisplay}
                           </span>
                         </div>
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="inline-block bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[11px] font-medium">
+                        <span className="inline-block bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs font-medium">
                           {row.stageName}
                         </span>
                       </td>
@@ -1182,7 +1182,7 @@ export const BankSoalView: React.FC = () => {
                           {log.levelName}
                         </span>
                       )}
-                      <span className="text-[11px] text-slate-500">
+                      <span className="text-xs text-slate-500">
                         · {log.participantIds.length} Peserta · Mode:{' '}
                         <strong>
                           {log.drawMode === 'lottery_number'
@@ -1194,7 +1194,7 @@ export const BankSoalView: React.FC = () => {
                       </span>
                       {log.seedSha256 && (
                         <span
-                          className="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded truncate max-w-[200px]"
+                          className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded truncate max-w-[200px]"
                           title={`SHA-256 Seed: ${log.seedSha256}`}
                         >
                           SHA: {log.seedSha256.slice(0, 12)}...
@@ -1202,7 +1202,7 @@ export const BankSoalView: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="text-[11px] text-slate-500 font-mono">
+                    <div className="text-xs text-slate-500 font-mono">
                       Oleh <span className="font-semibold text-slate-800">{log.actorName}</span> ·{' '}
                       {formatDateTimeWIB(log.createdAt)}
                     </div>
@@ -1212,7 +1212,7 @@ export const BankSoalView: React.FC = () => {
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse text-xs">
                       <thead>
-                        <tr className="border-b border-slate-100 text-slate-500 bg-white text-[11px] font-semibold">
+                        <tr className="border-b border-slate-100 text-slate-500 bg-white text-xs font-semibold">
                           <th className="px-5 py-2.5 w-14">No</th>
                           <th className="px-5 py-2.5">Nama Peserta</th>
                           <th className="px-5 py-2.5">Kode Maqra Ditugaskan</th>
@@ -1235,7 +1235,7 @@ export const BankSoalView: React.FC = () => {
                                 {r.assignedQuestionCodes.map((qt, qi) => (
                                   <span
                                     key={qi}
-                                    className="text-[11px] font-mono font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-2 py-0.5 rounded"
+                                    className="text-xs font-mono font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-2 py-0.5 rounded"
                                   >
                                     {qt}
                                   </span>
@@ -1287,7 +1287,7 @@ export const BankSoalView: React.FC = () => {
                 const pageSummary = getPageVerseRangeSummary(pageNum);
                 return (
                   <div key={pageNum} className="w-full p-0 m-0 bg-white border-b border-slate-100 last:border-b-0">
-                    <div className="px-4 py-1.5 bg-slate-50/90 border-b border-slate-200/70 flex items-center justify-between text-[11px] font-mono text-slate-600">
+                    <div className="px-4 py-1.5 bg-slate-50/90 border-b border-slate-200/70 flex items-center justify-between text-xs font-mono text-slate-600">
                       <span className="font-semibold text-emerald-800">
                         Mushaf Madinah Hal. {pageNum}
                       </span>
@@ -1341,7 +1341,7 @@ export const BankSoalView: React.FC = () => {
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs space-y-2">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="font-extrabold text-slate-900 text-sm">{manualAssignQuestion.title}</span>
-                <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+                <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
                   <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold border border-emerald-200">
                     Babak: {manualAssignQuestion.stageName}
                   </span>
@@ -1391,7 +1391,7 @@ export const BankSoalView: React.FC = () => {
                             #{p.lotteryNumber}
                           </span>
                           <span className="font-semibold text-slate-800">{p.name}</span>
-                          <span className="text-[10px] text-slate-500 ml-1.5">
+                          <span className="text-xs text-slate-500 ml-1.5">
                             ({p.kafilahName} · Babak {p.stageName})
                           </span>
                         </div>
@@ -1593,7 +1593,7 @@ export const BankSoalView: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleToggleSelectAllParticipants}
-                    className="text-[11px] font-semibold text-emerald-800 hover:underline"
+                    className="text-xs font-semibold text-emerald-800 hover:underline"
                   >
                     {selectedParticipantIds.length === eligibleLotteryParticipants.length
                       ? 'Batalkan Semua'
@@ -1629,7 +1629,7 @@ export const BankSoalView: React.FC = () => {
                                 #{p.lotteryNumber}
                               </span>
                               <span className="font-semibold text-slate-800">{p.name}</span>
-                              <span className="text-[10px] text-slate-400 block">
+                              <span className="text-xs text-slate-400 block">
                                 {p.branchName} · {p.levelName || 'Umum'}
                               </span>
                             </div>
@@ -1650,7 +1650,7 @@ export const BankSoalView: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleToggleSelectAllQuestions}
-                    className="text-[11px] font-semibold text-emerald-800 hover:underline"
+                    className="text-xs font-semibold text-emerald-800 hover:underline"
                   >
                     {selectedQuestionPoolIds.length === eligibleLotteryQuestions.length
                       ? 'Batalkan Semua'
@@ -1691,7 +1691,7 @@ export const BankSoalView: React.FC = () => {
                               <span className="font-semibold text-slate-800 truncate">
                                 {q.title}
                               </span>
-                              <span className="text-[10px] text-slate-400 block">
+                              <span className="text-xs text-slate-400 block">
                                 Hal. {q.pageStart || q.pageNumber} · {q.branchName || q.branchAndLevel}
                               </span>
                             </div>
@@ -1739,7 +1739,7 @@ export const BankSoalView: React.FC = () => {
                     <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
                     Hasil Pratinjau Undian ({lotteryDrawResults.length} Peserta)
                   </h4>
-                  <span className="text-[10px] font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                  <span className="text-xs font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
                     Siap Diterapkan
                   </span>
                 </div>
@@ -1755,7 +1755,7 @@ export const BankSoalView: React.FC = () => {
                         {res.questionTitles.map((t, i) => (
                           <span
                             key={i}
-                            className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-medium"
+                            className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-xs font-medium"
                           >
                             {t}
                           </span>
@@ -1807,7 +1807,7 @@ export const BankSoalView: React.FC = () => {
 
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
                   Kode Soal *
                 </label>
                 <input
@@ -1821,7 +1821,7 @@ export const BankSoalView: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
                   Hal. Awal (1-604) {allowManualPageOverride ? '*' : '(Otomatis)'}
                 </label>
                 <input
@@ -1843,7 +1843,7 @@ export const BankSoalView: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
                   Hal. Akhir (1-604) {allowManualPageOverride ? '*' : '(Otomatis)'}
                 </label>
                 <input
@@ -1861,7 +1861,7 @@ export const BankSoalView: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[11px]">
+            <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-xs">
               <label className="flex items-center gap-2 text-slate-700 font-medium cursor-pointer">
                 <input
                   type="checkbox"
@@ -1896,7 +1896,7 @@ export const BankSoalView: React.FC = () => {
             )}
 
             <div>
-              <label className="text-[11px] font-bold text-slate-600 block mb-1">
+              <label className="text-xs font-bold text-slate-600 block mb-1">
                 Judul Maqra *
               </label>
               <input
@@ -1911,7 +1911,7 @@ export const BankSoalView: React.FC = () => {
 
             <div className="grid grid-cols-4 gap-3">
               <div className="col-span-2">
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
                   Surah (1–114) *
                 </label>
                 <select
@@ -1940,7 +1940,7 @@ export const BankSoalView: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
                   Ayat Awal (1–{selectedSurahInfo.verseCount}) *
                 </label>
                 <input
@@ -1960,7 +1960,7 @@ export const BankSoalView: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
                   Ayat Akhir (1–{selectedSurahInfo.verseCount}) *
                 </label>
                 <input
@@ -1981,7 +1981,7 @@ export const BankSoalView: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
                   Cabang Lomba (Master Data) *
                 </label>
                 <select
@@ -2003,7 +2003,7 @@ export const BankSoalView: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
                   Babak (Master Data) *
                 </label>
                 <select
@@ -2026,7 +2026,7 @@ export const BankSoalView: React.FC = () => {
             </div>
 
             <div>
-              <label className="text-[11px] font-bold text-slate-600 block mb-1">
+              <label className="text-xs font-bold text-slate-600 block mb-1">
                 Catatan / Keterangan Maqam
               </label>
               <textarea
@@ -2099,7 +2099,7 @@ export const BankSoalView: React.FC = () => {
                   <p className="text-xs font-bold text-slate-900">
                     {importFileName || 'Pilih file Excel (.xlsx / .xls) sesuai Template Bank Soal'}
                   </p>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-xs text-slate-500">
                     Pastikan nama Cabang, Jenjang, dan Babak sesuai dengan sheet Referensi Master Data.
                   </p>
                 </div>
@@ -2163,7 +2163,7 @@ export const BankSoalView: React.FC = () => {
                       Pratinjau Soal Valid ({importValidation.validRows.length})
                     </div>
                     <div className="max-h-48 overflow-y-auto">
-                      <table className="w-full text-left text-[11px]">
+                      <table className="w-full text-left text-xs">
                         <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
                           <tr>
                             <th className="py-1.5 px-3">Kode</th>

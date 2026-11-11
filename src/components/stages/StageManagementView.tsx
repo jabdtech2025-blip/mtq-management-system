@@ -37,7 +37,7 @@ export const StageManagementView: React.FC = () => {
   // Form states
   const [formName, setFormName] = useState('');
   const [formOrder, setFormOrder] = useState<number>(stages.length + 1);
-  const [formBranch, setFormBranch] = useState(cabangList[0]?.name || 'Tilawah Dewasa Putra');
+  const [formBranch, setFormBranch] = useState(cabangList[0]?.name || '');
   const [formQuota, setFormQuota] = useState<number>(3);
   const [formChampionCount, setFormChampionCount] = useState<number>(3);
   const [formStatus, setFormStatus] = useState<'Menunggu' | 'Aktif' | 'Selesai'>('Menunggu');
@@ -46,7 +46,7 @@ export const StageManagementView: React.FC = () => {
     setEditingStage(null);
     setFormName('');
     setFormOrder(stages.length + 1);
-    setFormBranch(cabangList[0]?.name || 'Tilawah Dewasa Putra');
+    setFormBranch(cabangList[0]?.name || '');
     setFormQuota(3);
     setFormChampionCount(3);
     setFormStatus('Menunggu');
@@ -190,7 +190,7 @@ export const StageManagementView: React.FC = () => {
                       TAHAP 0{stg.order}
                     </span>
                     <span
-                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                      className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                         stg.status === 'Aktif'
                           ? 'bg-emerald-100 text-emerald-800'
                           : stg.status === 'Selesai'

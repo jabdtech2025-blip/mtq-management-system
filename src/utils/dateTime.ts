@@ -42,3 +42,12 @@ export function formatDateTimeWIB(input: string | Date | null | undefined): stri
     return date.toLocaleString('id-ID') + ' WIB';
   }
 }
+
+/**
+ * Menampilkan stempel waktu apa pun secara aman: string ISO dari database diformat ke WIB,
+ * sedangkan teks yang sudah terformat (mis. hasil getWibTime) ditampilkan apa adanya.
+ */
+export function formatTimestampDisplay(value: string | null | undefined): string {
+  if (!value) return '-';
+  return /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(value.trim()) ? formatDateTimeWIB(value.trim().replace(' ', 'T')) : value;
+}

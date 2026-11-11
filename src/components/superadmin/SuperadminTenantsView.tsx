@@ -138,7 +138,7 @@ export const SuperadminTenantsView: React.FC = () => {
             <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
               Manajemen Penyelenggara MTQ (Tenants)
             </h1>
-            <span className="text-[11px] font-semibold text-purple-800 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+            <span className="text-xs font-semibold text-purple-800 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
               Superadmin Platform
             </span>
           </div>
@@ -193,7 +193,7 @@ export const SuperadminTenantsView: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[760px] text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
                 <th className="px-5 py-3 w-28">Kode</th>
                 <th className="px-5 py-3">Nama Penyelenggara MTQ</th>
                 <th className="px-4 py-3">Wilayah & Periode</th>
@@ -209,17 +209,17 @@ export const SuperadminTenantsView: React.FC = () => {
                   </td>
                   <td className="px-5 py-3.5">
                     <p className="font-bold text-slate-900">{t.name}</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">{t.eventName}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{t.eventName}</p>
                   </td>
                   <td className="px-4 py-3.5">
                     <p className="font-semibold text-slate-800">{t.region}</p>
-                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                    <p className="text-xs text-slate-500 font-mono mt-0.5">
                       {t.edition} · {t.period}
                     </p>
                   </td>
                   <td className="px-4 py-3.5">
                     <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
                         t.status === 'Aktif'
                           ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                           : 'bg-slate-100 text-slate-500'

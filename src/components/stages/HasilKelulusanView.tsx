@@ -17,6 +17,7 @@ import {
 import { useMtq } from '../../context/MtqContext';
 import { Participant } from '../../types/mtq';
 import { RankingService } from '../../services/rankingService';
+import { supabaseDataService } from '../../services/supabaseDataService';
 
 export const HasilKelulusanView: React.FC = () => {
   const {
@@ -41,9 +42,12 @@ export const HasilKelulusanView: React.FC = () => {
   // Sinkronisasi langsung dari database setiap kali halaman Hasil & Kelulusan dibuka
   useEffect(() => {
     void refreshSupabaseConnection();
+    // Sinkron berkala 15 detik (sebelumnya 3 detik memuat ulang seluruh workspace) dan hanya saat tab terlihat
     const interval = setInterval(() => {
-      void refreshSupabaseConnection();
-    }, 3000);
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        void refreshSupabaseConnection();
+      }
+    }, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -137,6 +141,16 @@ export const HasilKelulusanView: React.FC = () => {
     });
     return ['Semua Cabang', ...Array.from(branchSet)];
   }, [currentStageParticipations, participants, tenantStages, currentTenant.id, selectedStageName]);
+
+  // Default ke cabang pertama agar pengesahan (yang wajib per cabang) langsung dapat dilakukan
+  useEffect(() => {
+    if (!branchOptions.includes(selectedBranch)) {
+      setSelectedBranch(branchOptions[1] || 'Semua Cabang');
+    } else if (selectedBranch === 'Semua Cabang' && branchOptions.length > 2) {
+      setSelectedBranch(branchOptions[1]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchOptions.join('|')]);
 
   // Effective branch when only 1 active branch exists or specific branch is selected
   const effectiveBranchName = useMemo(() => {
@@ -349,6 +363,141 @@ export const HasilKelulusanView: React.FC = () => {
 
   const rankedParticipants = evaluatedParticipants;
 
+  // ===========================================================================
+  // Peringkat resmi dari server (compute_stage_rankings) & resolusi seri pleno.
+  // Server adalah sumber kebenaran: seri penuh pada batas kuota / podium juara
+  // wajib diputuskan admin (urutan + alasan) dan dikirim sebagai p_tie_resolution.
+  // ===========================================================================
+  type ServerRankRow = {
+    participantId: string;
+    rank: number | null;
+    displayOrder: number;
+    isTied: boolean;
+    score: number | null;
+  };
+  const isLiveRanking = supabaseDataService.isLive();
+  const [serverRankings, setServerRankings] = useState<ServerRankRow[] | null>(null);
+  const [serverRankingError, setServerRankingError] = useState('');
+  const finalizedAssessmentKey = useMemo(
+    () =>
+      `${assessments.filter((a) => a.status === 'finalized').length}:${stageParticipations.length}`,
+    [assessments, stageParticipations]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isLiveRanking || !currentStage?.id || !effectiveBranchName || currentStage.isFinalized) {
+      setServerRankings(null);
+      setServerRankingError('');
+      return;
+    }
+    void supabaseDataService.computeStageRankingsRpc(currentStage.id).then((res) => {
+      if (cancelled) return;
+      if (!res.success) {
+        setServerRankings(null);
+        setServerRankingError(res.message);
+        return;
+      }
+      const raw = (res.data as { rankings?: Array<Record<string, unknown>> } | null)?.rankings;
+      setServerRankings(
+        Array.isArray(raw)
+          ? raw.map((r) => ({
+              participantId: String(r.participant_id),
+              rank: r.rank === null || r.rank === undefined ? null : Number(r.rank),
+              displayOrder: Number(r.display_order),
+              isTied: Boolean(r.is_tied),
+              score:
+                r.computed_score === null || r.computed_score === undefined ? null : Number(r.computed_score)
+            }))
+          : []
+      );
+      setServerRankingError('');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLiveRanking, currentStage?.id, currentStage?.isFinalized, effectiveBranchName, finalizedAssessmentKey]);
+
+  const serverRankMap = useMemo(() => {
+    const map = new Map<string, ServerRankRow>();
+    (serverRankings || []).forEach((r) => map.set(r.participantId, r));
+    return map;
+  }, [serverRankings]);
+
+  const championCount = currentStage?.championCount || 3;
+
+  const criticalTieGroups = useMemo(() => {
+    if (!serverRankings) return [];
+    const groups = new Map<number, ServerRankRow[]>();
+    serverRankings
+      .filter((r) => r.isTied && r.rank !== null)
+      .forEach((r) => {
+        const list = groups.get(r.rank as number) || [];
+        list.push(r);
+        groups.set(r.rank as number, list);
+      });
+    return Array.from(groups.entries())
+      .map(([rank, rows]) => {
+        const sorted = rows.slice().sort((a, b) => a.displayOrder - b.displayOrder);
+        return {
+          rank,
+          rows: sorted,
+          minOrder: sorted[0].displayOrder,
+          maxOrder: sorted[sorted.length - 1].displayOrder
+        };
+      })
+      .filter((g) => (nextStage ? g.minOrder <= quota && g.maxOrder > quota : g.rank <= championCount))
+      .sort((a, b) => a.rank - b.rank);
+  }, [serverRankings, nextStage, quota, championCount]);
+
+  const [tieOrder, setTieOrder] = useState<Record<string, number>>({});
+  const [tieReasons, setTieReasons] = useState<Record<number, string>>({});
+  const [appliedTieGroups, setAppliedTieGroups] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    setTieOrder({});
+    setTieReasons({});
+    setAppliedTieGroups({});
+  }, [currentStage?.id]);
+
+  const isTieGroupValid = (group: { rank: number; rows: ServerRankRow[] }) => {
+    const positions = group.rows.map((r) => tieOrder[r.participantId]);
+    const allSet = positions.every((pos) => Number.isInteger(pos) && pos >= 1 && pos <= group.rows.length);
+    const distinct = new Set(positions).size === group.rows.length;
+    return allSet && distinct && (tieReasons[group.rank] || '').trim().length >= 5;
+  };
+
+  const unresolvedCriticalTies = criticalTieGroups.filter((g) => !appliedTieGroups[g.rank]);
+
+  const handleApplyTieResolution = (group: { rank: number; rows: ServerRankRow[]; minOrder: number }) => {
+    if (!isTieGroupValid(group)) return;
+    const reason = `Keputusan pleno seri peringkat #${group.rank}: ${(tieReasons[group.rank] || '').trim()}`;
+    const winnersInGroup = nextStage ? Math.max(0, quota - (group.minOrder - 1)) : 0;
+    const nextOverrides: Record<string, boolean> = {};
+    const nextReasons: Record<string, string> = {};
+    group.rows.forEach((r) => {
+      const position = tieOrder[r.participantId];
+      const evaluated = evaluatedParticipants.find((e) => e.participant.id === r.participantId);
+      nextOverrides[r.participantId] = nextStage ? position <= winnersInGroup : Boolean(evaluated?.isQualified);
+      nextReasons[r.participantId] = reason;
+    });
+    setManualOverrides((prev) => ({ ...prev, ...nextOverrides }));
+    setOverrideReasons((prev) => ({ ...prev, ...nextReasons }));
+    setAppliedTieGroups((prev) => ({ ...prev, [group.rank]: true }));
+  };
+
+  const buildTieResolutionPayload = (): Record<string, number> => {
+    const payload: Record<string, number> = {};
+    criticalTieGroups
+      .filter((g) => appliedTieGroups[g.rank])
+      .forEach((g) => {
+        g.rows.forEach((r) => {
+          payload[r.participantId] = tieOrder[r.participantId];
+        });
+      });
+    return payload;
+  };
+
   // Stage overall progress status
   const stageStatusBadge = useMemo(() => {
     if (currentStage?.isFinalized) {
@@ -441,7 +590,8 @@ export const HasilKelulusanView: React.FC = () => {
       branchName: effectiveBranchName || currentStage?.branchName,
       qualifiedParticipantIds: qualifiedIds,
       manualOverrides,
-      overrideReasons
+      overrideReasons,
+      tieResolution: buildTieResolutionPayload()
     });
 
     setIsConfirmAdvancementOpen(false);
@@ -566,7 +716,7 @@ export const HasilKelulusanView: React.FC = () => {
             </span>
             <span className="text-xs text-slate-500">Peserta Lengkap</span>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 mt-1">
             {allAssessmentsFinalized ? (
               <span className="text-slate-500">Seluruh penilaian dewan juri lengkap</span>
             ) : blockingReasonDetail?.code === 'NO_JUDGES' ? (
@@ -595,7 +745,7 @@ export const HasilKelulusanView: React.FC = () => {
             </span>
             <span className="text-xs text-slate-500">Peserta Terbaik</span>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 mt-1">
             Target melaju ke: <strong className="text-slate-700">{nextStage ? `Babak ${nextStage.name}` : 'Juara Akhir'}</strong>
           </p>
         </div>
@@ -612,7 +762,7 @@ export const HasilKelulusanView: React.FC = () => {
             </span>
             <span className="text-xs text-slate-500">Peserta Terpilih</span>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 mt-1">
             {Object.keys(manualOverrides).length > 0
               ? `${Object.keys(manualOverrides).length} peserta disesuaikan (override)`
               : allAssessmentsFinalized
@@ -712,7 +862,7 @@ export const HasilKelulusanView: React.FC = () => {
                     <span className="font-bold text-xs uppercase tracking-wider text-amber-300">{displayTitle}</span>
                     <div className="font-extrabold text-base text-white">{item.name}</div>
                     <div className="text-xs text-emerald-200">{item.kafilahName}</div>
-                    <div className="text-[11px] font-mono text-emerald-300">
+                    <div className="text-xs font-mono text-emerald-300">
                       Undian #{item.lotteryNumber} · {item.participantCode}
                     </div>
                     <div className="mt-2 px-3 py-1 rounded-lg bg-emerald-950/80 border border-emerald-600/50 text-sm font-black font-mono text-amber-300">
@@ -734,7 +884,7 @@ export const HasilKelulusanView: React.FC = () => {
               <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
                 Isolasi Ranking Per Cabang Lomba ({branchGroups.length} Cabang Aktif)
               </h3>
-              <p className="text-[11px] text-slate-600 mt-0.5">
+              <p className="text-xs text-slate-600 mt-0.5">
                 Setiap cabang dievaluasi terpisah dengan dewan hakim, rubrik, aturan tie-break, dan kuota kelulusan masing-masing. Pilih cabang spesifik untuk melakukan pengesahan babak.
               </p>
             </div>
@@ -748,11 +898,11 @@ export const HasilKelulusanView: React.FC = () => {
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-extrabold text-xs text-slate-900 truncate">{grp.branchName}</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
                       Kuota Top {grp.quota}
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-1">
+                  <p className="text-xs text-slate-500 mt-1">
                     {grp.evaluation.evaluatedParticipants.filter((p) => p.isFullyFinalized).length} /{' '}
                     {grp.evaluation.evaluatedParticipants.length} Peserta Lengkap ·{' '}
                     {grp.evaluation.evaluatedParticipants.filter((p) => p.isQualified).length} Calon Lolos
@@ -761,7 +911,7 @@ export const HasilKelulusanView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedBranch(grp.branchName)}
-                  className="w-full py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-[11px] transition-colors cursor-pointer text-center"
+                  className="w-full py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-xs transition-colors cursor-pointer text-center"
                 >
                   Pilih & Kelola Cabang Ini →
                 </button>
@@ -792,7 +942,8 @@ export const HasilKelulusanView: React.FC = () => {
               </div>
             ) : (() => {
               const isMultiBranchBlocked = selectedBranch === 'Semua Cabang' && branchOptions.length > 2;
-              const isButtonDisabled = !allAssessmentsFinalized || !canFinalize || isMultiBranchBlocked;
+              const isButtonDisabled =
+                !allAssessmentsFinalized || !canFinalize || isMultiBranchBlocked || unresolvedCriticalTies.length > 0;
               const buttonLabel = nextStage
                 ? `Konfirmasi & Loloskan ke Babak ${nextStage.name}`
                 : 'Sahkan Juara & Selesaikan Musabaqah';
@@ -800,6 +951,8 @@ export const HasilKelulusanView: React.FC = () => {
                 ? 'Pilih cabang spesifik pada dropdown sebelum pengesahan'
                 : !allAssessmentsFinalized
                 ? blockingReasonDetail?.message || blockingReason || `Belum dapat disahkan (${incompleteCount} peserta belum lengkap)`
+                : unresolvedCriticalTies.length > 0
+                ? `Terdapat ${unresolvedCriticalTies.length} kelompok nilai seri yang wajib diputuskan sidang pleno (lihat panel di atas tabel).`
                 : !canFinalize
                 ? blockingReason || 'Selesaikan nilai seri atau kelengkapan juri terlebih dahulu'
                 : undefined;
@@ -827,7 +980,7 @@ export const HasilKelulusanView: React.FC = () => {
                   </button>
                   {helperReason && (
                     <span
-                      className={`text-[10px] font-medium max-w-[300px] text-right ${
+                      className={`text-xs font-medium max-w-[300px] text-right ${
                         !allAssessmentsFinalized || isMultiBranchBlocked ? 'text-amber-700' : 'text-rose-700'
                       }`}
                     >
@@ -840,10 +993,111 @@ export const HasilKelulusanView: React.FC = () => {
           </div>
         </div>
 
+        {!currentStage?.isFinalized && effectiveBranchName && (
+          <div className="px-5 py-2 border-b border-slate-100 text-xs text-slate-600">
+            {serverRankings
+              ? 'Peringkat dihitung resmi oleh server (sumber kebenaran pengesahan).'
+              : isLiveRanking
+              ? `Peringkat server belum tersedia${serverRankingError ? `: ${serverRankingError}` : ''}. Tampilan di bawah adalah perkiraan.`
+              : 'Mode demo: peringkat di bawah adalah perkiraan yang dihitung di perangkat ini.'}
+          </div>
+        )}
+
+        {!currentStage?.isFinalized && criticalTieGroups.length > 0 && (
+          <div className="m-4 rounded-xl border border-rose-300 bg-rose-50 p-4 space-y-4">
+            <div>
+              <h4 className="text-sm font-extrabold text-rose-900">Keputusan Sidang Pleno: Nilai Seri</h4>
+              <p className="text-xs text-rose-800 mt-1">
+                Peserta berikut memiliki nilai identik pada seluruh kriteria tie-break
+                {nextStage ? ' di batas kuota kelulusan' : ' di posisi juara'}. Tentukan urutan hasil keputusan
+                pleno dan tuliskan alasannya (minimal 5 karakter). Keputusan dicatat di log audit server.
+              </p>
+            </div>
+            {criticalTieGroups.map((group) => {
+              const valid = isTieGroupValid(group);
+              const applied = Boolean(appliedTieGroups[group.rank]);
+              return (
+                <div key={group.rank} className="rounded-lg border border-rose-200 bg-white p-3 space-y-3">
+                  <p className="text-xs font-bold text-slate-800">
+                    Seri pada peringkat #{group.rank} ({group.rows.length} peserta, nilai{' '}
+                    {group.rows[0]?.score !== null && group.rows[0]?.score !== undefined
+                      ? group.rows[0].score.toFixed(2)
+                      : '—'}
+                    )
+                  </p>
+                  <div className="space-y-2">
+                    {group.rows.map((r) => {
+                      const part = participants.find((pp) => pp.id === r.participantId);
+                      return (
+                        <label key={r.participantId} className="flex items-center justify-between gap-3 text-sm">
+                          <span className="text-slate-800">
+                            #{part?.lotteryNumber || '-'} {part?.name || r.participantId}
+                          </span>
+                          <select
+                            value={tieOrder[r.participantId] ?? ''}
+                            disabled={applied}
+                            onChange={(e) =>
+                              setTieOrder((prev) => ({ ...prev, [r.participantId]: Number(e.target.value) }))
+                            }
+                            aria-label={`Urutan keputusan pleno untuk ${part?.name || r.participantId}`}
+                            className="px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white"
+                          >
+                            <option value="">Pilih urutan</option>
+                            {group.rows.map((_, i) => (
+                              <option key={i + 1} value={i + 1}>
+                                Urutan {i + 1} (peringkat #{group.rank + i})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <textarea
+                    value={tieReasons[group.rank] || ''}
+                    disabled={applied}
+                    onChange={(e) => setTieReasons((prev) => ({ ...prev, [group.rank]: e.target.value }))}
+                    placeholder="Alasan / dasar keputusan sidang pleno (mis. hasil penampilan ulang)"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    rows={2}
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    {applied ? (
+                      <>
+                        <span className="text-xs font-bold text-emerald-700">Keputusan diterapkan</span>
+                        <button
+                          type="button"
+                          onClick={() => setAppliedTieGroups((prev) => ({ ...prev, [group.rank]: false }))}
+                          className="text-xs font-bold text-slate-600 underline"
+                        >
+                          Ubah
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!valid}
+                        onClick={() => handleApplyTieResolution(group)}
+                        className={
+                          valid
+                            ? 'px-3 py-1.5 rounded-lg bg-rose-700 text-white text-xs font-bold'
+                            : 'px-3 py-1.5 rounded-lg bg-slate-200 text-slate-400 text-xs font-bold cursor-not-allowed'
+                        }
+                      >
+                        Terapkan Keputusan Pleno
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[760px] text-xs">
             <thead>
-              <tr className="bg-slate-100/80 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+              <tr className="bg-slate-100/80 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
                 <th className="px-5 py-3 w-16 text-center">Rank</th>
                 <th className="px-4 py-3 w-20">Undian</th>
                 <th className="px-5 py-3">Nama Peserta & Grup</th>
@@ -871,7 +1125,12 @@ export const HasilKelulusanView: React.FC = () => {
                     >
                       {/* Rank */}
                       <td className="px-5 py-3.5 text-center font-mono font-bold text-xs text-slate-700">
-                        {item.isFullyFinalized ? `#${item.rank}` : '—'}
+                        {item.isFullyFinalized
+                          ? `#${serverRankMap.get(p.id)?.rank ?? item.rank}`
+                          : '—'}
+                        {serverRankMap.get(p.id)?.isTied && (
+                          <span className="block text-xs font-bold text-rose-700">Seri</span>
+                        )}
                       </td>
 
                       {/* Lottery */}
@@ -888,28 +1147,28 @@ export const HasilKelulusanView: React.FC = () => {
                               setSelectedParticipantId(p.id);
                               setCurrentView('penilaian_dual_panel');
                             }}
-                            className="text-[10px] text-slate-500 hover:text-slate-900 hover:underline font-medium cursor-pointer"
+                            className="text-xs text-slate-500 hover:text-slate-900 hover:underline font-medium cursor-pointer"
                             title="Buka Lembar Penilaian Peserta Ini"
                           >
                             [Buka]
                           </button>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
+                        <p className="text-xs text-slate-500 mt-0.5">
                           {p.participantId} · {p.kafilahName}
                         </p>
                         {item.tieBreakResolvedBy && (
-                          <p className="text-[10px] text-indigo-700 font-semibold mt-0.5 flex items-center gap-1">
+                          <p className="text-xs text-indigo-700 font-semibold mt-0.5 flex items-center gap-1">
                             <span>⚖️</span>
                             <span>{item.tieBreakResolvedBy}</span>
                           </p>
                         )}
                         {item.hasUnresolvedTieWithNext && (
-                          <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">
+                          <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-xs font-bold">
                             ⚠️ Nilai Seri Identik
                           </span>
                         )}
                         {item.isOverridden && (
-                          <p className="text-[10px] text-slate-500 mt-0.5 italic">
+                          <p className="text-xs text-slate-500 mt-0.5 italic">
                             Catatan Override: {item.overrideReason}
                           </p>
                         )}
@@ -922,7 +1181,7 @@ export const HasilKelulusanView: React.FC = () => {
                             <span className="font-extrabold text-sm text-slate-900">
                               {item.averageFinalScore.toFixed(2)}
                             </span>
-                            <span className="block text-[9px] font-medium text-slate-500">Resmi</span>
+                            <span className="block text-xs font-medium text-slate-500">Resmi</span>
                           </div>
                         ) : (
                           <div>
@@ -931,7 +1190,7 @@ export const HasilKelulusanView: React.FC = () => {
                                 ? item.provisionalScore.toFixed(2)
                                 : '—'}
                             </span>
-                            <span className="block text-[9px] font-medium text-slate-400">
+                            <span className="block text-xs font-medium text-slate-400">
                               (Sementara)
                             </span>
                           </div>
@@ -940,7 +1199,7 @@ export const HasilKelulusanView: React.FC = () => {
 
                       {/* Completeness (Neutral text) */}
                       <td className="px-4 py-3.5 text-center">
-                        <span className="text-[11px] font-medium text-slate-600">
+                        <span className="text-xs font-medium text-slate-600">
                           {item.finalizedJudgeCount} / {item.totalAssignedJudges} Juri Final
                         </span>
                       </td>
@@ -949,24 +1208,24 @@ export const HasilKelulusanView: React.FC = () => {
                       <td className="px-4 py-3.5 text-center">
                         {item.isOverridden ? (
                           item.isQualified ? (
-                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-800 border border-slate-300">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 border border-slate-300">
                               Override (Lolos)
                             </span>
                           ) : (
-                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
                               Override (Gugur)
                             </span>
                           )
                         ) : !allAssessmentsFinalized ? (
-                          <span className="inline-block text-[11px] text-slate-400">
+                          <span className="inline-block text-xs text-slate-400">
                             Menunggu Penilaian
                           </span>
                         ) : item.isQualified ? (
-                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-900 border border-slate-200">
+                          <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-900 border border-slate-200">
                             Lolos
                           </span>
                         ) : (
-                          <span className="inline-block text-[11px] text-slate-500">
+                          <span className="inline-block text-xs text-slate-500">
                             Tidak Lolos
                           </span>
                         )}
@@ -1115,7 +1374,7 @@ export const HasilKelulusanView: React.FC = () => {
               ))}
             </div>
 
-            <p className="text-[11px] text-slate-500 leading-relaxed mb-5">
+            <p className="text-xs text-slate-500 leading-relaxed mb-5">
               {nextStage
                 ? `Peserta yang lolos akan memasuki Babak ${nextStage.name} dengan paket maqra dan lembar penilaian baru. Rekam jejak babak sebelumnya tetap tersimpan rapi.`
                 : 'Pengesahan ini bersifat final dan mengikat. Rekam jejak nilai, peringkat podium, dan riwayat seluruh babak akan dibekukan secara permanen.'}

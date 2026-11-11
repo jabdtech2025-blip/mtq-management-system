@@ -112,7 +112,7 @@ export const UserManagementView: React.FC = () => {
     setFormPassword('');
     setFormRole('judge');
     setFormField(activeRubricFields[0] || 'Bidang Tajwid');
-    setFormBranch(activeBranches[0]?.name || 'Tilawah Dewasa Putra');
+    setFormBranch(activeBranches[0]?.name || '');
     setFormStage('Penyisihan');
     setIsModalOpen(true);
   };
@@ -211,7 +211,7 @@ export const UserManagementView: React.FC = () => {
             <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
               Manajemen Pengguna & Dewan Hakim
             </h1>
-            <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+            <span className="text-xs font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
               {tenantUsers.length} Akun Terdaftar
             </span>
           </div>
@@ -282,7 +282,7 @@ export const UserManagementView: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[780px] text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
                 <th className="px-5 py-3">Nama Pengguna</th>
                 <th className="px-4 py-3">Username / Email</th>
                 <th className="px-4 py-3">Peran</th>
@@ -307,16 +307,16 @@ export const UserManagementView: React.FC = () => {
                       <td className="px-5 py-3.5">
                         <p className="font-bold text-slate-900">{u.name}</p>
                         {u.mimbarLocation && (
-                          <p className="text-[10px] text-slate-400 mt-0.5">{u.mimbarLocation}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{u.mimbarLocation}</p>
                         )}
                       </td>
                       <td className="px-4 py-3.5 font-mono text-slate-600">
                         <p>{u.username}</p>
-                        <p className="text-[10px] text-slate-400">{u.email || '-'}</p>
+                        <p className="text-xs text-slate-400">{u.email || '-'}</p>
                       </td>
                       <td className="px-4 py-3.5">
                         <span
-                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                          className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${
                             u.role === 'superadmin'
                               ? 'bg-purple-100 text-purple-800'
                               : u.role === 'admin'
@@ -335,7 +335,7 @@ export const UserManagementView: React.FC = () => {
                         {u.role === 'judge' ? (
                           <div>
                             <p className="font-semibold text-slate-800">{u.judgeField}</p>
-                            <p className="text-[10px] text-slate-500">
+                            <p className="text-xs text-slate-500">
                               {u.assignedBranch || 'Tilawah Dewasa'} ({u.assignedStage || 'Penyisihan'})
                             </p>
                           </div>
@@ -346,7 +346,7 @@ export const UserManagementView: React.FC = () => {
                       <td className="px-4 py-3.5">
                         <div className="space-y-1">
                           <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
                               provStatus === 'Aktif'
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                 : provStatus === 'Menunggu Verifikasi' || provStatus === 'Mengundang...'
@@ -364,7 +364,7 @@ export const UserManagementView: React.FC = () => {
                             <span>{provStatus}</span>
                           </span>
                           {u.provisioningMessage && (
-                            <p className="text-[10px] text-slate-500 max-w-xs leading-snug">
+                            <p className="text-xs text-slate-500 max-w-xs leading-snug">
                               {u.provisioningMessage}
                             </p>
                           )}
@@ -374,7 +374,7 @@ export const UserManagementView: React.FC = () => {
                         {provStatus === 'Gagal / Perlu Tindakan Admin' && (
                           <button
                             onClick={() => handleRetryProvisioning(u.id)}
-                            className="px-2 py-1 text-[10px] font-bold bg-amber-100 text-amber-900 hover:bg-amber-200 rounded"
+                            className="px-2 py-1 text-xs font-bold bg-amber-100 text-amber-900 hover:bg-amber-200 rounded"
                             title="Coba Ulang Provisioning"
                           >
                             Coba Ulang
@@ -383,7 +383,7 @@ export const UserManagementView: React.FC = () => {
                         {u.email && isLiveSupabaseMode && (
                           <button
                             onClick={() => handleSendPasswordReset(u.email)}
-                            className="px-2 py-1 text-[10px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded"
+                            className="px-2 py-1 text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded"
                             title="Kirim Email Reset Kata Sandi"
                           >
                             Reset Sandi
@@ -534,7 +534,7 @@ export const UserManagementView: React.FC = () => {
                     placeholder="Isi kata sandi untuk langsung membuat akun login"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                   />
-                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                     Jika diisi, sistem akan langsung mendaftarkan akun di auth.users dan public.profiles dengan kata sandi ini tanpa mengeluarkan sesi aktif Anda.
                   </p>
                 </div>
@@ -542,7 +542,7 @@ export const UserManagementView: React.FC = () => {
 
               {formRole === 'judge' && (
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
-                  <p className="font-bold text-[11px] uppercase tracking-wider text-emerald-800">
+                  <p className="font-bold text-xs uppercase tracking-wider text-emerald-800">
                     Konfigurasi Penugasan Hakim
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

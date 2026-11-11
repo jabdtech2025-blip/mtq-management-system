@@ -19,12 +19,22 @@ export const PenilaianHakimListView: React.FC = () => {
     getParticipantStageQuestions,
     setSelectedParticipantId,
     setMonitoringJudgeId,
-    setCurrentView
+    setCurrentView,
+    cabangList
   } = useMtq();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Semua Status');
   const [branchFilter, setBranchFilter] = useState('Semua Cabang');
+
+  // Opsi cabang diambil dari master cabang tenant aktif (bukan daftar tetap/demo)
+  const tenantBranchNames = useMemo(() => {
+    const names = (cabangList || [])
+      .filter((c) => (!c.tenantId || c.tenantId === currentTenant.id) && c.status !== 'Nonaktif')
+      .map((c) => c.name)
+      .filter(Boolean);
+    return Array.from(new Set(names));
+  }, [cabangList, currentTenant.id]);
 
   // List of judges in current tenant for admin monitoring selection
   const tenantJudges = useMemo(() => {
@@ -172,10 +182,11 @@ export const PenilaianHakimListView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900">
-            {currentUser.role === 'judge' ? 'Daftar Penugasan Penilaian Peserta' : 'Mode Pemantauan Penilaian Dewan Hakim'}
+            {currentUser.role === 'judge' ? 'Daftar Penugasan Penilaian Peserta' : 'Monitoring Penilaian Dewan Hakim'}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Dewan Hakim: <span className="font-semibold text-slate-800">{activeJudge.name}</span> ·{' '}
+            {currentUser.role === 'judge' ? 'Dewan Hakim' : 'Menampilkan penugasan hakim'}:{' '}
+            <span className="font-semibold text-slate-800">{activeJudge.name}</span> ·{' '}
             {activeJudge.judgeField || 'Bidang Penilaian'} · {activeJudge.mimbarLocation || 'Mimbar Utama'}
           </p>
         </div>
@@ -271,8 +282,11 @@ export const PenilaianHakimListView: React.FC = () => {
             className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-800 bg-white outline-none"
           >
             <option value="Semua Cabang">Semua Cabang</option>
-            <option value="Tilawah Dewasa Putra">Tilawah Dewasa Putra</option>
-            <option value="Tilawah Dewasa Putri">Tilawah Dewasa Putri</option>
+            {tenantBranchNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -289,8 +303,8 @@ export const PenilaianHakimListView: React.FC = () => {
                 <th className="py-3.5 px-4">Grup</th>
                 <th className="py-3.5 px-4">Cabang & Babak</th>
                 <th className="py-3.5 px-4">Soal Maqra Ditugaskan</th>
-                <th className="py-3.5 px-4 text-center">Status Saya</th>
-                <th className="py-3.5 px-4 text-center">Nilai Saya</th>
+                <th className="py-3.5 px-4 text-center">{currentUser.role === 'judge' ? 'Status Saya' : 'Status Hakim'}</th>
+                <th className="py-3.5 px-4 text-center">{currentUser.role === 'judge' ? 'Nilai Saya' : 'Nilai Hakim'}</th>
                 <th className="py-3.5 px-4 text-center">Aksi Penilaian</th>
               </tr>
             </thead>
@@ -325,11 +339,11 @@ export const PenilaianHakimListView: React.FC = () => {
                     <td className="py-3.5 px-4 text-slate-600">{p.kafilahName}</td>
                     <td className="py-3.5 px-4">
                       <p className="font-medium text-slate-800">{p.branchName}</p>
-                      <p className="text-[11px] text-slate-400">{p.stageName}</p>
+                      <p className="text-xs text-slate-400">{p.stageName}</p>
                     </td>
                     <td className="py-3.5 px-4">
                       {p.totalQuestions === 0 ? (
-                        <span className="inline-block px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                        <span className="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                           Maqra Belum Ditetapkan
                         </span>
                       ) : (
@@ -339,7 +353,7 @@ export const PenilaianHakimListView: React.FC = () => {
                               <span className="font-semibold text-emerald-800">
                                 {q.code ? `${q.code}: ` : ''}{q.title}
                               </span>
-                              <span className="text-[10px] text-slate-400 font-mono">
+                              <span className="text-xs text-slate-400 font-mono">
                                 (Hal. {q.pageStart && q.pageEnd && q.pageStart !== q.pageEnd ? `${q.pageStart}-${q.pageEnd}` : q.pageNumber})
                               </span>
                             </div>
@@ -349,21 +363,21 @@ export const PenilaianHakimListView: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-4 text-center">
                       {p.judgeStatus === 'no_maqra' ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
                           Maqra Belum Ada
                         </span>
                       ) : isFinal ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                           <Lock className="w-3 h-3" />
                           Final ({p.finalizedCount}/{p.totalQuestions} Maqra)
                         </span>
                       ) : isInProgress ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
                           Berlangsung ({p.finalizedCount}/{p.totalQuestions} Maqra)
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
                           <Clock className="w-3 h-3 text-slate-400" />
                           Belum Dimulai (0/{p.totalQuestions} Maqra)
                         </span>

@@ -582,7 +582,7 @@ export const MasterDataView: React.FC = () => {
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
                 Daftar Kategori Kesalahan & Pemetaan Relasional ke Bidang Rubrik
               </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 Setiap kategori wajib terhubung ke bidang rubrik yang valid untuk memastikan potongan nilai terisolasi dan tidak salah potong.
               </p>
             </div>
@@ -605,7 +605,7 @@ export const MasterDataView: React.FC = () => {
 
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs">
                 <th className="px-5 py-3 w-16">Kode</th>
                 <th className="px-5 py-3">Nama Kategori & Cakupan Kesalahan</th>
                 <th className="px-4 py-3">Bidang Rubrik Terkait (P0)</th>
@@ -643,15 +643,15 @@ export const MasterDataView: React.FC = () => {
                     <td className="px-5 py-3.5 font-mono font-bold text-slate-900">{cat.code}</td>
                     <td className="px-5 py-3.5">
                       <p className="font-bold text-slate-900">{cat.name}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">{cat.scope}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{cat.scope}</p>
                     </td>
                     <td className="px-4 py-3.5">
                       {mappedField ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                           {mappedField.name}
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-800 border border-rose-200">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200">
                           ⚠️ Belum Dipetakan
                         </span>
                       )}
@@ -661,7 +661,7 @@ export const MasterDataView: React.FC = () => {
                     </td>
                     <td className="px-4 py-3.5 text-center">
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        className={`text-xs font-bold px-2 py-0.5 rounded-full ${
                           cat.status === 'Aktif' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
                         }`}
                       >
@@ -770,7 +770,7 @@ export const MasterDataView: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <h3 className="font-extrabold text-sm text-slate-900">{rubric.name}</h3>
                           <span
-                            className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                            className={`text-xs font-extrabold px-2 py-0.5 rounded-full ${
                               rubric.status === 'Aktif'
                                 ? 'bg-emerald-100 text-emerald-800'
                                 : rubric.status === 'Draft'
@@ -780,7 +780,7 @@ export const MasterDataView: React.FC = () => {
                           >
                             {rubric.status || 'Aktif'}
                           </span>
-                          <span className="text-[10px] font-mono text-slate-500 font-bold">
+                          <span className="text-xs font-mono text-slate-500 font-bold">
                             v{rubric.version}
                           </span>
                         </div>
@@ -856,7 +856,7 @@ export const MasterDataView: React.FC = () => {
                       {rubric.fields.length === 0 ? (
                         <div className="p-6 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-center text-xs text-slate-500">
                           <p className="font-bold text-slate-700">Belum Ada Bidang Penilaian</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
+                          <p className="text-xs text-slate-500 mt-0.5">
                             Rubrik ini belum memiliki bidang. Klik "+ Tambah Bidang" di atas untuk menambahkan bidang penilaian (misal Tajwid, Fashahah, Lagu, dll).
                           </p>
                         </div>
@@ -877,7 +877,7 @@ export const MasterDataView: React.FC = () => {
                                   }`}
                                 >
                                   <div className="flex items-center justify-between mb-1">
-                                    <span className="font-mono font-bold text-[10px] text-slate-500">
+                                    <span className="font-mono font-bold text-xs text-slate-500">
                                       #{fld.order} · {fld.code} {fld.weight && fld.weight !== 1 ? `(${fld.weight}x)` : ''}
                                     </span>
                                     <div className="flex items-center gap-1.5">
@@ -894,13 +894,13 @@ export const MasterDataView: React.FC = () => {
                                           setFieldDescription(fld.description || '');
                                           setIsEditFieldOpen(true);
                                         }}
-                                        className="text-[11px] font-bold text-emerald-800 hover:text-emerald-900 cursor-pointer"
+                                        className="text-xs font-bold text-emerald-800 hover:text-emerald-900 cursor-pointer"
                                       >
                                         Edit
                                       </button>
                                       <button
                                         onClick={() => handleToggleOrRemoveField(rubric, fld, 'toggle')}
-                                        className="text-[10px] font-semibold text-slate-500 hover:text-amber-700 cursor-pointer"
+                                        className="text-xs font-semibold text-slate-500 hover:text-amber-700 cursor-pointer"
                                         title={isInactive ? 'Aktifkan kembali bidang ini' : 'Nonaktifkan bidang ini'}
                                       >
                                         {isInactive ? 'Aktifkan' : 'Nonaktif'}
@@ -943,7 +943,7 @@ export const MasterDataView: React.FC = () => {
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
                 Konfigurasi Aturan Kompetisi, Prioritas Tie-Break & Kuota per Cabang
               </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 Administrator dapat mengatur urutan pemutus nilai seri (tie-break) menggunakan bidang rubrik aktif dari database.
               </p>
             </div>
@@ -972,7 +972,7 @@ export const MasterDataView: React.FC = () => {
 
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs">
                 <th className="px-5 py-3">Cabang Lomba</th>
                 <th className="px-5 py-3">Urutan Prioritas Tie-Break Resmi</th>
                 <th className="px-4 py-3 text-center">Kuota Babak</th>
@@ -1011,7 +1011,7 @@ export const MasterDataView: React.FC = () => {
                     <tr key={`${rule.id}-${idx}`} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3.5">
                         <p className="font-bold text-slate-900">{rule.branchName}</p>
-                        <p className="text-[11px] font-mono text-slate-500">
+                        <p className="text-xs font-mono text-slate-500">
                           Rubrik ID: {rule.rubricVersionId}
                         </p>
                       </td>
@@ -1019,7 +1019,7 @@ export const MasterDataView: React.FC = () => {
                         <div className="flex items-center gap-1 flex-wrap">
                           {rule.tieBreakOrder.map((crit, cIdx) => (
                             <React.Fragment key={`${crit}-${cIdx}`}>
-                              <span className="px-2 py-0.5 bg-slate-100 rounded text-[11px] font-semibold text-slate-700">
+                              <span className="px-2 py-0.5 bg-slate-100 rounded text-xs font-semibold text-slate-700">
                                 {cIdx + 1}. {crit}
                               </span>
                               {cIdx < rule.tieBreakOrder.length - 1 && (
@@ -1031,19 +1031,19 @@ export const MasterDataView: React.FC = () => {
                       </td>
                       <td className="px-4 py-3.5 text-center font-mono">
                         {Object.entries(resolvedQuotas).map(([stg, q], sIdx) => (
-                          <span key={`${stg}-${sIdx}`} className="inline-block mx-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 rounded font-bold text-[10px]">
+                          <span key={`${stg}-${sIdx}`} className="inline-block mx-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 rounded font-bold text-xs">
                             {stg}: {q}
                           </span>
                         ))}
                       </td>
                       <td className="px-4 py-3.5">
-                        <p className="text-slate-700 text-[11px]">{rule.officialSource || 'Standar'}</p>
+                        <p className="text-slate-700 text-xs">{rule.officialSource || 'Standar'}</p>
                         {rule.isVerifiedOfficial ? (
-                          <span className="inline-flex items-center text-[10px] text-emerald-700 font-bold gap-0.5 mt-0.5">
+                          <span className="inline-flex items-center text-xs text-emerald-700 font-bold gap-0.5 mt-0.5">
                             <Check className="w-3 h-3" /> Terverifikasi Resmi
                           </span>
                         ) : (
-                          <span className="inline-flex items-center text-[10px] text-amber-700 font-bold gap-0.5 mt-0.5">
+                          <span className="inline-flex items-center text-xs text-amber-700 font-bold gap-0.5 mt-0.5">
                             ⚠️ Konfigurasi Penyelenggara
                           </span>
                         )}
@@ -1116,7 +1116,7 @@ export const MasterDataView: React.FC = () => {
 
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs">
                 <th className="px-5 py-3 w-16 text-center">Urutan</th>
                 <th className="px-5 py-3">Nama Babak</th>
                 <th className="px-4 py-3">Cabang Terkait</th>
@@ -1149,7 +1149,7 @@ export const MasterDataView: React.FC = () => {
                     </td>
                     <td className="px-4 py-3.5 text-center">
                       <span
-                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                        className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                           stg.isFinalized
                             ? 'bg-slate-100 text-slate-700'
                             : stg.status === 'Aktif'
@@ -1221,7 +1221,7 @@ export const MasterDataView: React.FC = () => {
 
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase text-[10px]">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase text-xs">
                 <th className="px-5 py-3 w-28">Kode</th>
                 <th className="px-5 py-3">Nama Jenjang Usia</th>
                 <th className="px-4 py-3 text-center w-32">Status</th>
@@ -1245,7 +1245,7 @@ export const MasterDataView: React.FC = () => {
                     className="hover:bg-slate-50/70 transition-colors"
                   >
                     <td className="px-5 py-3">
-                      <span className="font-mono text-[11px] font-medium px-2 py-0.5 bg-slate-100 rounded text-slate-700">
+                      <span className="font-mono text-xs font-medium px-2 py-0.5 bg-slate-100 rounded text-slate-700">
                         {item.code}
                       </span>
                     </td>
@@ -1259,7 +1259,7 @@ export const MasterDataView: React.FC = () => {
                             status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
                           })
                         }
-                        className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
+                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
                           item.status === 'Aktif'
                             ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
                             : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
@@ -1305,7 +1305,7 @@ export const MasterDataView: React.FC = () => {
 
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase text-[10px]">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase text-xs">
                 <th className="px-5 py-3 w-28">Kode</th>
                 <th className="px-5 py-3">Nama Cabang / Golongan</th>
                 <th className="px-4 py-3 text-center w-32">Status</th>
@@ -1329,7 +1329,7 @@ export const MasterDataView: React.FC = () => {
                     className="hover:bg-slate-50/70 transition-colors"
                   >
                     <td className="px-5 py-3">
-                      <span className="font-mono text-[11px] font-medium px-2 py-0.5 bg-slate-100 rounded text-slate-700">
+                      <span className="font-mono text-xs font-medium px-2 py-0.5 bg-slate-100 rounded text-slate-700">
                         {item.code}
                       </span>
                     </td>
@@ -1343,7 +1343,7 @@ export const MasterDataView: React.FC = () => {
                             status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
                           })
                         }
-                        className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
+                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
                           item.status === 'Aktif'
                             ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
                             : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
@@ -1400,7 +1400,7 @@ export const MasterDataView: React.FC = () => {
 
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
+              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs">
                 <th className="px-5 py-3">Nama Dewan Hakim</th>
                 <th className="px-4 py-3">Babak</th>
                 <th className="px-4 py-3">Cabang</th>
@@ -1510,7 +1510,7 @@ export const MasterDataView: React.FC = () => {
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] text-slate-500 mt-1">
+                <p className="text-xs text-slate-500 mt-1">
                   Pengurangan kesalahan kategori ini akan dipotongkan secara eksplisit ke bidang rubrik yang dipilih.
                 </p>
               </div>
@@ -1861,7 +1861,7 @@ export const MasterDataView: React.FC = () => {
                       const nextUnused = candidateFields.find((cf) => !ruleTieBreakList.includes(cf)) || candidateFields[0] || 'total';
                       setRuleTieBreakList((prev) => [...prev, nextUnused]);
                     }}
-                    className="text-[11px] font-bold text-emerald-800 hover:text-emerald-950 inline-flex items-center gap-1 cursor-pointer"
+                    className="text-xs font-bold text-emerald-800 hover:text-emerald-950 inline-flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3 h-3" />
                     <span>Tambah Prioritas</span>
@@ -1882,7 +1882,7 @@ export const MasterDataView: React.FC = () => {
 
                     return ruleTieBreakList.map((selectedCrit, idx) => (
                       <div key={`tb-${idx}`} className="flex items-center gap-2">
-                        <span className="w-6 text-center font-mono font-bold text-slate-500 text-[11px]">
+                        <span className="w-6 text-center font-mono font-bold text-slate-500 text-xs">
                           #{idx + 1}
                         </span>
                         <select
@@ -1921,7 +1921,7 @@ export const MasterDataView: React.FC = () => {
                     ));
                   })()}
                 </div>
-                <p className="text-[10px] text-slate-500 mt-1">
+                <p className="text-xs text-slate-500 mt-1">
                   Pilihan mengacu langsung pada bidang penilaian aktif pada versi rubrik di database.
                 </p>
               </div>
@@ -2190,7 +2190,7 @@ export const MasterDataView: React.FC = () => {
                   ))}
                 </select>
                 {availableFieldsForAssignment.length === 0 && (
-                  <p className="text-[10px] text-amber-700 mt-1">
+                  <p className="text-xs text-amber-700 mt-1">
                     Belum ada bidang penilaian di database. Tambahkan versi rubrik dan bidang terlebih dahulu pada tab Rubrik & Bidang.
                   </p>
                 )}

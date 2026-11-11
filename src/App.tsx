@@ -15,20 +15,22 @@ import { Sidebar } from './components/layout/Sidebar';
 import { TopHeader } from './components/layout/TopHeader';
 import { DemoAccountModal } from './components/layout/DemoAccountModal';
 import { DashboardView } from './components/dashboard/DashboardView';
-import { KafilahPesertaView } from './components/kafilah/KafilahPesertaView';
-import { BankSoalView } from './components/bankSoal/BankSoalView';
-import { MasterDataView } from './components/masterData/MasterDataView';
-import { PenilaianHakimListView } from './components/penilaian/PenilaianHakimListView';
-import { RekapNilaiView } from './components/rekap/RekapNilaiView';
-import { PenilaianDualPanelView } from './components/penilaian/PenilaianDualPanelView';
-import { UserManagementView } from './components/users/UserManagementView';
-import { StageManagementView } from './components/stages/StageManagementView';
-import { HasilKelulusanView } from './components/stages/HasilKelulusanView';
-import { SuperadminDashboardView } from './components/superadmin/SuperadminDashboardView';
-import { SuperadminTenantsView } from './components/superadmin/SuperadminTenantsView';
-import { SuperadminUsersView } from './components/superadmin/SuperadminUsersView';
-import { SuperadminAuditView } from './components/superadmin/SuperadminAuditView';
-import { ActivityLogView } from './components/activityLog/ActivityLogView';
+
+// Halaman dimuat sesuai kebutuhan (code-splitting) agar bundel awal kecil
+const KafilahPesertaView = React.lazy(() => import('./components/kafilah/KafilahPesertaView').then((m) => ({ default: m.KafilahPesertaView })));
+const BankSoalView = React.lazy(() => import('./components/bankSoal/BankSoalView').then((m) => ({ default: m.BankSoalView })));
+const MasterDataView = React.lazy(() => import('./components/masterData/MasterDataView').then((m) => ({ default: m.MasterDataView })));
+const PenilaianHakimListView = React.lazy(() => import('./components/penilaian/PenilaianHakimListView').then((m) => ({ default: m.PenilaianHakimListView })));
+const RekapNilaiView = React.lazy(() => import('./components/rekap/RekapNilaiView').then((m) => ({ default: m.RekapNilaiView })));
+const PenilaianDualPanelView = React.lazy(() => import('./components/penilaian/PenilaianDualPanelView').then((m) => ({ default: m.PenilaianDualPanelView })));
+const UserManagementView = React.lazy(() => import('./components/users/UserManagementView').then((m) => ({ default: m.UserManagementView })));
+const StageManagementView = React.lazy(() => import('./components/stages/StageManagementView').then((m) => ({ default: m.StageManagementView })));
+const HasilKelulusanView = React.lazy(() => import('./components/stages/HasilKelulusanView').then((m) => ({ default: m.HasilKelulusanView })));
+const SuperadminDashboardView = React.lazy(() => import('./components/superadmin/SuperadminDashboardView').then((m) => ({ default: m.SuperadminDashboardView })));
+const SuperadminTenantsView = React.lazy(() => import('./components/superadmin/SuperadminTenantsView').then((m) => ({ default: m.SuperadminTenantsView })));
+const SuperadminUsersView = React.lazy(() => import('./components/superadmin/SuperadminUsersView').then((m) => ({ default: m.SuperadminUsersView })));
+const SuperadminAuditView = React.lazy(() => import('./components/superadmin/SuperadminAuditView').then((m) => ({ default: m.SuperadminAuditView })));
+const ActivityLogView = React.lazy(() => import('./components/activityLog/ActivityLogView').then((m) => ({ default: m.ActivityLogView })));
 
 const AuthenticationGateView: React.FC = () => {
   const {
@@ -258,7 +260,7 @@ const AuthenticationGateView: React.FC = () => {
           <div className="space-y-1 text-xs">
             <p className="font-extrabold text-rose-900">{title}</p>
             <p className="text-rose-800 leading-relaxed">{description}</p>
-            <p className="text-[11px] font-mono text-rose-700 pt-1">
+            <p className="text-xs font-mono text-rose-700 pt-1">
               UID: {authenticatedProfile.authUserId} · Email: {authenticatedProfile.email} · Global Role:{' '}
               {authenticatedProfile.globalRole}
             </p>
@@ -309,15 +311,15 @@ const AuthenticationGateView: React.FC = () => {
               <ShieldCheck className="w-6 h-6 text-amber-400" />
             </div>
             <div>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-900/90 border border-emerald-700 text-[10px] font-bold uppercase tracking-wider text-emerald-200 mb-1">
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-900/90 border border-emerald-700 text-xs font-bold uppercase tracking-wider text-emerald-200 mb-1">
                 <Lock className="w-3 h-3 text-amber-400" />
-                Gerbang Keamanan Produksi MTQ (Fail-Closed)
+                Akses Terbatas Panitia & Dewan Hakim
               </span>
               <h1 className="text-lg font-extrabold tracking-tight">
                 Sistem Manajemen & Penilaian MTQ
               </h1>
               <p className="text-xs text-emerald-200/80">
-                Wajib autentikasi Supabase Auth & verifikasi keanggotaan tenant aktif
+                Masuk dengan akun yang diberikan panitia penyelenggara
               </p>
             </div>
           </div>
@@ -481,7 +483,7 @@ const AuthenticationGateView: React.FC = () => {
                         Kirim Tautan Pemulihan Kata Sandi
                       </h2>
                       <p className="text-xs text-slate-600 mt-0.5">
-                        Masukkan alamat email akun resmi Anda. Sistem akan mengirim tautan reset kata sandi melalui Supabase Auth.
+                        Masukkan alamat email akun resmi Anda. Sistem akan mengirim tautan untuk mengatur ulang kata sandi ke email tersebut.
                       </p>
                     </div>
 
@@ -556,7 +558,7 @@ const AuthenticationGateView: React.FC = () => {
               className="w-full py-3.5 px-4 rounded-xl bg-emerald-100 hover:bg-emerald-200 active:scale-[0.99] text-emerald-950 font-bold text-sm sm:text-base border border-emerald-300 flex items-center justify-center gap-2 shadow-sm cursor-pointer transition-all"
             >
               <FlaskConical className="w-5 h-5 text-emerald-800" />
-              <span>Mode Simulasi Lokal</span>
+              <span>Coba Mode Demo (tanpa menyimpan data)</span>
             </button>
           </div>
         </div>
@@ -636,19 +638,21 @@ const MainLayout: React.FC = () => {
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Offline Demo Simulation Isolation Banner */}
         {isOfflineDemoSimulation && (
-          <div className="bg-amber-900 text-amber-50 px-4 py-2 text-xs font-semibold flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0 z-40 border-b border-amber-700">
+          <div className="bg-amber-900 text-amber-50 px-4 py-1.5 text-xs font-semibold flex flex-row items-center justify-between gap-2 shrink-0 z-40 border-b border-amber-700">
             <div className="flex items-center gap-2">
               <FlaskConical className="w-4 h-4 text-amber-300 shrink-0" />
               <span>
-                MODE SIMULASI DEMO LOKAL — Seluruh perubahan disimpan di memori lokal browser dan
-                tidak menyentuh database produksi Supabase.
+                <span className="sm:hidden">Mode Demo (data tidak disimpan)</span>
+                <span className="hidden sm:inline">
+                  Mode Demo — data hanya tersimpan di browser ini, bukan di database lomba.
+                </span>
               </span>
             </div>
             <button
               onClick={exitOfflineDemoSimulation}
-              className="bg-white hover:bg-amber-50 text-amber-950 px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all self-start sm:self-auto shrink-0"
+              className="bg-white hover:bg-amber-50 text-amber-950 px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all shrink-0"
             >
-              Kembali ke Mode Produksi Supabase
+              Keluar dari Demo
             </button>
           </div>
         )}
@@ -673,7 +677,11 @@ const MainLayout: React.FC = () => {
         {!isScoringView && <TopHeader />}
 
         <main className={`flex-1 min-w-0 ${isScoringView ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          {renderCurrentView()}
+          <React.Suspense
+            fallback={<div className="p-8 text-sm text-slate-500">Memuat halaman…</div>}
+          >
+            {renderCurrentView()}
+          </React.Suspense>
         </main>
       </div>
 
