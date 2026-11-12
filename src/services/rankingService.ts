@@ -71,6 +71,8 @@ export interface EvaluatedParticipantStage {
   tieBreakResolvedBy?: string;
   hasUnresolvedTieWithNext?: boolean;
   hasUnresolvedTie?: boolean;
+  /** true bila seri tak terpecahkan ini menentukan hasil (batas kuota / posisi juara) dan wajib diputuskan pleno */
+  isDecisiveTie?: boolean;
 }
 
 export interface StageEvaluationResult {
@@ -260,7 +262,9 @@ export class RankingService {
         manualOverrides,
         overrideReasons,
         customRuleConfigs,
-        customRubricVersions
+        customRubricVersions,
+        isFinalStage: Boolean(branchStage) && !branchNextStage,
+        championCount: branchStage?.championCount || 3
       });
 
       if (evaluation.evaluatedParticipants.length > 0) {
@@ -298,6 +302,10 @@ export class RankingService {
     overrideReasons?: Record<string, string>;
     customRuleConfigs?: CompetitionRuleConfig[];
     customRubricVersions?: RubricVersion[];
+    /** true bila babak ini tidak punya babak berikutnya (final): seri di posisi juara wajib diputuskan */
+    isFinalStage?: boolean;
+    /** jumlah juara di babak final (bawaan 3) */
+    championCount?: number;
   }): StageEvaluationResult {
     const {
       tenantId,
@@ -314,8 +322,14 @@ export class RankingService {
       manualOverrides = {},
       overrideReasons = {},
       customRuleConfigs,
-      customRubricVersions = INITIAL_RUBRIC_VERSIONS
+      customRubricVersions = INITIAL_RUBRIC_VERSIONS,
+      isFinalStage = false,
+      championCount: championCountParam
     } = params;
+    const championCount =
+      typeof championCountParam === 'number' && Number.isInteger(championCountParam) && championCountParam > 0
+        ? championCountParam
+        : 3;
 
     const hasExplicitBranchFilter = Boolean(branchId || (branchName && branchName !== 'Semua Cabang'));
 
@@ -812,6 +826,39 @@ export class RankingService {
       };
     });
 
+    // 5b. Tandai seri tak terpecahkan yang MENENTUKAN hasil (selaras dengan server & panel pleno):
+    //  - babak final: seri yang menyentuh posisi juara (peringkat <= championCount)
+    //  - babak lain : seri yang melintasi batas kuota kelulusan
+    // Seri di luar itu cukup berbagi peringkat dan tidak memblokir pengesahan.
+    for (let i = 0; i < evaluatedParticipants.length; ) {
+      const head = evaluatedParticipants[i];
+      if (!head.hasUnresolvedTie) {
+        i += 1;
+        continue;
+      }
+      let j = i;
+      while (
+        j + 1 < evaluatedParticipants.length &&
+        evaluatedParticipants[j + 1].hasUnresolvedTie &&
+        evaluatedParticipants[j + 1].displayScore === head.displayScore
+      ) {
+        j += 1;
+      }
+      const firstRank = i + 1;
+      const lastRank = j + 1;
+      const decisive =
+        lastRank > firstRank &&
+        (isFinalStage ? firstRank <= championCount : isQuotaValid && firstRank <= quota && lastRank > quota);
+      for (let k = i; k <= j; k += 1) {
+        const ep = evaluatedParticipants[k];
+        ep.isDecisiveTie = decisive;
+        ep.tieBreakResolvedBy = decisive
+          ? 'Nilai seri identik pada seluruh kriteria bidang — perlu keputusan sidang pleno'
+          : 'Seri — berbagi peringkat, tidak memengaruhi kelulusan';
+      }
+      i = j + 1;
+    }
+
     const qualifiedCount = evaluatedParticipants.filter((ep) => ep.isQualified).length;
 
     // 6. Deteksi Nilai Seri pada Posisi Kritis (Podium Juara 1, 2, 3 dan Batas Kuota)
@@ -828,7 +875,7 @@ export class RankingService {
     Object.entries(scoresMap).forEach(([scoreStr, pIds]) => {
       if (pIds.length > 1) {
         const tiedPodiumParticipants = evaluatedParticipants.filter(
-          (ep) => pIds.includes(ep.participant.id) && ep.rank <= 3 && ep.hasUnresolvedTie
+          (ep) => isFinalStage && pIds.includes(ep.participant.id) && ep.rank <= championCount && ep.hasUnresolvedTie
         );
         if (tiedPodiumParticipants.length > 1) {
           podiumTies.push({
@@ -843,8 +890,9 @@ export class RankingService {
     // P0-D: Cek batas kuota kelulusan (Boundary Tie)
     // HANYA memblokir jika peserta pada batas kuota (quota vs quota+1) TETAP SERI IDENTIK
     // setelah seluruh kriteria tie-break resmi dievaluasi (unresolved tie).
+    // Batas kuota hanya relevan untuk babak yang meloloskan peserta ke babak berikutnya.
     let boundaryTie = false;
-    if (isQuotaValid && evaluatedParticipants.length > quota) {
+    if (!isFinalStage && isQuotaValid && evaluatedParticipants.length > quota) {
       const quotaItem = evaluatedParticipants[quota - 1];
       const nextItem = evaluatedParticipants[quota];
       const isBoundaryOverridden =
@@ -928,13 +976,16 @@ export class RankingService {
         'Terdapat nilai seri identik tak terpecahkan pada batas kuota kelulusan. Wajib diselesaikan melalui sidang pleno atau override manual berizin sebelum babak disahkan.'
       );
     } else {
-      const podiumUnresolved = evaluatedParticipants.some(
-        (ep) => ep.rank <= 3 && ep.hasUnresolvedTie && !ep.isOverridden
-      );
+      // Aturan posisi juara HANYA berlaku di babak final (selaras dengan server & panel pleno).
+      const podiumUnresolved =
+        isFinalStage &&
+        evaluatedParticipants.some(
+          (ep) => ep.rank <= championCount && ep.isDecisiveTie && !ep.isOverridden
+        );
       if (podiumUnresolved) {
         setBlock(
           'UNRESOLVED_TIE',
-          'Terdapat nilai seri identik pada posisi Podium Juara (1/2/3). Wajib diputuskan dalam sidang pleno dewan hakim atau melalui override manual.'
+          `Terdapat nilai seri identik pada posisi juara 1–${championCount}. Wajib diputuskan dalam sidang pleno dewan hakim atau melalui override manual.`
         );
       }
     }

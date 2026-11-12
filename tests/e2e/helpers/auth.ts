@@ -5,14 +5,14 @@ import { Page, expect } from '@playwright/test';
  */
 export async function clearStorageAndOpenGate(page: Page) {
   await page.context().clearCookies();
-  await page.goto('/');
+  await page.goto('/app');
   await page.evaluate(() => {
     try {
       localStorage.clear();
       sessionStorage.clear();
     } catch {}
   });
-  await page.goto('/');
+  await page.goto('/app');
   await page.waitForLoadState('domcontentloaded');
 }
 

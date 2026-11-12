@@ -22,7 +22,7 @@ test.describe('Live Supabase Role Audits (Superadmin, Admin, Judge)', () => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
 
-    await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
+    await page.goto('http://localhost:3000/app', { waitUntil: 'networkidle' });
 
     const emailInput = page.locator('input[type="email"]');
     await expect(emailInput).toBeVisible({ timeout: 15000 });
@@ -65,7 +65,7 @@ test.describe('Live Supabase Role Audits (Superadmin, Admin, Judge)', () => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
 
-    await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
+    await page.goto('http://localhost:3000/app', { waitUntil: 'networkidle' });
 
     const emailInput = page.locator('input[type="email"]');
     await expect(emailInput).toBeVisible({ timeout: 15000 });
@@ -122,7 +122,7 @@ test.describe('Live Supabase Role Audits (Superadmin, Admin, Judge)', () => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
 
-    await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
+    await page.goto('http://localhost:3000/app', { waitUntil: 'networkidle' });
 
     const emailInput = page.locator('input[type="email"]');
     await expect(emailInput).toBeVisible({ timeout: 15000 });

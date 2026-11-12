@@ -4,4 +4,4 @@ Disallow: /app
 Disallow: /dashboard
 Disallow: /platform/
 
-Sitemap: https://mtq.id/sitemap.xml
+Sitemap: https://mtq-management-system.vercel.app/sitemap.xml

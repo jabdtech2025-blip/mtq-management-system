@@ -479,13 +479,13 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   metaDescription:
     'Platform manajemen MTQ multi-tenant dengan penilaian digital dewan hakim, mushaf kanvas, dan rekapitulasi nilai real-time.',
   metaKeywords: 'MTQ, STQ, LPTQ, Musabaqah Tilawatil Quran, E-Scoring MTQ',
-  canonicalUrl: 'https://mtq.id',
+  canonicalUrl: 'https://mtqsystem.web.id',
   robots: 'index,follow',
   faviconUrl: '/icon.svg',
   ogTitle: 'Manajemen MTQ — Musabaqah Digital',
   ogDescription:
     'Platform manajemen MTQ multi-tenant dengan penilaian digital dewan hakim, mushaf kanvas, dan rekapitulasi nilai real-time.',
-  ogImageUrl: 'https://mtq.id/icons/icon-512x512.png',
+  ogImageUrl: 'https://mtqsystem.web.id/og-image.jpg',
   ogImageAlt: 'Logo dan Antarmuka Manajemen MTQ Digital',
   ogType: 'website',
   ogLocale: 'id_ID',

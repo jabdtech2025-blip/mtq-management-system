@@ -33,11 +33,11 @@ function upsertMetaTag(attrName: 'name' | 'property', attrValue: string, content
   el.setAttribute('content', content);
 }
 
-export function useDocumentMeta(currentView: ViewType, siteSettings: SiteSettings) {
+export function useDocumentMeta(currentView: ViewType, siteSettings: SiteSettings, pageTitleOverride?: string) {
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
-    const pageTitle = VIEW_PAGE_TITLES[currentView] || siteSettings.defaultTitle;
+    const pageTitle = pageTitleOverride || VIEW_PAGE_TITLES[currentView] || siteSettings.defaultTitle;
     const template = (siteSettings.titleTemplate || '%s — Manajemen MTQ').trim();
     const formattedTitle = template.includes('%s')
       ? template.replace('%s', pageTitle)
@@ -73,5 +73,5 @@ export function useDocumentMeta(currentView: ViewType, siteSettings: SiteSetting
         iconLink.type = 'image/x-icon';
       }
     }
-  }, [currentView, siteSettings]);
+  }, [currentView, siteSettings, pageTitleOverride]);
 }

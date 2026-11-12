@@ -179,3 +179,15 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Landing page: bayangan di atas gambar podium hero */
+.landing-hero-shade {
+  background: linear-gradient(180deg, rgba(6, 32, 31, 0.55) 0%, rgba(6, 32, 31, 0.88) 55%, #06201f 100%);
+}
+@media (min-width: 1024px) {
+  .landing-hero-shade {
+    background:
+      linear-gradient(90deg, #06201f 0%, #06201f 30%, rgba(6, 32, 31, 0.7) 50%, rgba(6, 32, 31, 0.15) 75%, rgba(6, 32, 31, 0) 100%),
+      linear-gradient(0deg, #06201f 0%, rgba(6, 32, 31, 0) 30%);
+  }
+}

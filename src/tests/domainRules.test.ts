@@ -1828,6 +1828,122 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     `weightedFinal: ${weightedScoreRes.finalScore}, rank1: ${nullsLastEval.evaluatedParticipants[0]?.participant.id}, champ1: ${finalChampSnap.rankings[0]?.championTitle}, champ2: ${finalChampSnap.rankings[1]?.championTitle}`
   );
 
+
+  // ===== Seri: aturan "menentukan" selaras dengan server & panel pleno =====
+  // scores: daftar nilai akhir per peserta (urutan = urutan masukan). Peserta dengan nilai sama diberi
+  // fieldScores identik sehingga seri tak terpecahkan oleh tie-break.
+  const buildTieScenario = (scores: number[]) => {
+    const parts: Participant[] = [];
+    const sps: StageParticipation[] = [];
+    const asses: JudgeAssessment[] = [];
+    scores.forEach((score, i) => {
+      const pid = `p-sx-${i + 1}`;
+      const spid = `sp-sx-${i + 1}`;
+      parts.push({ ...partTied1, id: pid, participantId: `SX-${i + 1}`, lotteryNumber: String(i + 1), name: `Peserta ${i + 1}` });
+      sps.push({ ...tieParticipations[0], id: spid, participantId: pid, lotteryNumber: String(i + 1) });
+      const base = score - 60;
+      asses.push({
+        ...tieAssessments[0],
+        id: `a-sx-${i + 1}`,
+        stageParticipationId: spid,
+        participantId: pid,
+        finalScore: score,
+        totalDeductions: 100 - score,
+        fieldScores: { Tajwid: 20 + base / 4, Lagu: 20 + base / 4, Fashahah: 10 + base / 4, Suara: 10 + base / 4 }
+      });
+    });
+    return { parts, sps, asses };
+  };
+  const runTieScenario = (
+    scores: number[],
+    opts: { quota: number; isFinalStage?: boolean; championCount?: number; overrides?: Record<string, boolean>; reasons?: Record<string, string> }
+  ) => {
+    const { parts, sps, asses } = buildTieScenario(scores);
+    return RankingService.evaluateStageParticipants({
+      tenantId: 't-1',
+      stageName: 'Penyisihan',
+      branchName: 'Tilawah Dewasa Putra',
+      participations: sps,
+      participants: parts,
+      assessments: asses,
+      judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+      stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 305 }],
+      quota: opts.quota,
+      isFinalStage: opts.isFinalStage,
+      championCount: opts.championCount,
+      manualOverrides: opts.overrides,
+      overrideReasons: opts.reasons
+    });
+  };
+  const blockCode = (r: ReturnType<typeof runTieScenario>) => r.blockingReasonDetail?.code;
+
+  // 36a. Non-final, seri di peringkat 1, kuota 7, 8 peserta → tidak diblokir, keduanya lolos
+  const s36a = runTieScenario([95, 95, 90, 88, 86, 84, 82, 80], { quota: 7, isFinalStage: false });
+  assert(
+    '36a. Seri di peringkat 1 pada babak non-final (kuota 7) tidak memblokir pengesahan dan keduanya lolos',
+    s36a.canFinalize === true &&
+      blockCode(s36a) !== 'UNRESOLVED_TIE' &&
+      s36a.evaluatedParticipants[0].isQualified === true &&
+      s36a.evaluatedParticipants[1].isQualified === true &&
+      s36a.evaluatedParticipants[0].isDecisiveTie === false,
+    `canFinalize: ${s36a.canFinalize}, code: ${blockCode(s36a)}, reason: ${s36a.blockingReason}`
+  );
+
+  // 36b. Non-final, seri di peringkat 7 & 8, kuota 7 → diblokir (batas kuota)
+  const s36b = runTieScenario([95, 93, 91, 89, 87, 85, 80, 80], { quota: 7, isFinalStage: false });
+  assert(
+    '36b. Seri tak terpecahkan di batas kuota (peringkat 7 & 8) tetap memblokir pengesahan',
+    s36b.canFinalize === false && blockCode(s36b) === 'UNRESOLVED_TIE' && s36b.evaluatedParticipants[6].isDecisiveTie === true,
+    `canFinalize: ${s36b.canFinalize}, code: ${blockCode(s36b)}`
+  );
+
+  // 36c. Final, seri di peringkat 2, championCount 3 → diblokir
+  const s36c = runTieScenario([95, 90, 90, 85, 80], { quota: 5, isFinalStage: true, championCount: 3 });
+  assert(
+    '36c. Seri di peringkat 2 pada babak final (3 juara) memblokir pengesahan',
+    s36c.canFinalize === false && blockCode(s36c) === 'UNRESOLVED_TIE' && (s36c.blockingReason || '').includes('1–3'),
+    `canFinalize: ${s36c.canFinalize}, code: ${blockCode(s36c)}, reason: ${s36c.blockingReason}`
+  );
+
+  // 36d. Final, seri di peringkat 4, championCount 3 → tidak diblokir
+  const s36d = runTieScenario([95, 92, 90, 85, 85], { quota: 5, isFinalStage: true, championCount: 3 });
+  assert(
+    '36d. Seri di peringkat 4 pada babak final (3 juara) tidak memblokir pengesahan',
+    s36d.canFinalize === true && s36d.evaluatedParticipants[3].isDecisiveTie === false,
+    `canFinalize: ${s36d.canFinalize}, code: ${blockCode(s36d)}, reason: ${s36d.blockingReason}`
+  );
+
+  // 36e. Final, seri di peringkat 2 yang sudah di-override dengan alasan → tidak diblokir
+  const s36e = runTieScenario([95, 90, 90, 85, 80], {
+    quota: 5,
+    isFinalStage: true,
+    championCount: 3,
+    overrides: { 'p-sx-2': true, 'p-sx-3': true },
+    reasons: { 'p-sx-2': 'Keputusan sidang pleno: Juara 2', 'p-sx-3': 'Keputusan sidang pleno: Juara 3' }
+  });
+  assert(
+    '36e. Seri di peringkat 2 pada babak final yang sudah di-override dengan alasan tidak memblokir',
+    s36e.canFinalize === true,
+    `canFinalize: ${s36e.canFinalize}, code: ${blockCode(s36e)}, reason: ${s36e.blockingReason}`
+  );
+
+  // 36f. Non-final, kuota 7, seri di peringkat 11 & 12 → tidak diblokir, keduanya tidak lolos, nilai sama
+  const s36f = runTieScenario([99, 98, 97, 96, 95, 94, 93, 92, 91, 90, 80, 80], { quota: 7, isFinalStage: false });
+  const p11 = s36f.evaluatedParticipants[10];
+  const p12 = s36f.evaluatedParticipants[11];
+  assert(
+    '36f. Seri di peringkat 11 & 12 (di luar kuota 7) tidak memblokir; keduanya tidak lolos dan berbagi peringkat',
+    s36f.canFinalize === true &&
+      p11.isQualified === false &&
+      p12.isQualified === false &&
+      p11.hasUnresolvedTie === true &&
+      p12.hasUnresolvedTie === true &&
+      p11.displayScore === p12.displayScore &&
+      p11.isDecisiveTie === false &&
+      (p11.tieBreakResolvedBy || '').startsWith('Seri — berbagi peringkat'),
+    `canFinalize: ${s36f.canFinalize}, code: ${blockCode(s36f)}, q11: ${p11.isQualified}, q12: ${p12.isQualified}`
+  );
+
   return { passed, failed, results };
 }
 

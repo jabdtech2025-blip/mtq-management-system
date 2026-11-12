@@ -11,9 +11,10 @@ test.describe('E2E: Gerbang Akses (Pendaftaran Mandiri Ditutup)', () => {
   });
 
   test('01. Menampilkan Gerbang Akses Bersih dengan Bahasa Operasional & Tombol Mode Demo', async ({ page }) => {
-    await expect(page.getByText('Sistem Manajemen & Penilaian MTQ')).toBeVisible();
-    await expect(page.getByText(/Akses Terbatas Panitia & Dewan Hakim/i)).toBeVisible();
-    await expect(page.getByText(/Masuk dengan akun yang diberikan panitia penyelenggara/i)).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Masuk ke sistem' })).toBeVisible();
+    await expect(page.getByText(/Untuk panitia, dewan hakim, dan pengelola yang telah diundang/i)).toBeVisible();
+    await expect(page.getByText(/Pendaftaran mandiri tidak tersedia/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: /Kembali ke beranda/i })).toHaveAttribute('href', '/');
 
     // Tidak ada istilah teknis atau status koneksi database di layar login
     await expect(page.getByText(/Fail-Closed/i)).toHaveCount(0);
@@ -32,11 +33,11 @@ test.describe('E2E: Gerbang Akses (Pendaftaran Mandiri Ditutup)', () => {
   test('03. Alur "Lupa Kata Sandi?" dan Kembali ke Form Login', async ({ page }) => {
     test.skip(!SUPABASE_CONFIGURED, 'Form login hanya tampil saat Supabase dikonfigurasi (E2E_SUPABASE_CONFIGURED=true).');
 
-    await page.getByRole('button', { name: /Lupa Kata Sandi\?/i }).click();
-    await expect(page.getByText(/Kirim Tautan Pemulihan Kata Sandi/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: /Kirim Tautan Reset/i })).toBeVisible();
+    await page.getByRole('button', { name: /Lupa kata sandi\?/i }).click();
+    await expect(page.getByRole('heading', { level: 1, name: /Lupa kata sandi\?/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Kirim tautan/i })).toBeVisible();
 
-    await page.getByRole('button', { name: /Kembali Login/i }).click();
-    await expect(page.getByRole('button', { name: /Lupa Kata Sandi\?/i })).toBeVisible();
+    await page.getByRole('button', { name: /Kembali ke halaman masuk/i }).click();
+    await expect(page.getByRole('button', { name: /Lupa kata sandi\?/i })).toBeVisible();
   });
 });

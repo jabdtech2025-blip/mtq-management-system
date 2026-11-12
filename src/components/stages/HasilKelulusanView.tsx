@@ -340,9 +340,13 @@ export const HasilKelulusanView: React.FC = () => {
       manualOverrides,
       overrideReasons,
       customRuleConfigs: competitionRules,
-      customRubricVersions: rubricVersions
+      customRubricVersions: rubricVersions,
+      isFinalStage: Boolean(currentStage) && !nextStage,
+      championCount: currentStage?.championCount || 3
     });
   }, [
+    nextStage,
+    currentStage,
     currentTenant.id,
     currentStage?.id,
     currentStage?.branchId,
@@ -456,6 +460,20 @@ export const HasilKelulusanView: React.FC = () => {
       .filter((g) => (nextStage ? g.minOrder <= quota && g.maxOrder > quota : g.rank <= championCount))
       .sort((a, b) => a.rank - b.rank);
   }, [serverRankings, nextStage, quota, championCount]);
+
+  // Peserta yang berada dalam kelompok seri yang MENENTUKAN (butuh keputusan sidang pleno).
+  // Sumber utama: peringkat server; cadangan: evaluasi di layar.
+  const decisiveTieIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (serverRankings) {
+      criticalTieGroups.forEach((g) => g.rows.forEach((r) => ids.add(r.participantId)));
+    } else {
+      evaluatedParticipants.forEach((ep) => {
+        if (ep.isDecisiveTie) ids.add(ep.participant.id);
+      });
+    }
+    return ids;
+  }, [serverRankings, criticalTieGroups, evaluatedParticipants]);
 
   const [tieOrder, setTieOrder] = useState<Record<string, number>>({});
   const [tieReasons, setTieReasons] = useState<Record<number, string>>({});
@@ -1148,7 +1166,11 @@ export const HasilKelulusanView: React.FC = () => {
                           ? `#${serverRankMap.get(p.id)?.rank ?? item.rank}`
                           : '—'}
                         {serverRankMap.get(p.id)?.isTied && (
-                          <span className="block text-xs font-bold text-rose-700">Seri</span>
+                          <span
+                            className={`block text-xs font-bold ${decisiveTieIds.has(p.id) ? 'text-rose-700' : 'text-slate-500'}`}
+                          >
+                            Seri
+                          </span>
                         )}
                       </td>
 
@@ -1176,16 +1198,28 @@ export const HasilKelulusanView: React.FC = () => {
                         <p className="text-xs text-slate-500 mt-0.5">
                           <span className="font-mono tabular-nums">{p.participantId}</span> · {p.kafilahName}
                         </p>
-                        {item.tieBreakResolvedBy && (
-                          <p className="text-xs text-emerald-800 font-semibold mt-0.5 flex items-center gap-1">
-                            <span>⚖️</span>
-                            <span>{item.tieBreakResolvedBy}</span>
-                          </p>
-                        )}
-                        {item.hasUnresolvedTieWithNext && (
-                          <div className="mt-1">
-                            <Badge variant="danger">Nilai Seri Identik</Badge>
-                          </div>
+                        {item.hasUnresolvedTie ? (
+                          decisiveTieIds.has(p.id) && !item.isOverridden ? (
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              <Badge variant="danger">Nilai Seri Identik</Badge>
+                              <span className="text-xs font-semibold text-rose-700">
+                                Perlu keputusan sidang pleno
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {decisiveTieIds.has(p.id)
+                                ? 'Seri — sudah diputuskan melalui override'
+                                : 'Seri — berbagi peringkat, tidak memengaruhi kelulusan'}
+                            </p>
+                          )
+                        ) : (
+                          item.tieBreakResolvedBy && (
+                            <p className="text-xs text-emerald-800 font-semibold mt-0.5 flex items-center gap-1">
+                              <span>⚖️</span>
+                              <span>{item.tieBreakResolvedBy}</span>
+                            </p>
+                          )
                         )}
                         {item.isOverridden && (
                           <p className="text-xs text-slate-600 mt-0.5 italic">

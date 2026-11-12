@@ -769,7 +769,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Sync initial URL if at root '/'
     try {
       const currentClean = window.location.pathname.replace(/\/+$/, '') || '/';
-      if (currentClean === '/' && window.history?.replaceState) {
+      // "/" (tautan email) dan "/app" (tombol Masuk di landing page) diarahkan ke tampilan awal aplikasi
+      if ((currentClean === '/' || currentClean === '/app') && window.history?.replaceState) {
         const initialPath = VIEW_TO_PATH[currentView] || '/dashboard';
         window.history.replaceState({ view: currentView }, '', initialPath + window.location.search + window.location.hash);
       }

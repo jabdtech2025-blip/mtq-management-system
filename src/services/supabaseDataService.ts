@@ -531,7 +531,8 @@ export const supabaseDataService = {
       typeof window !== 'undefined' && window.location?.origin
         ? window.location.origin
         : 'http://localhost:3000';
-    const raw = (candidateUrl || fallbackOrigin).trim();
+    // Tautan undangan & reset kata sandi diarahkan ke aplikasi (/app), bukan landing page (/)
+    const raw = (candidateUrl || `${fallbackOrigin}/app`).trim();
 
     try {
       const parsed = new URL(raw);
