@@ -286,6 +286,19 @@ export const supabaseDataService = {
           msg.includes('could not find the table') ||
           msg.includes('schema cache');
 
+        // Server menjawab tetapi menolak karena izin (mis. pengunjung belum login dan RLS memanggil
+        // fungsi yang hanya untuk pengguna terautentikasi). Artinya database TERJANGKAU, bukan putus.
+        const isPermissionOnly = code === '42501' || msg.includes('permission denied');
+        if (isPermissionOnly) {
+          setRuntimeSupabaseConnectionState({
+            state: hasSession ? 'connected_authenticated' : 'connected_unauthenticated',
+            isDatabaseReady: true,
+            isAuthenticated: hasSession,
+            lastError: null
+          });
+          return getSupabaseConnectionInfo();
+        }
+
         if (isSchemaMissing) {
           setRuntimeSupabaseConnectionState({
             state: 'schema_missing',

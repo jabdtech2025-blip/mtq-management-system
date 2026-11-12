@@ -34,7 +34,15 @@ export interface OutboxSummary {
 }
 
 type OutboxListener = (summary: OutboxSummary) => void;
-type OutboxProcessor = (record: OutboxRecord) => Promise<{ success: boolean; error?: string }>;
+// `message` diterima juga karena pemroses di MtqContext mengembalikan { success, message }
+type OutboxProcessor = (
+  record: OutboxRecord
+) => Promise<{ success: boolean; error?: string; message?: string }>;
+
+/** Jeda percobaan ulang otomatis untuk item tertunda/gagal (milidetik). */
+const RETRY_INTERVAL_MS = 20_000;
+/** Jeda setelah perangkat kembali online, memberi waktu sesi login pulih lebih dulu. */
+const ONLINE_FLUSH_DELAY_MS = 2_500;
 
 const DB_NAME = 'mtq_outbox_db_v1';
 const STORE_NAME = 'outbox_operations';
@@ -60,8 +68,17 @@ class OutboxSyncService {
     this.initPromise = this.initializeStore();
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
-        void this.flushPendingQueue();
+        // Tunggu sebentar agar token sesi diperbarui sebelum antrean dikirim
+        window.setTimeout(() => {
+          void this.flushPendingQueue();
+        }, ONLINE_FLUSH_DELAY_MS);
       });
+      // Percobaan ulang berkala: item yang gagal (mis. dikirim saat sesi belum pulih) tidak macet selamanya
+      window.setInterval(() => {
+        if (this.hasRetryableItems()) {
+          void this.flushPendingQueue();
+        }
+      }, RETRY_INTERVAL_MS);
     }
   }
 
@@ -177,6 +194,13 @@ class OutboxSyncService {
     } catch {
       // Ignore quota errors
     }
+  }
+
+  private hasRetryableItems(): boolean {
+    for (const item of this.memoryStore.values()) {
+      if (item.status === 'pending' || item.status === 'failed') return true;
+    }
+    return false;
   }
 
   public registerProcessor(processor: OutboxProcessor): void {
@@ -340,7 +364,7 @@ class OutboxSyncService {
               ...syncingItem,
               status: 'failed',
               retryCount: syncingItem.retryCount + 1,
-              lastError: res.error || 'Sinkronisasi gagal pada server.',
+              lastError: res.error || res.message || 'Sinkronisasi gagal pada server.',
               updatedAt: new Date().toISOString(),
             };
             await this.persistRecord(failedItem);

@@ -55,7 +55,7 @@ test.describe('E2E: Navigasi Workspace Demo Lokal & Antarmuka Responsif', () => 
   test('03. Akses Workspace Superadmin Platform dan Kembali ke Tenant', async ({ page }) => {
     // Buka modal ganti persona demo di footer sidebar
     await page.getByRole('button', { name: /Ganti/i }).first().click();
-    await expect(page.getByText(/Mode Simulasi Demo Lokal & Persona Evaluasi/i)).toBeVisible();
+    await expect(page.getByText(/Mode Demo · Pilih Peran/i)).toBeVisible();
 
     // Pilih persona Superadmin
     const superadminPersonaBtn = page.getByText(/Nasaruddin/i).first();

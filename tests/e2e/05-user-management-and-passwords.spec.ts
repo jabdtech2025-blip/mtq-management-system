@@ -37,7 +37,7 @@ test.describe('E2E: Manajemen Pengguna, Input Kata Sandi Baru & Pemetaan Akun Gl
   test('02. Manajemen Akun Global Superadmin: Filter Akun Belum Ditugaskan & Input Kata Sandi', async ({ page }) => {
     // Buka switcher persona demo di footer sidebar
     await page.getByRole('button', { name: /Ganti/i }).click();
-    await expect(page.getByText(/Mode Simulasi Demo Lokal & Persona Evaluasi/i)).toBeVisible();
+    await expect(page.getByText(/Mode Demo · Pilih Peran/i)).toBeVisible();
 
     // Pilih persona Superadmin
     const superadminPersonaBtn = page.getByText(/Prof\. Dr\. H\. Nasaruddin/i).first();

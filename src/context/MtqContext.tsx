@@ -416,6 +416,14 @@ const generateUniqueLogId = (prefix: string = 'act') => {
   return `${prefix}-${Date.now()}-${logIdSequence}-${Math.random().toString(36).substring(2, 8)}`;
 };
 
+/** Pesan galat yang menandakan gangguan jaringan (bukan penolakan server). */
+const isLikelyNetworkFailure = (message?: string | null): boolean => {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  return /failed to fetch|networkerror|network request failed|load failed|fetch failed|timeout|timed out|kesalahan jaringan|err_internet|err_network/i.test(
+    message || ''
+  );
+};
+
 export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [tenants, setTenants] = useState<Tenant[]>(() => {
     try {
@@ -992,6 +1000,55 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   assessmentsRef.current = assessments;
   const stageParticipationsRef = useRef<StageParticipation[]>(stageParticipations);
   stageParticipationsRef.current = stageParticipations;
+  // Ketahanan offline: sesi terakhir yang sah, apakah workspace pernah termuat, dan lembar nilai yang sedang dikirim
+  const authenticatedProfileRef = useRef<AuthenticatedSupabaseProfile | null>(authenticatedProfile);
+  authenticatedProfileRef.current = authenticatedProfile;
+  const hasHydratedWorkspaceRef = useRef<boolean>(false);
+  const inFlightAssessmentKeysRef = useRef<Map<string, number>>(new Map());
+  const markAssessmentInFlight = (assessmentId: string, delta: 1 | -1) => {
+    const key = toDeterministicUuid(assessmentId);
+    const next = (inFlightAssessmentKeysRef.current.get(key) || 0) + delta;
+    if (next <= 0) inFlightAssessmentKeysRef.current.delete(key);
+    else inFlightAssessmentKeysRef.current.set(key, next);
+  };
+
+  /**
+   * Gabungkan lembar nilai dari server dengan lembar lokal yang BELUM tersimpan
+   * (masih di antrean offline atau sedang dikirim). Versi lokal menang sampai server mengonfirmasi,
+   * sehingga data dari server tidak menimpa koreksi yang baru dimasukkan hakim.
+   */
+  const mergeUnsyncedLocalAssessments = (serverAssessments: JudgeAssessment[]): JudgeAssessment[] => {
+    const protectedKeys = new Set<string>(inFlightAssessmentKeysRef.current.keys());
+    outboxSyncService.getSummary().items.forEach((item) => {
+      if (item.operationType === 'UPSERT_ASSESSMENT_DRAFT' && item.status !== 'synced') {
+        const localId = item.idempotencyKey.replace(/^assessment-draft-/, '');
+        protectedKeys.add(toDeterministicUuid(localId));
+      }
+    });
+    if (protectedKeys.size === 0) return serverAssessments;
+
+    const localByKey = new Map<string, JudgeAssessment>();
+    assessmentsRef.current.forEach((a) => {
+      const key = toDeterministicUuid(a.id);
+      if (protectedKeys.has(key)) localByKey.set(key, a);
+    });
+    if (localByKey.size === 0) return serverAssessments;
+
+    const usedKeys = new Set<string>();
+    const merged = serverAssessments.map((srv) => {
+      const key = toDeterministicUuid(srv.id);
+      const local = localByKey.get(key);
+      if (!local) return srv;
+      usedKeys.add(key);
+      // Lembar yang sudah difinalisasi di server tidak boleh ditimpa draf lokal
+      if (srv.status === 'finalized' && local.status !== 'finalized') return srv;
+      return local;
+    });
+    localByKey.forEach((local, key) => {
+      if (!usedKeys.has(key)) merged.push(local);
+    });
+    return merged;
+  };
 
   useEffect(() => {
     outboxSyncService.registerProcessor(async (op) => {
@@ -1001,15 +1058,41 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (!assessment) {
             return { success: false, message: 'Payload draf penilaian tidak lengkap di antrean outbox.' };
           }
-          const res = await supabaseDataService.syncAssessmentToRemote(
-            assessment as JudgeAssessment,
-            assignedMaqraId as string | undefined,
-            {
-              stageParticipation: stageParticipation as StageParticipation | undefined,
-              participant: participant as Participant | undefined
+          // Kirim versi TERBARU dari perangkat (bukan salinan lama saat masuk antrean),
+          // agar koreksi yang ditambahkan setelahnya tidak tertimpa data lama.
+          const queued = assessment as JudgeAssessment;
+          const latestLocal = assessmentsRef.current.find((a) => toDeterministicUuid(a.id) === queued.id);
+          const freshPayload: JudgeAssessment = latestLocal
+            ? {
+                ...queued,
+                ...latestLocal,
+                id: queued.id,
+                tenantId: queued.tenantId,
+                stageParticipationId: queued.stageParticipationId,
+                judgeId: queued.judgeId,
+                rubricVersionId: queued.rubricVersionId,
+                questionId: queued.questionId,
+                assignedMaqraId: queued.assignedMaqraId
+              }
+            : queued;
+          const localKey = latestLocal?.id || queued.id;
+          markAssessmentInFlight(localKey, 1);
+          try {
+            const res = await supabaseDataService.syncAssessmentToRemote(
+              freshPayload,
+              assignedMaqraId as string | undefined,
+              {
+                stageParticipation: stageParticipation as StageParticipation | undefined,
+                participant: participant as Participant | undefined
+              }
+            );
+            if (res.success) {
+              setLastSyncTime(getWibTime());
             }
-          );
-          return { success: res.success, message: res.message };
+            return { success: res.success, message: res.message };
+          } finally {
+            markAssessmentInFlight(localKey, -1);
+          }
         }
         if (op.operationType === 'UPSERT_PARTICIPANT') {
           const { participant, stageParticipation, levelId, autoCreateMissingMaster } = op.payload || {};
@@ -1266,9 +1349,24 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Dilindungi oleh `authRequestGenRef` agar respons lama (stale) tidak pernah menimpa sesi login/logout baru.
    */
   const refreshSupabaseConnection = async (): Promise<SupabaseConnectionInfo> => {
+    const hadAuthorizedSession = Boolean(authenticatedProfileRef.current) && hasHydratedWorkspaceRef.current;
+
+    // Saat perangkat offline, jangan memeriksa ulang sesi: pemeriksaan pasti gagal dan akan
+    // mengeluarkan hakim dari aplikasi. Data tetap di layar, perubahan masuk antrean.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false && hadAuthorizedSession) {
+      setSyncStatus('Offline — perubahan disimpan di perangkat dan dikirim saat tersambung');
+      return connectionInfo;
+    }
+
     const reqGen = ++authRequestGenRef.current;
     const info = await supabaseDataService.verifyDatabaseConnection();
     if (reqGen !== authRequestGenRef.current) return info;
+
+    // Gangguan jaringan sesaat pada sesi yang sudah sah: pertahankan sesi & data, jangan tampilkan gerbang masuk.
+    if (!info.isDatabaseReady && info.state === 'connection_error' && hadAuthorizedSession) {
+      setSyncStatus('Koneksi ke server terputus — perubahan disimpan di perangkat');
+      return info;
+    }
 
     setConnectionInfo(info);
     setSyncStatus(info.statusLabel);
@@ -1276,9 +1374,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (info.isDatabaseReady) {
       const profile = await supabaseDataService.fetchAuthenticatedUserProfile();
       if (reqGen !== authRequestGenRef.current) return info;
+      if (!profile && hadAuthorizedSession && typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return info;
+      }
       setAuthenticatedProfile(profile);
 
       if (!profile) {
+        hasHydratedWorkspaceRef.current = false;
         // Sesi belum login di mode live: bersihkan state operasional agar data demo tidak bocor
         setDataSourceMode('supabase_live');
         setWorkspaceError(null);
@@ -1415,8 +1517,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setErrorCategories(hydrated.errorCategories || []);
         setCompetitionRules(hydrated.competitionRules || []);
         setJudgeAssignments(hydrated.judgeAssignments || []);
-        setAssessments(hydrated.assessments || []);
-        assessmentsRef.current = hydrated.assessments || [];
+        const mergedAssessments = mergeUnsyncedLocalAssessments(hydrated.assessments || []);
+        setAssessments(mergedAssessments);
+        assessmentsRef.current = mergedAssessments;
+        hasHydratedWorkspaceRef.current = true;
         setStageSnapshots(hydrated.stageSnapshots || []);
         setAuditLogs(hydrated.auditLogs || []);
         setLotteryDrawLogs(hydrated.lotteryDrawLogs || []);
@@ -1432,6 +1536,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           (r) => !deletedIds.has(r.id) && !deletedIds.has(toDeterministicUuid(r.id))
         );
         setRubricVersions(filteredRubrics);
+        // Sesi & data sudah pulih: kirim antrean yang tertunda (mis. koreksi saat offline)
+        setTimeout(() => {
+          void outboxSyncService.flushPendingQueue();
+        }, 0);
+      } else if (hadAuthorizedSession) {
+        // Workspace sudah pernah termuat: gagal muat ulang (mis. jaringan) tidak boleh mengosongkan layar.
+        setSyncStatus('Gagal memuat ulang data dari server — menampilkan data terakhir');
       } else {
         setDataSourceMode('supabase_error');
         setWorkspaceError(hydration.error || 'Gagal memuat workspace database.');
@@ -1524,6 +1635,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Invalidate any in-flight hydration requests immediately
     authRequestGenRef.current += 1;
     await supabaseDataService.signOut();
+    hasHydratedWorkspaceRef.current = false;
+    authenticatedProfileRef.current = null;
     setAuthenticatedProfile(null);
     setIsPasswordRecoveryMode(false);
     setWorkspaceError(null);
@@ -1597,15 +1710,40 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [currentTenantId, isOfflineDemoSimulation]);
 
+  // ID unik tab ini: sinyal "data berubah" dari tab yang sama diabaikan, supaya tab yang sedang
+  // dipakai tidak memuat ulang dirinya sendiri dan menimpa koreksi yang belum tersimpan.
+  const crossTabSourceIdRef = useRef<string>(`tab-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
   const notifyCrossTabSync = useCallback((reason: string) => {
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const bc = new BroadcastChannel('mtq_realtime_sync_channel');
-        bc.postMessage({ type: 'MTQ_DATA_UPDATED', reason, timestamp: Date.now() });
+        bc.postMessage({
+          type: 'MTQ_DATA_UPDATED',
+          reason,
+          timestamp: Date.now(),
+          sourceId: crossTabSourceIdRef.current
+        });
         bc.close();
       }
     } catch {}
   }, []);
+
+  // Saat perangkat kembali online: pulihkan sesi & data (yang juga mengirim antrean tertunda).
+  useEffect(() => {
+    if (typeof window === 'undefined' || isOfflineDemoSimulation) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const handleOnline = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void refreshSupabaseConnection();
+      }, 1500);
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [isOfflineDemoSimulation]);
 
   // Supabase Realtime Subscription + Cross-Tab BroadcastChannel (judge_assessments, stage_participations, stages)
   useEffect(() => {
@@ -1623,7 +1761,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (typeof BroadcastChannel !== 'undefined') {
         bc = new BroadcastChannel('mtq_realtime_sync_channel');
         bc.onmessage = (ev) => {
-          if (ev.data?.type === 'MTQ_DATA_UPDATED') {
+          if (ev.data?.type === 'MTQ_DATA_UPDATED' && ev.data?.sourceId !== crossTabSourceIdRef.current) {
             triggerRefresh(`Sinkronisasi Antar-Tab (${ev.data.reason || 'Penilaian'})...`);
           }
         };
@@ -2666,6 +2804,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         questionId: toDeterministicUuid(targetQuestionId),
         assignedMaqraId: matchedMaqraItem?.id
       };
+      markAssessmentInFlight(initializedAsm.id, 1);
       void supabaseDataService
         .syncAssessmentToRemote(
           remoteAsmPayload,
@@ -2686,8 +2825,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 return updated;
               });
             }
-          } else {
-            setSyncStatus(`Gagal Menyimpan Lembar Nilai: ${res.message}`);
+          } else if (isLikelyNetworkFailure(res.message)) {
+            // Gangguan jaringan: lembar tetap di perangkat dan dikirim otomatis saat tersambung
+            setSyncStatus('Offline — lembar nilai disimpan di perangkat, menunggu sinkron');
             void outboxSyncService.enqueueOperation({
               idempotencyKey: `assessment-draft-${initializedAsm.id}`,
               tenantId: currentTenantId,
@@ -2701,6 +2841,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               },
               errorMessage: res.message
             });
+          } else {
+            // Ditolak server: batalkan pembuatan lembar di layar
+            setSyncStatus(`Gagal Menyimpan Lembar Nilai: ${res.message}`);
             assessmentsRef.current = prevAssessmentsSnapshot;
             setAssessments(prevAssessmentsSnapshot);
             stageParticipationsRef.current = prevSpSnapshot;
@@ -2709,7 +2852,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .catch((err) => {
           const msg = err instanceof Error ? err.message : 'Kesalahan jaringan';
-          setSyncStatus(`Gagal Menyimpan Lembar Nilai: ${msg}`);
+          setSyncStatus('Offline — lembar nilai disimpan di perangkat, menunggu sinkron');
           void outboxSyncService.enqueueOperation({
             idempotencyKey: `assessment-draft-${initializedAsm.id}`,
             tenantId: currentTenantId,
@@ -2723,10 +2866,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             },
             errorMessage: msg
           });
-          assessmentsRef.current = prevAssessmentsSnapshot;
-          setAssessments(prevAssessmentsSnapshot);
-          stageParticipationsRef.current = prevSpSnapshot;
-          setStageParticipations(prevSpSnapshot);
+        })
+        .finally(() => {
+          markAssessmentInFlight(initializedAsm.id, -1);
         });
     } else {
       setSyncStatus('Mode Simulasi Lokal (Tersimpan di Browser)');
@@ -2999,6 +3141,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         questionId: toDeterministicUuid(targetQuestionId),
         assignedMaqraId: matchedMaqraItem?.id
       };
+      markAssessmentInFlight(updatedAssessment.id, 1);
       void supabaseDataService
         .syncAssessmentToRemote(
           remoteAsmPayload,
@@ -3051,6 +3194,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             },
             errorMessage: msg
           });
+        })
+        .finally(() => {
+          markAssessmentInFlight(updatedAssessment.id, -1);
         });
     } else {
       setSyncStatus('Mode Simulasi Lokal (Tersimpan di Browser)');
