@@ -1,4 +1,13 @@
-export type OutboxItemStatus = 'pending' | 'syncing' | 'synced' | 'failed';
+/**
+ * Status item antrean:
+ * - pending  : menunggu dikirim
+ * - syncing  : sedang dikirim
+ * - failed   : gagal SEMENTARA (mis. jaringan) — dicoba ulang otomatis dengan jeda bertahap
+ * - rejected : DITOLAK server (hak akses, babak disahkan, data tidak valid) — TIDAK dicoba ulang otomatis;
+ *              pengguna memilih "Coba lagi" atau "Buang" lewat jendela Gagal Menyinkronkan
+ * - synced   : terkirim (biasanya langsung dihapus dari antrean)
+ */
+export type OutboxItemStatus = 'pending' | 'syncing' | 'synced' | 'failed' | 'rejected';
 
 export type OutboxOperationType =
   | 'UPSERT_ASSESSMENT_DRAFT'
@@ -20,14 +29,66 @@ export interface OutboxRecord<TPayload = Record<string, unknown>> {
   status: OutboxItemStatus;
   retryCount: number;
   lastError?: string;
+  /** id akun (auth user) pemilik perubahan; item tanpa ownerId berasal dari versi lama */
+  ownerId?: string;
+  /** waktu paling cepat percobaan berikutnya (ISO) untuk status failed */
+  nextAttemptAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Jenis kegagalan sinkron. */
+export type SyncFailureKind = 'network' | 'rejected';
+
+/**
+ * Bedakan gangguan jaringan (boleh dicoba ulang otomatis) dari penolakan server (percuma dicoba ulang).
+ */
+export function classifySyncFailure(message?: string | null): SyncFailureKind {
+  const text = (message || '').toLowerCase();
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'network';
+  if (
+    /row-level security|violates|permission denied|42501|not allowed|tidak diizinkan|forbidden|unauthori[sz]ed|jwt|foreign key|tidak ditemukan|not found|tidak valid|invalid input|sudah (difinalisasi|final|disahkan|dikunci)|terkunci|finalized|is_locked|duplicate key|tidak dikenal|tidak lengkap|check constraint/.test(
+      text
+    )
+  ) {
+    return 'rejected';
+  }
+  return 'network';
+}
+
+/** Terjemahkan pesan teknis menjadi kalimat yang mudah dipahami panitia & hakim. */
+export function friendlySyncError(message?: string | null): string {
+  const text = (message || '').toLowerCase();
+  if (!text) return 'Server tidak memberi alasan.';
+  if (/row-level security|permission denied|42501|not allowed|tidak diizinkan|forbidden/.test(text)) {
+    return 'Ditolak server: akun ini tidak berhak menyimpan data tersebut (mis. tidak ditugaskan di babak ini, atau babak sudah disahkan).';
+  }
+  if (/sudah (difinalisasi|final|disahkan|dikunci)|terkunci|finalized|is_locked/.test(text)) {
+    return 'Ditolak server: lembar atau babak ini sudah dikunci/disahkan.';
+  }
+  if (/foreign key|tidak ditemukan|not found/.test(text)) {
+    return 'Ditolak server: data terkait (peserta, babak, atau soal) tidak ditemukan di server.';
+  }
+  if (/jwt|unauthori[sz]ed|session/.test(text)) {
+    return 'Sesi masuk berakhir. Masuk kembali lalu coba lagi.';
+  }
+  if (/failed to fetch|network|timeout|timed out|kesalahan jaringan|load failed/.test(text)) {
+    return 'Koneksi ke server terputus. Akan dicoba lagi otomatis.';
+  }
+  return message as string;
+}
+
+/** Jeda bertahap percobaan ulang untuk gangguan jaringan: 20 dtk, 1 mnt, lalu tiap 5 mnt. */
+export function retryDelayMs(retryCount: number): number {
+  const steps = [20_000, 60_000, 300_000];
+  return steps[Math.min(Math.max(retryCount - 1, 0), steps.length - 1)];
 }
 
 export interface OutboxSummary {
   pendingCount: number;
   syncingCount: number;
   failedCount: number;
+  rejectedCount: number;
   syncedCount: number;
   lastSyncedAt: string | null;
   items: OutboxRecord[];
@@ -35,12 +96,13 @@ export interface OutboxSummary {
 
 type OutboxListener = (summary: OutboxSummary) => void;
 // `message` diterima juga karena pemroses di MtqContext mengembalikan { success, message }
+// `skipped: true` = item bukan milik akun yang sedang masuk; biarkan apa adanya
 type OutboxProcessor = (
   record: OutboxRecord
-) => Promise<{ success: boolean; error?: string; message?: string }>;
+) => Promise<{ success: boolean; error?: string; message?: string; skipped?: boolean }>;
 
-/** Jeda percobaan ulang otomatis untuk item tertunda/gagal (milidetik). */
-const RETRY_INTERVAL_MS = 20_000;
+/** Seberapa sering antrean diperiksa (item 'failed' tetap menunggu nextAttemptAt masing-masing). */
+const RETRY_INTERVAL_MS = 15_000;
 /** Jeda setelah perangkat kembali online, memberi waktu sesi login pulih lebih dulu. */
 const ONLINE_FLUSH_DELAY_MS = 2_500;
 
@@ -196,9 +258,16 @@ class OutboxSyncService {
     }
   }
 
+  private isDue(item: OutboxRecord, now = Date.now()): boolean {
+    if (item.status === 'pending') return true;
+    if (item.status !== 'failed') return false;
+    return !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now;
+  }
+
   private hasRetryableItems(): boolean {
+    const now = Date.now();
     for (const item of this.memoryStore.values()) {
-      if (item.status === 'pending' || item.status === 'failed') return true;
+      if (this.isDue(item, now)) return true;
     }
     return false;
   }
@@ -215,20 +284,29 @@ class OutboxSyncService {
     };
   }
 
-  public getSummary(tenantId?: string): OutboxSummary {
+  public getSummary(filter?: string | ((item: OutboxRecord) => boolean)): OutboxSummary {
+    const predicate =
+      typeof filter === 'function'
+        ? filter
+        : (item: OutboxRecord) => !filter || item.tenantId === filter;
     const allItems = Array.from(this.memoryStore.values())
-      .filter((item) => !tenantId || item.tenantId === tenantId)
+      .filter(predicate)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return OutboxSyncService.summarize(allItems, this.lastSyncedAt);
+  }
 
+  public static summarize(allItems: OutboxRecord[], lastSyncedAt: string | null): OutboxSummary {
     let pendingCount = 0;
     let syncingCount = 0;
     let failedCount = 0;
+    let rejectedCount = 0;
     let syncedCount = 0;
 
     for (const item of allItems) {
       if (item.status === 'pending') pendingCount += 1;
       else if (item.status === 'syncing') syncingCount += 1;
       else if (item.status === 'failed') failedCount += 1;
+      else if (item.status === 'rejected') rejectedCount += 1;
       else if (item.status === 'synced') syncedCount += 1;
     }
 
@@ -236,8 +314,9 @@ class OutboxSyncService {
       pendingCount,
       syncingCount,
       failedCount,
+      rejectedCount,
       syncedCount,
-      lastSyncedAt: this.lastSyncedAt,
+      lastSyncedAt,
       items: allItems,
     };
   }
@@ -259,6 +338,7 @@ class OutboxSyncService {
     entityLabel: string;
     payload: TPayload;
     errorMessage?: string;
+    ownerId?: string;
   }): Promise<OutboxRecord<TPayload>> {
     if (FORBIDDEN_OFFLINE_OPERATIONS.has(params.operationType)) {
       throw new Error(
@@ -275,13 +355,19 @@ class OutboxSyncService {
       (item) => item.idempotencyKey === params.idempotencyKey && item.status !== 'synced'
     );
 
+    // Penolakan server langsung ditandai 'rejected' (tidak dicoba ulang otomatis)
+    const initialStatus: OutboxItemStatus =
+      params.errorMessage && classifySyncFailure(params.errorMessage) === 'rejected' ? 'rejected' : 'pending';
+
     const record: OutboxRecord<TPayload> = existing
       ? {
           ...(existing as OutboxRecord<TPayload>),
           payload: params.payload,
           entityLabel: params.entityLabel,
-          status: 'pending',
+          status: initialStatus,
           lastError: params.errorMessage || existing.lastError,
+          ownerId: params.ownerId || existing.ownerId,
+          nextAttemptAt: undefined,
           updatedAt: now,
         }
       : {
@@ -291,9 +377,10 @@ class OutboxSyncService {
           operationType: params.operationType as OutboxOperationType,
           entityLabel: params.entityLabel,
           payload: params.payload,
-          status: 'pending',
+          status: initialStatus,
           retryCount: 0,
           lastError: params.errorMessage,
+          ownerId: params.ownerId,
           createdAt: now,
           updatedAt: now,
         };
@@ -317,6 +404,25 @@ class OutboxSyncService {
     this.notifyListeners();
   }
 
+  /** Kirim ulang satu item sekarang (dipakai tombol "Coba lagi"), termasuk item yang ditolak. */
+  public async retryItem(id: string): Promise<void> {
+    if (this.initPromise) await this.initPromise;
+    const item = this.memoryStore.get(id);
+    if (!item) return;
+    await this.persistRecord({ ...item, status: 'pending', nextAttemptAt: undefined, updatedAt: new Date().toISOString() });
+    this.notifyListeners();
+    await this.flushPendingQueue();
+  }
+
+  /** Buang item dari antrean (tombol "Buang perubahan ini"). Perubahan itu tidak akan dikirim ke server. */
+  public async discardItems(ids: string[]): Promise<void> {
+    if (this.initPromise) await this.initPromise;
+    for (const id of ids) {
+      if (this.memoryStore.has(id)) await this.removeRecord(id);
+    }
+    this.notifyListeners();
+  }
+
   public async flushPendingQueue(): Promise<{ processed: number; succeeded: number; failed: number }> {
     if (this.initPromise) {
       await this.initPromise;
@@ -328,8 +434,9 @@ class OutboxSyncService {
       return { processed: 0, succeeded: 0, failed: 0 };
     }
 
+    const nowMs = Date.now();
     const candidates = Array.from(this.memoryStore.values())
-      .filter((item) => item.status === 'pending' || item.status === 'failed')
+      .filter((item) => this.isDue(item, nowMs))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
     if (candidates.length === 0) {
@@ -354,28 +461,39 @@ class OutboxSyncService {
 
         try {
           const res = await this.processor(syncingItem);
-          if (res.success) {
+          if (res.skipped) {
+            // Bukan milik akun yang sedang masuk: kembalikan apa adanya
+            await this.persistRecord(item);
+            processed -= 1;
+          } else if (res.success) {
             succeeded += 1;
             await this.removeRecord(syncingItem.id);
             this.lastSyncedAt = new Date().toISOString();
           } else {
             failed += 1;
+            const errorText = res.error || res.message || 'Sinkronisasi gagal pada server.';
+            const retryCount = syncingItem.retryCount + 1;
+            const kind = classifySyncFailure(errorText);
             const failedItem: OutboxRecord = {
               ...syncingItem,
-              status: 'failed',
-              retryCount: syncingItem.retryCount + 1,
-              lastError: res.error || res.message || 'Sinkronisasi gagal pada server.',
+              status: kind === 'rejected' ? 'rejected' : 'failed',
+              retryCount,
+              lastError: errorText,
+              nextAttemptAt:
+                kind === 'rejected' ? undefined : new Date(Date.now() + retryDelayMs(retryCount)).toISOString(),
               updatedAt: new Date().toISOString(),
             };
             await this.persistRecord(failedItem);
           }
         } catch (err) {
           failed += 1;
+          const retryCount = syncingItem.retryCount + 1;
           const failedItem: OutboxRecord = {
             ...syncingItem,
             status: 'failed',
-            retryCount: syncingItem.retryCount + 1,
+            retryCount,
             lastError: err instanceof Error ? err.message : 'Kesalahan jaringan saat sinkronisasi.',
+            nextAttemptAt: new Date(Date.now() + retryDelayMs(retryCount)).toISOString(),
             updatedAt: new Date().toISOString(),
           };
           await this.persistRecord(failedItem);

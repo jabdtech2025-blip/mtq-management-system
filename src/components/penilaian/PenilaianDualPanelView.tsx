@@ -51,7 +51,8 @@ export const PenilaianDualPanelView: React.FC = () => {
     lastSyncTime,
     toggleSidebar,
     judgeAssignments,
-    getActiveRubricForBranch
+    getActiveRubricForBranch,
+    stages
   } = useMtq();
 
   // Find current participant (handle empty state gracefully)
@@ -271,7 +272,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Erase stroke near point without white paint!
   const eraseStrokesNear = (point: NormalizedPoint) => {
-    if (!currentParticipant || isFinalized || isAdminMode) return;
+    if (!currentParticipant || isFinalized || isEditLocked) return;
     const ERASE_RADIUS = 0.035; // Normalized radius
 
     const remainingStrokes = strokes.filter((s) => {
@@ -292,7 +293,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Pointer event handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!currentParticipant || isFinalized || isAdminMode || activeTool === 'scroll') return;
+    if (!currentParticipant || isFinalized || isEditLocked || activeTool === 'scroll') return;
     const pt = getNormalizedPoint(e);
     if (!pt) return;
 
@@ -307,7 +308,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !currentParticipant || isFinalized || isAdminMode || activeTool === 'scroll') return;
+    if (!isDrawing || !currentParticipant || isFinalized || isEditLocked || activeTool === 'scroll') return;
     const pt = getNormalizedPoint(e);
     if (!pt) return;
 
@@ -320,7 +321,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   };
 
   const handlePointerUp = () => {
-    if (!isDrawing || !currentParticipant || isFinalized || isAdminMode || activeTool === 'scroll') {
+    if (!isDrawing || !currentParticipant || isFinalized || isEditLocked || activeTool === 'scroll') {
       setIsDrawing(false);
       setCurrentStroke([]);
       return;
@@ -346,7 +347,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Undo stroke on current page
   const handleUndo = () => {
-    if (!currentParticipant || isFinalized || isAdminMode) return;
+    if (!currentParticipant || isFinalized || isEditLocked) return;
     const pageStrokes = strokes.filter((s) => s.page === currentPage);
     if (pageStrokes.length === 0) return;
 
@@ -358,7 +359,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Clear current page strokes only
   const handleConfirmClearPage = () => {
-    if (!currentParticipant || isFinalized || isAdminMode) return;
+    if (!currentParticipant || isFinalized || isEditLocked) return;
     const updated = strokes.filter((s) => s.page !== currentPage);
     setStrokes(updated);
     saveAnnotations(currentParticipant.id, activeJudgeId, updated, activeStageName, activeQuestionId);
@@ -369,16 +370,48 @@ export const PenilaianDualPanelView: React.FC = () => {
   const [isFlawlessConfirmed, setIsFlawlessConfirmed] = useState<boolean>(false);
   const [isFinalizing, setIsFinalizing] = useState<boolean>(false);
 
-  // Active judge assignment & field resolution
-  const currentJudgeAssignment = useMemo(() => {
-    if (!currentParticipant) return null;
-    return judgeAssignments.find(
-      (ja) =>
-        ja.judgeId === activeJudgeId &&
-        ja.stageName === activeStageName &&
-        (!ja.branchName || ja.branchName === 'Semua Cabang' || ja.branchName === currentParticipant.branchName)
+  // Babak (stage) milik peserta pada cabangnya — dipakai untuk cek "sudah disahkan" & penugasan
+  const activeStage = useMemo(() => {
+    if (!currentParticipant) return undefined;
+    const sameName = stages.filter((s) => s.name === activeStageName);
+    return (
+      (currentParticipant.stageId && stages.find((s) => s.id === currentParticipant.stageId)) ||
+      sameName.find((s) => currentParticipant.branchId && s.branchId === currentParticipant.branchId) ||
+      sameName.find((s) => s.branchName === currentParticipant.branchName) ||
+      sameName.find((s) => !s.branchId && (!s.branchName || s.branchName === 'Semua Cabang'))
     );
-  }, [judgeAssignments, activeJudgeId, activeStageName, currentParticipant]);
+  }, [stages, activeStageName, currentParticipant]);
+
+  // SELURUH penugasan aktif hakim ini di babak & cabang peserta (satu hakim bisa memegang beberapa rubrik/bidang).
+  // Aturan ini disamakan dengan fungsi database is_assigned_judge.
+  const activeJudgeAssignments = useMemo(() => {
+    if (!currentParticipant) return [];
+    return judgeAssignments.filter((ja) => {
+      if (ja.judgeId !== activeJudgeId) return false;
+      if (ja.status === 'Nonaktif') return false;
+      const stageMatches =
+        ja.stageId && activeStage?.id ? ja.stageId === activeStage.id : ja.stageName === activeStageName;
+      if (!stageMatches) return false;
+      if (ja.branchId && currentParticipant.branchId) {
+        return ja.branchId === currentParticipant.branchId || ja.branchId === activeStage?.branchId;
+      }
+      return !ja.branchName || ja.branchName === 'Semua Cabang' || ja.branchName === currentParticipant.branchName;
+    });
+  }, [judgeAssignments, activeJudgeId, activeStageName, activeStage, currentParticipant]);
+  const currentJudgeAssignment = activeJudgeAssignments[0] || null;
+
+  // Pencegahan di sumbernya: hakim hanya boleh mengisi lembar bila ditugaskan dan babak belum disahkan
+  const judgeLockReason: string | null = (() => {
+    if (isAdminMode || !currentParticipant || isFinalized) return null;
+    if (activeStage?.isFinalized) {
+      return `Babak ${activeStageName} sudah disahkan. Lembar penilaian hanya dapat dilihat.`;
+    }
+    if (activeJudgeAssignments.length === 0) {
+      return `Anda tidak ditugaskan menilai babak ${activeStageName} untuk cabang ${currentParticipant.branchName}. Hubungi panitia bila ini keliru.`;
+    }
+    return null;
+  })();
+  const isEditLocked = isAdminMode || Boolean(judgeLockReason);
 
   const assignedFieldName =
     currentJudgeAssignment?.judgeField ||
@@ -391,12 +424,13 @@ export const PenilaianDualPanelView: React.FC = () => {
   const activeErrorCategories = useMemo(() => {
     const activeOnly = errorCategories.filter((cat) => cat.status !== 'Nonaktif');
 
-    if (assignedFieldId || assignedFieldName) {
-      const lowerAssigned = (assignedFieldName || '').toLowerCase();
+    const categoriesForField = (fieldId?: string, fieldName?: string) => {
+      const lowerAssigned = (fieldName || '').toLowerCase();
       const cleanedAssigned = lowerAssigned.replace(/^bidang\s+/i, '').trim();
 
       const matchingRubricField = activeRubric?.fields?.find((f) => {
-        if (assignedFieldId && f.id === assignedFieldId) return true;
+        if (fieldId && f.id === fieldId) return true;
+        if (!lowerAssigned) return false;
         const fName = f.name.toLowerCase();
         const fCode = f.code.toLowerCase();
         const cleanedFName = fName.replace(/^bidang\s+/i, '').trim();
@@ -409,11 +443,11 @@ export const PenilaianDualPanelView: React.FC = () => {
         );
       });
 
-      const targetFieldId = assignedFieldId || matchingRubricField?.id;
-      const targetFieldName = (matchingRubricField?.name || assignedFieldName || '').toLowerCase();
+      const targetFieldId = fieldId || matchingRubricField?.id;
+      const targetFieldName = (matchingRubricField?.name || fieldName || '').toLowerCase();
       const cleanedTargetField = targetFieldName.replace(/^bidang\s+/i, '').trim();
 
-      const filtered = activeOnly.filter((cat) => {
+      return activeOnly.filter((cat) => {
         if (targetFieldId && cat.fieldId === targetFieldId) return true;
         const catScope = (cat.scope || '').toLowerCase();
         const catName = (cat.name || '').toLowerCase();
@@ -422,12 +456,33 @@ export const PenilaianDualPanelView: React.FC = () => {
         if (cleanedTargetField && (catScope.includes(cleanedTargetField) || catName.includes(cleanedTargetField))) return true;
         return false;
       });
+    };
 
-      if (filtered.length > 0) return filtered;
+    // Satu hakim dapat ditugaskan pada beberapa rubrik/bidang di babak yang sama: gabungkan kategorinya
+    const fieldTargets =
+      activeJudgeAssignments.length > 0
+        ? activeJudgeAssignments.map((ja) => ({
+            id: ja.judgeFieldId || ja.rubricFieldId,
+            name: ja.rubricFieldName || ja.judgeField
+          }))
+        : assignedFieldId || assignedFieldName
+          ? [{ id: assignedFieldId, name: assignedFieldName }]
+          : [];
+
+    if (fieldTargets.length > 0) {
+      const seen = new Set<string>();
+      const merged = fieldTargets
+        .flatMap((t) => categoriesForField(t.id, t.name))
+        .filter((cat) => {
+          if (seen.has(cat.id)) return false;
+          seen.add(cat.id);
+          return true;
+        });
+      if (merged.length > 0) return merged;
     }
 
     return activeOnly;
-  }, [errorCategories, assignedFieldId, assignedFieldName, activeRubric]);
+  }, [errorCategories, activeJudgeAssignments, assignedFieldId, assignedFieldName, activeRubric]);
   const errorCounts = currentAssessment?.errorCounts || {};
   const startingScore = activeRubric?.startingScore ?? 100.0;
   const liveScoreCalc = useMemo(() => {
@@ -441,7 +496,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Finalize action
   const handleConfirmFinalize = async () => {
-    if (!currentParticipant || isFinalizing) return;
+    if (!currentParticipant || isFinalizing || isEditLocked) return;
     if (isZeroErrorSheet && !isFlawlessConfirmed) {
       setFinalizeError(
         'Lembar penilaian memiliki 0 kesalahan. Centang konfirmasi penampilan sempurna (0 kesalahan) terlebih dahulu sebelum mengunci nilai.'
@@ -597,6 +652,11 @@ export const PenilaianDualPanelView: React.FC = () => {
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-md shadow-sm">
                   <Lock className="w-3.5 h-3.5 text-amber-600" />
                   <span>Terkunci (Final)</span>
+                </div>
+              ) : judgeLockReason ? (
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-2.5 py-1.5 rounded-md shadow-sm">
+                  <Lock className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Hanya Baca</span>
                 </div>
               ) : (
                 <>
@@ -810,7 +870,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                 onPointerCancel={handlePointerUp}
                 style={{ touchAction: activeTool === 'scroll' ? 'auto' : 'none' }}
                 className={`absolute inset-0 w-full h-full ${
-                  isAdminMode || isFinalized || activeTool === 'scroll'
+                  isEditLocked || isFinalized || activeTool === 'scroll'
                     ? 'cursor-grab pointer-events-none'
                     : 'cursor-crosshair'
                 }`}
@@ -944,6 +1004,8 @@ export const PenilaianDualPanelView: React.FC = () => {
                     ? 'Mode Pantau'
                     : isFinalized
                     ? 'Terkunci'
+                    : judgeLockReason
+                    ? 'Hanya baca'
                     : 'Ketuk + / - (48px)'}
                 </span>
               </div>
@@ -1011,7 +1073,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                                   activeQuestionId || currentParticipant.questionId || undefined
                                 )
                               }
-                              disabled={count <= 0 || isFinalized || isAdminMode}
+                              disabled={count <= 0 || isFinalized || isEditLocked}
                               className="w-12 h-12 rounded-md bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-800 flex items-center justify-center font-bold transition-colors shadow-sm cursor-pointer shrink-0"
                               title="Kurangi 1 Kesalahan"
                               aria-label={`Kurangi kesalahan ${cat.name}`}
@@ -1031,7 +1093,7 @@ export const PenilaianDualPanelView: React.FC = () => {
                                   activeQuestionId || currentParticipant.questionId || undefined
                                 )
                               }
-                              disabled={isFinalized || isAdminMode}
+                              disabled={isFinalized || isEditLocked}
                               className="w-12 h-12 rounded-md bg-emerald-800 hover:bg-emerald-700 active:bg-emerald-900 disabled:opacity-30 disabled:pointer-events-none text-white flex items-center justify-center font-bold transition-colors shadow-sm cursor-pointer shrink-0"
                               title="Tambah 1 Kesalahan"
                               aria-label={`Tambah kesalahan ${cat.name}`}
@@ -1069,6 +1131,16 @@ export const PenilaianDualPanelView: React.FC = () => {
                 <p className="text-xs text-emerald-700 mt-0.5 font-mono tabular-nums">
                   Difinalisasi pada: {currentAssessment?.finalizedAt || lastSyncTime}
                 </p>
+              </div>
+            ) : judgeLockReason ? (
+              <div
+                role="status"
+                data-testid="judge-lock-reason"
+                className="p-3 bg-amber-50 border border-amber-200 rounded-md text-center"
+              >
+                <Lock className="w-4 h-4 text-amber-700 mx-auto mb-1" />
+                <p className="text-xs font-bold text-amber-900">Lembar Hanya Dapat Dilihat</p>
+                <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">{judgeLockReason}</p>
               </div>
             ) : participantAssignedQuestions.length === 0 ? (
               <div className="p-3 bg-slate-100 border border-slate-200 rounded-md text-center">

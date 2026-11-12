@@ -63,7 +63,7 @@ import {
   getBranchRuleConfig,
   resolveActiveRubricForBranch
 } from '../services/competitionRules';
-import { outboxSyncService, OutboxSummary } from '../services/outboxSyncService';
+import { outboxSyncService, OutboxSummary, OutboxRecord, friendlySyncError } from '../services/outboxSyncService';
 import {
   fisherYatesShuffle,
   ParsedParticipantImportRow,
@@ -214,8 +214,13 @@ interface MtqContextType {
   ) => Promise<{ success: boolean; message: string }>;
   stageSnapshots: StageResultSnapshot[];
   lotteryDrawLogs: LotteryDrawLogItem[];
+  /** Ringkasan antrean sinkron MILIK akun yang sedang masuk (kosong di Mode Demo). */
   outboxSummary: OutboxSummary;
   flushOutboxQueue: () => Promise<{ processed: number; succeeded: number; failed: number }>;
+  /** Kirim ulang satu item antrean sekarang (tombol "Coba lagi"). */
+  retryOutboxItem: (id: string) => Promise<void>;
+  /** Buang item antrean lalu muat ulang data dari server (tombol "Buang perubahan ini"). */
+  discardOutboxItems: (ids: string[]) => Promise<void>;
   getJudgeAssessment: (
     participantId: string,
     judgeId: string,
@@ -990,8 +995,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [outboxSummary, setOutboxSummary] = useState<OutboxSummary>(() =>
-    outboxSyncService.getSummary()
+    outboxSyncService.getSummary(() => false)
   );
+  const isOfflineDemoRef = useRef<boolean>(isOfflineDemoSimulation);
+  isOfflineDemoRef.current = isOfflineDemoSimulation;
 
   // Refs for synchronous access during back-to-back initializeAssessment -> finalizeAssessment calls
   // and race condition protection across auth/hydration requests
@@ -1052,6 +1059,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     outboxSyncService.registerProcessor(async (op) => {
+      // Mode Demo tidak pernah mengirim ke server; item milik akun lain dibiarkan apa adanya
+      const currentOwnerId = authenticatedProfileRef.current?.authUserId;
+      if (isOfflineDemoRef.current || !currentOwnerId || (op.ownerId && op.ownerId !== currentOwnerId)) {
+        return { success: false, skipped: true };
+      }
       try {
         if (op.operationType === 'UPSERT_ASSESSMENT_DRAFT') {
           const { assessment, assignedMaqraId, stageParticipation, participant } = op.payload || {};
@@ -1184,14 +1196,39 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    const unsubscribe = outboxSyncService.subscribe((summary) => {
-      setOutboxSummary(summary);
+    const unsubscribe = outboxSyncService.subscribe(() => {
+      setOutboxSummary(outboxSyncService.getSummary(isOwnOutboxItem));
     });
     return unsubscribe;
   }, []);
 
+  // Hanya item milik akun yang sedang masuk yang ditampilkan & dihitung.
+  // Item lama tanpa pemilik (dari versi sebelumnya) tetap ditampilkan agar bisa dibuang.
+  function isOwnOutboxItem(item: OutboxRecord): boolean {
+    if (isOfflineDemoRef.current) return false;
+    const ownerId = authenticatedProfileRef.current?.authUserId;
+    if (!ownerId) return false;
+    return !item.ownerId || item.ownerId === ownerId;
+  }
+
+  useEffect(() => {
+    setOutboxSummary(outboxSyncService.getSummary(isOwnOutboxItem));
+  }, [authenticatedProfile?.authUserId, isOfflineDemoSimulation]);
+
   const flushOutboxQueue = async () => {
     return outboxSyncService.flushPendingQueue();
+  };
+
+  const retryOutboxItem = async (id: string) => {
+    await outboxSyncService.retryItem(id);
+  };
+
+  const discardOutboxItems = async (ids: string[]) => {
+    await outboxSyncService.discardItems(ids);
+    // Lembar yang dibuang tidak lagi dilindungi dari data server: muat ulang agar tampilan sesuai server
+    if (!isOfflineDemoRef.current) {
+      void refreshSupabaseConnection();
+    }
   };
 
   useEffect(() => {
@@ -2791,7 +2828,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     stageParticipationsRef.current = nextStageParticipations;
     setStageParticipations(nextStageParticipations);
 
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+    if (isLiveDbActive) {
       setSyncStatus('Menyimpan ke database...');
       const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
       const remoteAsmPayload = {
@@ -2829,6 +2866,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             // Gangguan jaringan: lembar tetap di perangkat dan dikirim otomatis saat tersambung
             setSyncStatus('Offline — lembar nilai disimpan di perangkat, menunggu sinkron');
             void outboxSyncService.enqueueOperation({
+              ownerId: authenticatedProfileRef.current?.authUserId,
               idempotencyKey: `assessment-draft-${initializedAsm.id}`,
               tenantId: currentTenantId,
               operationType: 'UPSERT_ASSESSMENT_DRAFT',
@@ -2854,6 +2892,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const msg = err instanceof Error ? err.message : 'Kesalahan jaringan';
           setSyncStatus('Offline — lembar nilai disimpan di perangkat, menunggu sinkron');
           void outboxSyncService.enqueueOperation({
+              ownerId: authenticatedProfileRef.current?.authUserId,
             idempotencyKey: `assessment-draft-${initializedAsm.id}`,
             tenantId: currentTenantId,
             operationType: 'UPSERT_ASSESSMENT_DRAFT',
@@ -3128,7 +3167,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     notifyCrossTabSync(`Koreksi Nilai ${part.name}`);
 
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+    if (isLiveDbActive) {
       setSyncStatus('Menyimpan ke database...');
       const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
       const remoteAsmPayload = {
@@ -3164,6 +3203,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } else {
             setSyncStatus(`Menunggu Sinkronisasi Ulang: ${res.message}`);
             void outboxSyncService.enqueueOperation({
+              ownerId: authenticatedProfileRef.current?.authUserId,
               idempotencyKey: `assessment-draft-${updatedAssessment.id}`,
               tenantId: currentTenantId,
               operationType: 'UPSERT_ASSESSMENT_DRAFT',
@@ -3182,6 +3222,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const msg = err instanceof Error ? err.message : 'Kesalahan jaringan';
           setSyncStatus(`Menunggu Sinkronisasi Ulang: ${msg}`);
           void outboxSyncService.enqueueOperation({
+              ownerId: authenticatedProfileRef.current?.authUserId,
             idempotencyKey: `assessment-draft-${updatedAssessment.id}`,
             tenantId: currentTenantId,
             operationType: 'UPSERT_ASSESSMENT_DRAFT',
@@ -3327,7 +3368,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [...others, updatedSheet];
     });
 
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated && activeRubric) {
+    if (isLiveDbActive && activeRubric) {
       const matchedMaqraItem = stageQuestions.find((q) => q.questionId === targetQuestionId);
       void supabaseDataService
         .syncAssessmentToRemote(
@@ -3543,7 +3584,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let persistedAssessmentId = existing.id;
 
     // 10. Database Transaction First when in live database mode!
-    if (supabaseDataService.isLive() && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+    if (supabaseDataService.isLive() && isLiveDbActive) {
       setSyncStatus('Memproses finalisasi di server...');
       const asmUuid = toDeterministicUuid(existing.id);
 
@@ -3572,7 +3613,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setSyncStatus('Gagal Menyimpan Draf ke Database');
         return {
           success: false,
-          message: `Gagal menyimpan draf penilaian ke database sebelum finalisasi: ${syncRes.message}`
+          message: `Gagal menyimpan lembar sebelum dikunci. ${friendlySyncError(syncRes.message)}`
         };
       }
 
@@ -3779,7 +3820,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Execute server RPC FIRST when connected to live database
-    if (supabaseDataService.isLive() && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+    if (supabaseDataService.isLive() && isLiveDbActive) {
       setSyncStatus('Membuka kunci penilaian di server...');
       const rpcRes = await supabaseDataService.reopenJudgeAssessmentRpc(
         toDeterministicUuid(existing.id),
@@ -4929,7 +4970,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     // Persist assigned_maqra in database and sync returned database row ID
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+    if (isLiveDbActive) {
       void supabaseDataService
         .assignMaqraRecord({
           id: maqraRecordId,
@@ -5308,7 +5349,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const matchedLevelObj = resolvedLevelName ? jenjangList.find((j) => j.name === resolvedLevelName) : undefined;
 
     // Persist assigned_maqras atomically to live database if connected via commit_lottery_draw RPC (P0-04)
-    if (connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated) {
+    if (isLiveDbActive) {
       void supabaseDataService
         .commitLotteryDrawRpc({
           tenantId: toDeterministicUuid(currentTenantId),
@@ -5416,6 +5457,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .then((res) => {
           if (!res.success) {
             void outboxSyncService.enqueueOperation({
+              ownerId: authenticatedProfileRef.current?.authUserId,
               idempotencyKey: `lottery-draw-${drawLogEntry.id}`,
               tenantId: currentTenantId,
               operationType: 'COMMIT_LOTTERY_DRAW',
@@ -5429,6 +5471,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .catch((err) => {
           void outboxSyncService.enqueueOperation({
+              ownerId: authenticatedProfileRef.current?.authUserId,
             idempotencyKey: `lottery-draw-${drawLogEntry.id}`,
             tenantId: currentTenantId,
             operationType: 'COMMIT_LOTTERY_DRAW',
@@ -7196,7 +7239,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // 7. Execute Server RPC Transaction FIRST (including final championship where nextStageId = null!)
     const isServerCommit =
-      supabaseDataService.isLive() && connectionInfo.isDatabaseReady && connectionInfo.isAuthenticated;
+      supabaseDataService.isLive() && isLiveDbActive;
     if (isServerCommit) {
       setSyncStatus('Mengesahkan hasil babak di server...');
       const rpcRankingsSnapshot = stageSnapshot.rankings.map((entry) => ({
@@ -7799,6 +7842,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lotteryDrawLogs: lotteryDrawLogs.filter((l) => l.tenantId === currentTenantId),
         outboxSummary,
         flushOutboxQueue,
+        retryOutboxItem,
+        discardOutboxItems,
         getJudgeAssessment,
         getParticipantProgress,
         getStageParticipation,

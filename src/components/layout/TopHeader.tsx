@@ -13,6 +13,7 @@ import {
 import { useMtq, ViewType } from '../../context/MtqContext';
 import { formatTimestampDisplay } from '../../utils/dateTime';
 import { PWAInstallHeaderButton } from '../pwa/PWAInstallSection';
+import { SyncIssuesModal } from './SyncIssuesModal';
 
 export const TopHeader: React.FC = () => {
   const {
@@ -35,6 +36,15 @@ export const TopHeader: React.FC = () => {
   );
 
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isSyncIssuesOpen, setIsSyncIssuesOpen] = useState(false);
+  // Buka otomatis jendela "Gagal menyinkronkan" saat ada perubahan BARU yang ditolak server (sekali per item)
+  const seenRejectedIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const rejectedIds = outboxSummary.items.filter((i) => i.status === 'rejected').map((i) => i.id);
+    const hasNew = rejectedIds.some((id) => !seenRejectedIdsRef.current.has(id));
+    rejectedIds.forEach((id) => seenRejectedIdsRef.current.add(id));
+    if (hasNew) setIsSyncIssuesOpen(true);
+  }, [outboxSummary]);
   const notificationDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -67,7 +77,8 @@ export const TopHeader: React.FC = () => {
     };
   }, [isNotificationOpen]);
 
-  const pendingOrFailedCount = outboxSummary.pendingCount + outboxSummary.failedCount;
+  const pendingOrFailedCount =
+    outboxSummary.pendingCount + outboxSummary.failedCount + outboxSummary.rejectedCount;
   const isSyncingState =
     outboxSummary.syncingCount > 0 ||
     connectionInfo.state === 'checking' ||
@@ -80,11 +91,8 @@ export const TopHeader: React.FC = () => {
     if (!isLiveSupabaseMode) return 'Mode Demo';
     if (!isBrowserOnline) return 'Offline';
     if (isSyncingState) return 'Syncing';
-    if (
-      pendingOrFailedCount > 0 ||
-      syncStatus.toLowerCase().includes('gagal') ||
-      (isLiveSupabaseMode && !connectionInfo.isDatabaseReady)
-    ) {
+    // Hanya isi antrean & koneksi yang menentukan, bukan kata "gagal" pada teks status
+    if (pendingOrFailedCount > 0 || (isLiveSupabaseMode && !connectionInfo.isDatabaseReady)) {
       return 'Unsynced';
     }
     return 'Connected';
@@ -189,15 +197,24 @@ export const TopHeader: React.FC = () => {
           {/* In-App Install Prompt Button */}
           <PWAInstallHeaderButton />
 
-          {/* Connection Status Pill */}
-          <div
+          {/* Connection Status Pill — klik untuk melihat perubahan yang belum terkirim */}
+          <button
+            type="button"
             data-testid="header-connection-status"
+            onClick={() => isLiveSupabaseMode && setIsSyncIssuesOpen(true)}
+            aria-haspopup="dialog"
             title={`${syncStatus}${lastSyncTime ? ` • Sinkron terakhir: ${lastSyncTime}` : ''}`}
-            className="inline-flex items-center gap-2 h-9 px-3 rounded-md border border-slate-200/80 bg-white/90 text-xs font-medium text-slate-700 shadow-sm"
+            className={`inline-flex items-center gap-2 h-9 px-3 rounded-md border text-xs font-medium shadow-sm cursor-pointer transition-colors ${
+              outboxSummary.rejectedCount > 0
+                ? 'border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100'
+                : 'border-slate-200/80 bg-white/90 text-slate-700 hover:bg-slate-50'
+            }`}
           >
-            <span className={`w-2 h-2 rounded-full ${dotColorClass}`} />
+            <span className={`w-2 h-2 rounded-full ${outboxSummary.rejectedCount > 0 ? 'bg-rose-500' : dotColorClass}`} />
             <span>
-              {headerConnectionState === 'Connected'
+              {outboxSummary.rejectedCount > 0
+                ? 'Gagal Menyinkronkan'
+                : headerConnectionState === 'Connected'
                 ? 'Tersambung'
                 : headerConnectionState === 'Syncing'
                 ? 'Menyinkronkan'
@@ -205,7 +222,13 @@ export const TopHeader: React.FC = () => {
                 ? 'Belum Tersinkron'
                 : headerConnectionState}
             </span>
-          </div>
+            {pendingOrFailedCount > 0 && (
+              <span className="min-w-5 h-5 px-1.5 rounded-full bg-white/80 border border-current/20 font-mono tabular-nums text-[11px] leading-5 text-center">
+                {pendingOrFailedCount}
+              </span>
+            )}
+          </button>
+          <SyncIssuesModal isOpen={isSyncIssuesOpen} onClose={() => setIsSyncIssuesOpen(false)} />
 
           {/* Notification Bell */}
           <div className="relative" ref={notificationDropdownRef}>

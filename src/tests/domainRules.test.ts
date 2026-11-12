@@ -31,6 +31,11 @@ import {
   resolveCorsHeaders,
   buildPublicProvisionSuccessResponse
 } from '../utils/provisionSecurity';
+import {
+  classifySyncFailure,
+  friendlySyncError,
+  retryDelayMs
+} from '../services/outboxSyncService';
 import fs from 'fs';
 import path from 'path';
 
@@ -1942,6 +1947,45 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       p11.isDecisiveTie === false &&
       (p11.tieBreakResolvedBy || '').startsWith('Seri — berbagi peringkat'),
     `canFinalize: ${s36f.canFinalize}, code: ${blockCode(s36f)}, q11: ${p11.isQualified}, q12: ${p12.isQualified}`
+  );
+
+  // 37a. Klasifikasi kegagalan sinkronisasi: penolakan server vs gangguan jaringan
+  assert(
+    '37a. classifySyncFailure membedakan penolakan server (rejected) dari gangguan jaringan sementara (network)',
+    classifySyncFailure('new row violates row-level security policy for table "judge_assessments"') === 'rejected' &&
+      classifySyncFailure('permission denied for table judge_assessments (42501)') === 'rejected' &&
+      classifySyncFailure('Babak Penyisihan sudah disahkan dan terkunci.') === 'rejected' &&
+      classifySyncFailure('insert or update violates foreign key constraint') === 'rejected' &&
+      classifySyncFailure('Failed to fetch') === 'network' &&
+      classifySyncFailure('NetworkError when attempting to fetch resource.') === 'network',
+    'Klasifikasi kegagalan sinkronisasi tidak sesuai'
+  );
+
+  // 37b. Terjemahan pesan ramah pengguna & jeda bertahap percobaan ulang
+  assert(
+    '37b. friendlySyncError menerjemahkan galat teknis ke kalimat ramah pengguna dan retryDelayMs meningkat bertahap (20s -> 60s -> 300s)',
+    friendlySyncError('new row violates row-level security policy').includes('Ditolak server: akun ini tidak berhak') &&
+      friendlySyncError('Lembar sudah difinalisasi').includes('sudah dikunci/disahkan') &&
+      friendlySyncError('Failed to fetch').includes('Koneksi ke server terputus') &&
+      retryDelayMs(1) === 20_000 &&
+      retryDelayMs(2) === 60_000 &&
+      retryDelayMs(3) === 300_000 &&
+      retryDelayMs(10) === 300_000,
+    `delays: ${retryDelayMs(1)}, ${retryDelayMs(2)}, ${retryDelayMs(3)}`
+  );
+
+  // 37c. Pencegahan lembar penilaian hanya-baca & dukungan multi-rubrik pada PenilaianDualPanelView
+  const dualPanelSrc = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/components/penilaian/PenilaianDualPanelView.tsx'),
+    'utf-8'
+  );
+  assert(
+    '37c. PenilaianDualPanelView mengunci lembar (hanya-baca) bila hakim tidak ditugaskan atau babak sudah disahkan serta menggabungkan kategori dari seluruh penugasan rubrik hakim',
+    dualPanelSrc.includes('const activeJudgeAssignments = useMemo') &&
+      dualPanelSrc.includes('const judgeLockReason: string | null') &&
+      dualPanelSrc.includes('const isEditLocked = isAdminMode || Boolean(judgeLockReason)') &&
+      dualPanelSrc.includes('data-testid="judge-lock-reason"'),
+    'Penjaga isEditLocked / judgeLockReason / activeJudgeAssignments belum lengkap pada PenilaianDualPanelView.tsx'
   );
 
   return { passed, failed, results };
