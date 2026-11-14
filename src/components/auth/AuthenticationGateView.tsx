@@ -838,9 +838,20 @@ export const AuthenticationGateView: React.FC = () => {
 
         <div className="flex flex-wrap justify-between gap-2 px-5 pb-6 text-[13px] text-[#6B7280] lg:px-8">
           <span>© {year} Manajemen MTQ</span>
-          <a href={`mailto:${landingContent.contact.email}`} className="text-[#6B7280] no-underline hover:text-[#09403E]">
-            {landingContent.contact.email}
-          </a>
+          <span className="flex flex-wrap gap-x-4 gap-y-1">
+            <a href="/panduan" className="text-[#6B7280] no-underline hover:text-[#09403E]">
+              Panduan
+            </a>
+            <a href="/privasi" className="text-[#6B7280] no-underline hover:text-[#09403E]">
+              Privasi
+            </a>
+            <a href="/ketentuan" className="text-[#6B7280] no-underline hover:text-[#09403E]">
+              Ketentuan
+            </a>
+            <a href={`mailto:${landingContent.contact.email}`} className="text-[#6B7280] no-underline hover:text-[#09403E]">
+              {landingContent.contact.email}
+            </a>
+          </span>
         </div>
       </main>
     </div>

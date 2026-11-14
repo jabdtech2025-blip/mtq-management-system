@@ -245,3 +245,59 @@ export const landingContent: LandingContent = {
 
 export const whatsappLink = (contact: LandingContact): string =>
   `https://wa.me/${contact.whatsappNumber}?text=${encodeURIComponent(contact.whatsappMessage)}`;
+
+/* -------------------------------------------------------------------------- */
+/*  CMS ringan: penggabungan isi dari Superadmin (tabel site_content) dengan   */
+/*  isi bawaan di atas. Field yang kosong / tidak ada => memakai bawaan.        */
+/* -------------------------------------------------------------------------- */
+
+/** Nama field berisi URL gambar. Bila dikosongkan, gambar bawaan dari repo dipakai. */
+export const LANDING_IMAGE_KEYS = new Set(['image', 'backgroundImage', 'backdrop', 'logImage']);
+
+/** Bagian yang tidak boleh diubah lewat CMS (struktur navigasi & identitas teknis). */
+export const LANDING_LOCKED_KEYS = new Set(['nav', 'markCaption']);
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** URL gambar yang diizinkan: https:// atau path situs (/…). */
+export const isSafeImageUrl = (v: unknown): v is string =>
+  typeof v === 'string' && /^(https:\/\/[^\s"'<>]+|\/(?!\/)[^\s"'<>]*)$/i.test(v.trim());
+
+function mergeValue(base: unknown, override: unknown, key: string, fallbackItem?: unknown): unknown {
+  if (LANDING_LOCKED_KEYS.has(key)) return base;
+  if (override === undefined || override === null) return base;
+
+  if (LANDING_IMAGE_KEYS.has(key)) {
+    return isSafeImageUrl(override) ? override.trim() : base;
+  }
+  if (typeof base === 'string') {
+    return typeof override === 'string' && override.trim() !== '' ? override : base;
+  }
+  if (Array.isArray(base)) {
+    if (!Array.isArray(override)) return base;
+    const template = base[0] ?? fallbackItem;
+    return override
+      .map((item, idx) => {
+        const baseItem = base[idx] ?? template;
+        if (typeof baseItem === 'string') return typeof item === 'string' && item.trim() !== '' ? item : null;
+        return mergeValue(baseItem, item, String(idx), template);
+      })
+      .filter((item) => item !== null);
+  }
+  if (isPlainObject(base)) {
+    if (!isPlainObject(override)) return base;
+    const result: Record<string, unknown> = {};
+    Object.keys(base).forEach((k) => {
+      result[k] = mergeValue(base[k], override[k], k, isPlainObject(fallbackItem) ? fallbackItem[k] : undefined);
+    });
+    return result;
+  }
+  return base;
+}
+
+/** Gabungkan isi CMS ke isi bawaan. Struktur selalu mengikuti bawaan, jadi isi CMS yang rusak tidak merusak halaman. */
+export function mergeLandingContent(override: unknown, base: LandingContent = landingContent): LandingContent {
+  if (!isPlainObject(override)) return base;
+  return mergeValue(base, override, '') as LandingContent;
+}

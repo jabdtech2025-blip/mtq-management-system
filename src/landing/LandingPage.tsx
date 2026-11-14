@@ -3,7 +3,8 @@ import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/ibm-plex-sans/700.css';
-import { landingContent as c, whatsappLink } from '../content/landing';
+import { whatsappLink } from '../content/landing';
+import { CORE_FOOTER_LINKS, extraFooterPages, useLandingContent, usePublishedPages } from '../public/usePublicContent';
 import { LogoTile } from '../components/brand/Logo';
 
 const APP_PATH = '/app';
@@ -37,6 +38,9 @@ const GoldCheck: React.FC = () => (
 );
 
 const LandingPage: React.FC = () => {
+  // Isi bawaan langsung tampil; isi dari Superadmin (CMS) menggantikannya setelah termuat
+  const c = useLandingContent();
+  const footerPages = extraFooterPages(usePublishedPages());
   const [menuOpen, setMenuOpen] = useState(false);
   const wa = whatsappLink(c.contact);
   const year = new Date().getFullYear();
@@ -457,6 +461,19 @@ const LandingPage: React.FC = () => {
               <a href="#tahapan" className="text-[#D7E3E2] no-underline hover:text-white">Tahapan</a>
               <a href="#tanya-jawab" className="text-[#D7E3E2] no-underline hover:text-white">Tanya Jawab</a>
               <a href={APP_PATH} className="text-[#D7E3E2] no-underline hover:text-white">Masuk Sistem</a>
+            </nav>
+            <nav aria-label="Informasi" className="flex flex-col gap-1.5">
+              <span className="font-bold text-white">Informasi</span>
+              {CORE_FOOTER_LINKS.map((l) => (
+                <a key={l.href} href={l.href} className="text-[#D7E3E2] no-underline hover:text-white">
+                  {l.label}
+                </a>
+              ))}
+              {footerPages.map((p) => (
+                <a key={p.slug} href={`/${p.slug}`} className="text-[#D7E3E2] no-underline hover:text-white">
+                  {p.title}
+                </a>
+              ))}
             </nav>
             <address className="flex flex-col gap-1.5 not-italic">
               <span className="font-bold text-white">Kontak</span>

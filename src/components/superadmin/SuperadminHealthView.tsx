@@ -41,10 +41,16 @@ const MANUAL_HEALTH_CHECKS: ManualHealthCheckDefinition[] = [
       'Periksa apakah rate limit autentikasi (Authentication → Rate Limits) diatur secara proporsional agar dewan hakim tidak terblokir saat login massal di venue.'
   },
   {
-    id: 'storage_bucket_rls',
-    label: 'Bucket Storage Berkas (Mushaf & Foto Peserta) Terproteksi RLS',
+    id: 'self_signup_disabled',
+    label: 'Pendaftaran Mandiri Supabase Auth Dinonaktifkan',
     description:
-      'Verifikasi bahwa objek file mushaf dan tanda pengenal peserta disimpan pada bucket private dengan RLS storage.objects yang hanya dapat dibaca peserta/hakim berwenang.'
+      'Pastikan "Allow new users to sign up" dimatikan (Authentication → Sign In / Providers). Akun hanya dibuat lewat undangan administrator.'
+  },
+  {
+    id: 'realtime_publication',
+    label: 'Realtime Supabase Aktif untuk Rekap Nilai',
+    description:
+      'Pastikan migrasi 20261119 sudah dijalankan sehingga tabel judge_assessments, stage_participations, dan stages terdaftar di publikasi supabase_realtime (Database → Publications). Tanpa ini, rekap tidak ter-update otomatis.'
   },
   {
     id: 'auth_redirect_urls',
@@ -643,6 +649,7 @@ export const SuperadminHealthView: React.FC = () => {
                 >
                   <Checkbox
                     id={`manual-check-${m.id}`}
+                    data-testid={`manual-check-${m.id}`}
                     checked={isChecked}
                     onChange={(e) => void handleToggleManualCheck(m.id, e.target.checked)}
                     label={m.label}

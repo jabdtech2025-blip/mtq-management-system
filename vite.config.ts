@@ -109,6 +109,38 @@ export default defineConfig(() => {
                   statuses: [0, 200]
                 }
               }
+            },
+            // Halaman mushaf lokal (public/mushaf/*.webp, opsional). Hanya respons 200 yang disimpan,
+            // dan isinya diperbarui di latar agar penambahan file baru tetap terbaca.
+            {
+              urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/mushaf/'),
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'mushaf-lokal',
+                expiration: {
+                  maxEntries: 120,
+                  maxAgeSeconds: 60 * 60 * 24 * 60
+                },
+                cacheableResponse: {
+                  statuses: [200]
+                }
+              }
+            },
+            // Halaman mushaf dari pihak ketiga (cadangan). Disimpan agar tetap tampil saat Wi-Fi putus.
+            // Respons lintas-domain bersifat "opaque" (status 0) dan memakan kuota lebih besar, jadi dibatasi.
+            {
+              urlPattern: /^https:\/\/(android\.quran\.com|everyayah\.com)\/.*\.png$/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'mushaf-pihak-ketiga',
+                expiration: {
+                  maxEntries: 60,
+                  maxAgeSeconds: 60 * 60 * 24 * 60
+                },
+                cacheableResponse: {
+                  statuses: [0, 200]
+                }
+              }
             }
           ]
         },

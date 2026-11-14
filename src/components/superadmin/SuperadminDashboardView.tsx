@@ -50,6 +50,7 @@ export const SuperadminDashboardView: React.FC = () => {
           <button
             type="button"
             onClick={() => setCurrentView('superadmin_health')}
+            aria-label="Buka Kesehatan Sistem"
             className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-md shadow-xs transition-all cursor-pointer"
           >
             <Activity className="w-4 h-4 text-purple-700" />

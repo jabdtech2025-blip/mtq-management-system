@@ -23,6 +23,7 @@ const SuperadminTenantsView = React.lazy(() => import('./components/superadmin/S
 const SuperadminUsersView = React.lazy(() => import('./components/superadmin/SuperadminUsersView').then((m) => ({ default: m.SuperadminUsersView })));
 const SuperadminHealthView = React.lazy(() => import('./components/superadmin/SuperadminHealthView').then((m) => ({ default: m.SuperadminHealthView })));
 const SuperadminAuditView = React.lazy(() => import('./components/superadmin/SuperadminAuditView').then((m) => ({ default: m.SuperadminAuditView })));
+const SuperadminContentView = React.lazy(() => import('./components/superadmin/SuperadminContentView').then((m) => ({ default: m.SuperadminContentView })));
 const SuperadminSettingsView = React.lazy(() => import('./components/superadmin/SuperadminSettingsView').then((m) => ({ default: m.SuperadminSettingsView })));
 const ActivityLogView = React.lazy(() => import('./components/activityLog/ActivityLogView').then((m) => ({ default: m.ActivityLogView })));
 import { useDocumentMeta } from './hooks/useDocumentMeta';
@@ -88,6 +89,8 @@ const MainLayout: React.FC = () => {
         return <SuperadminAuditView />;
       case 'superadmin_settings':
         return <SuperadminSettingsView />;
+      case 'superadmin_content':
+        return <SuperadminContentView />;
 
       default:
         return <DashboardView />;

@@ -35,4 +35,24 @@ test.describe('E2E: Landing Page Publik', () => {
     await page.goto('/#error_description=contoh&error=access_denied');
     await expect(page.getByRole('button', { name: /Coba Mode Demo/i })).toBeVisible({ timeout: 15000 });
   });
+
+  test('05. Halaman publik Panduan, Kebijakan Privasi, dan Ketentuan tampil dari isi bawaan', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('link', { name: 'Kebijakan Privasi' })).toHaveAttribute('href', '/privasi');
+
+    await page.goto('/panduan');
+    await expect(page.getByRole('heading', { level: 1, name: 'Panduan Penggunaan' })).toBeVisible();
+    await page.getByRole('link', { name: /Panduan Dewan Hakim/i }).first().click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Panduan Dewan Hakim' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Mencatat kesalahan/i })).toBeVisible();
+
+    await page.goto('/privasi');
+    await expect(page.getByRole('heading', { level: 1, name: 'Kebijakan Privasi' })).toBeVisible();
+    await expect(page.getByText(/Berlaku sejak/i)).toBeVisible();
+    // Halaman publik boleh diindeks (tidak diberi noindex)
+    await expect(page.locator('meta[name="robots"]')).toHaveCount(0);
+
+    await page.goto('/halaman/tidak-ada');
+    await expect(page.getByRole('heading', { name: /Halaman tidak ditemukan/i })).toBeVisible();
+  });
 });

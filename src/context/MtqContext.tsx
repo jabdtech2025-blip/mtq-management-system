@@ -48,7 +48,7 @@ import {
 } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
 import { getParticipantStageCompletion, resolveRequiredJudgeIdsForStage } from '../services/completion';
-import { supabaseDataService, AuthenticatedSupabaseProfile } from '../services/supabaseDataService';
+import { mapJudgeAssessmentRow, TenantRealtimeEvent, supabaseDataService, AuthenticatedSupabaseProfile } from '../services/supabaseDataService';
 import {
   SupabaseConnectionInfo,
   AccessGateReason,
@@ -89,7 +89,8 @@ export type ViewType =
   | 'superadmin_users'
   | 'superadmin_health'
   | 'superadmin_audit'
-  | 'superadmin_settings';
+  | 'superadmin_settings'
+  | 'superadmin_content';
 
 export interface LocalNotification {
   id: string;
@@ -738,7 +739,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     superadmin_users: '/platform/users',
     superadmin_health: '/platform/health',
     superadmin_audit: '/platform/audit',
-    superadmin_settings: '/platform/settings'
+    superadmin_settings: '/platform/settings',
+    superadmin_content: '/platform/content'
   };
 
   const PATH_TO_VIEW: Record<string, ViewType> = Object.entries(VIEW_TO_PATH).reduce(
@@ -1732,10 +1734,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       void refreshSupabaseConnection();
     }
     if (supabase && !isOfflineDemoSimulation) {
-      const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'PASSWORD_RECOVERY') {
           setIsPasswordRecoveryMode(true);
         }
+        // Hemat kuota: muat ulang seluruh workspace HANYA bila identitas sesi berubah.
+        // TOKEN_REFRESHED (tiap ±1 jam) dan SIGNED_IN ulang saat tab aktif kembali untuk pengguna yang sama
+        // tidak perlu memuat ulang ±25 tabel.
+        const sessionUserId = session?.user?.id || null;
+        const loadedUserId = authenticatedProfileRef.current?.authUserId || null;
+        const identityChanged = sessionUserId !== loadedUserId;
+        const needsRefresh =
+          event === 'PASSWORD_RECOVERY' ||
+          event === 'USER_UPDATED' ||
+          event === 'SIGNED_OUT' ||
+          ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && identityChanged);
+        if (!needsRefresh) return;
         // Gunakan setTimeout(..., 0) agar tidak terjadi race condition / deadlock di dalam lock internal Supabase Auth
         setTimeout(() => {
           void refreshSupabaseConnection();
@@ -1782,41 +1796,131 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [isOfflineDemoSimulation]);
 
-  // Supabase Realtime Subscription + Cross-Tab BroadcastChannel (judge_assessments, stage_participations, stages)
+  // Ref terbaru untuk dipakai di dalam handler realtime (handler dibuat sekali per langganan)
+  const judgeAssignmentsRef = useRef<JudgeAssignment[]>(judgeAssignments);
+  judgeAssignmentsRef.current = judgeAssignments;
+  const usersRef = useRef<User[]>(users);
+  usersRef.current = users;
+  const refreshFnRef = useRef<() => Promise<SupabaseConnectionInfo>>(async () => connectionInfo);
+  refreshFnRef.current = refreshSupabaseConnection;
+
+  /**
+   * Terapkan SATU baris judge_assessments dari event realtime langsung ke state, tanpa memuat ulang
+   * seluruh workspace. Mengembalikan false bila baris belum bisa dipetakan (mis. maqra/partisipasi baru),
+   * sehingga pemanggil perlu memuat ulang penuh.
+   */
+  const applyRealtimeAssessmentRow = (event: TenantRealtimeEvent): boolean => {
+    if (event.eventType === 'DELETE') {
+      const deletedId = String(event.oldRow?.id || '');
+      if (!deletedId) return false;
+      setAssessments((prev) => {
+        const next = prev.filter((a) => toDeterministicUuid(a.id) !== deletedId);
+        assessmentsRef.current = next;
+        return next;
+      });
+      return true;
+    }
+    const row = event.newRow;
+    if (!row || !row.id || !row.stage_participation_id) return false;
+
+    const spById = new Map<string, StageParticipation>();
+    const questionIdByAssignedMaqraId = new Map<string, string>();
+    stageParticipationsRef.current.forEach((sp) => {
+      spById.set(sp.id, sp);
+      spById.set(toDeterministicUuid(sp.id), sp);
+      (sp.assignedQuestions || []).forEach((q) => {
+        if (q.id) questionIdByAssignedMaqraId.set(q.id, q.questionId);
+      });
+    });
+    const spKey = String(row.stage_participation_id);
+    const amKey = String(row.assigned_maqra_id || '');
+    if (!spById.has(spKey) || (amKey && !questionIdByAssignedMaqraId.has(amKey))) {
+      return false; // data pendukung belum ada di perangkat ini
+    }
+    const judgeInfoById = new Map<string, { name: string; field: string }>();
+    judgeAssignmentsRef.current.forEach((ja) => {
+      if (!judgeInfoById.has(ja.judgeId)) judgeInfoById.set(ja.judgeId, { name: ja.judgeName, field: ja.judgeField });
+    });
+    usersRef.current.forEach((u) => {
+      if (!judgeInfoById.has(u.id)) judgeInfoById.set(u.id, { name: u.name, field: u.judgeField || 'Dewan Hakim' });
+    });
+
+    const mapped = mapJudgeAssessmentRow(row, { spById, questionIdByAssignedMaqraId, judgeInfoById });
+    // Lembar yang masih di antrean / sedang dikirim dari perangkat ini: versi lokal tetap menang
+    const merged = mergeUnsyncedLocalAssessments([mapped]);
+    const incoming = merged.find((a) => toDeterministicUuid(a.id) === mapped.id) || mapped;
+
+    setAssessments((prev) => {
+      const idx = prev.findIndex((a) => toDeterministicUuid(a.id) === mapped.id);
+      const next = idx >= 0 ? prev.map((a, i) => (i === idx ? incoming : a)) : [...prev, incoming];
+      assessmentsRef.current = next;
+      return next;
+    });
+    setLastSyncTime(getWibTime());
+    return true;
+  };
+  const applyRealtimeAssessmentRowRef = useRef(applyRealtimeAssessmentRow);
+  applyRealtimeAssessmentRowRef.current = applyRealtimeAssessmentRow;
+
+  // Realtime Supabase + sinyal antar-tab.
+  // - judge_assessments: baris yang berubah diterapkan langsung (tanpa memuat ulang ±25 tabel).
+  // - stage_participations / stages (jarang berubah: undian, finalisasi, pengesahan): muat ulang penuh,
+  //   digabung dalam jeda 2 detik agar banyak event beruntun hanya memicu satu kali muat ulang.
+  // - Koneksi realtime pulih setelah terputus: muat ulang penuh sekali untuk menutup celah.
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    const triggerRefresh = (label: string) => {
+    const scheduleFullRefresh = (label: string, delayMs = 2000) => {
       setSyncStatus(label);
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
-        void refreshSupabaseConnection();
-      }, 250);
+        void refreshFnRef.current();
+      }, delayMs);
     };
+
+    const realtimeActive = isLiveDbActive && isLiveAccessAuthorized && isValidUuid(currentTenantId);
 
     let bc: BroadcastChannel | null = null;
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         bc = new BroadcastChannel('mtq_realtime_sync_channel');
         bc.onmessage = (ev) => {
+          // Dalam mode akun, perubahan dari tab lain sudah datang lewat realtime Supabase
+          if (realtimeActive) return;
           if (ev.data?.type === 'MTQ_DATA_UPDATED' && ev.data?.sourceId !== crossTabSourceIdRef.current) {
-            triggerRefresh(`Sinkronisasi Antar-Tab (${ev.data.reason || 'Penilaian'})...`);
+            scheduleFullRefresh(`Sinkronisasi Antar-Tab (${ev.data.reason || 'Penilaian'})...`, 250);
           }
         };
       }
     } catch {}
 
     let unsubscribeSupabase = () => {};
-    if (isLiveDbActive && isLiveAccessAuthorized && isValidUuid(currentTenantId)) {
-      unsubscribeSupabase = supabaseDataService.subscribeToTenantRealtime(
-        currentTenantId,
-        ({ table, eventType }) => {
-          triggerRefresh(`Sinkronisasi Realtime (${table} • ${eventType})...`);
+    if (realtimeActive) {
+      unsubscribeSupabase = supabaseDataService.subscribeToTenantRealtime(currentTenantId, (event) => {
+        if (event.table === 'judge_assessments') {
+          const applied = applyRealtimeAssessmentRowRef.current(event);
+          if (!applied) scheduleFullRefresh('Sinkronisasi Realtime (lembar penilaian baru)...');
+          return;
         }
-      );
+        if (event.table === 'connection') {
+          scheduleFullRefresh('Koneksi realtime pulih — menyelaraskan data...', 500);
+          return;
+        }
+        scheduleFullRefresh(`Sinkronisasi Realtime (${event.table})...`);
+      });
     }
+
+    // Pengaman: muat ulang penuh sesekali (tiap 5 menit, hanya saat tab terlihat) bila ada event yang terlewat
+    const safetyTimer = realtimeActive
+      ? setInterval(() => {
+          if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+            void refreshFnRef.current();
+          }
+        }, 5 * 60 * 1000)
+      : null;
 
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer);
+      if (safetyTimer) clearInterval(safetyTimer);
       unsubscribeSupabase();
       try {
         if (bc) bc.close();

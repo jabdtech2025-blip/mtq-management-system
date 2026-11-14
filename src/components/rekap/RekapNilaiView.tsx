@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Download,
   Search,
@@ -29,23 +29,11 @@ export const RekapNilaiView: React.FC = () => {
     getParticipantProgress,
     getParticipantStageQuestions,
     setSelectedParticipantId,
-    setCurrentView,
-    refreshSupabaseConnection
+    setCurrentView
   } = useMtq();
 
-  const refreshFnRef = useRef(refreshSupabaseConnection);
-  useEffect(() => {
-    refreshFnRef.current = refreshSupabaseConnection;
-  }, [refreshSupabaseConnection]);
-
-  // Real-time live synchronization: poll every 3s using a stable ref so in-flight requests are never cancelled by state re-renders
-  useEffect(() => {
-    void refreshFnRef.current();
-    const timer = setInterval(() => {
-      void refreshFnRef.current();
-    }, 3000);
-    return () => clearInterval(timer);
-  }, []);
+  // Data rekap diperbarui otomatis lewat realtime Supabase (lihat MtqContext): setiap lembar nilai yang berubah
+  // langsung diterapkan per baris. Tidak ada lagi polling 3 detik yang memuat ulang seluruh data.
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStage, setSelectedStage] = useState('Semua Babak');

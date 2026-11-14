@@ -138,7 +138,8 @@ export const TopHeader: React.FC = () => {
     superadmin_users: { section: 'Superadmin Platform', title: 'Manajemen Akun' },
     superadmin_health: { section: 'Superadmin Platform', title: 'Kesehatan Sistem (Health Check)' },
     superadmin_audit: { section: 'Superadmin Platform', title: 'Audit Log Platform' },
-    superadmin_settings: { section: 'Superadmin Platform', title: 'SEO dan Meta Situs' }
+    superadmin_settings: { section: 'Superadmin Platform', title: 'SEO dan Meta Situs' },
+    superadmin_content: { section: 'Superadmin Platform', title: 'Konten Situs' }
   };
 
   const routeInfo = viewRouteInfo[currentView] || { section: 'Ringkasan', title: 'Dashboard' };

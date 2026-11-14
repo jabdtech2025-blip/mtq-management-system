@@ -121,6 +121,61 @@ const SYSTEM_TENANT_UUID = '00000000-0000-0000-0000-000000000000';
  * - Menggunakan ID baris nyata dari database untuk assigned_maqras dan stage_participations.
  * - Memeriksa error setiap query pada hidrasi workspace dan tidak mencampur data demo saat mode database aktif.
  */
+/** Data pendukung untuk mengubah baris tabel judge_assessments menjadi JudgeAssessment. */
+export interface AssessmentRowLookups {
+  spById: Map<string, StageParticipation>;
+  questionIdByAssignedMaqraId: Map<string, string>;
+  judgeInfoById: Map<string, { name: string; field: string }>;
+}
+
+/**
+ * Ubah satu baris judge_assessments (dari query atau dari event realtime) menjadi JudgeAssessment.
+ * Dipakai bersama oleh pemuatan workspace penuh dan pembaruan realtime per baris.
+ */
+export function mapJudgeAssessmentRow(a: Record<string, unknown>, lookups: AssessmentRowLookups): JudgeAssessment {
+  const spId = String(a.stage_participation_id);
+  const spObj = lookups.spById.get(spId);
+  const amId = String(a.assigned_maqra_id);
+  const resolvedQuestionId = lookups.questionIdByAssignedMaqraId.get(amId) || amId;
+  const jId = String(a.judge_profile_id);
+  const jInfo = lookups.judgeInfoById.get(jId);
+  return {
+    id: String(a.id),
+    tenantId: String(a.tenant_id),
+    stageParticipationId: spId,
+    assignedMaqraId: amId,
+    stageId: spObj?.stageId || '',
+    stageName: spObj?.stageName || 'Penyisihan',
+    participantId: spObj?.participantId || '',
+    judgeId: jId,
+    judgeName: jInfo?.name || 'Dewan Hakim',
+    judgeField: jInfo?.field || 'Dewan Hakim',
+    questionId: resolvedQuestionId,
+    status: (a.status as JudgeAssessment['status']) || 'in_progress',
+    errorCounts: (a.error_counts as Record<string, number>) || {},
+    deductions: {},
+    fieldScores: (a.field_scores as Record<string, number>) || {},
+    totalDeductions: Number(a.total_deductions || 0),
+    finalScore: Number(a.final_score || 100),
+    annotations: (a.annotations as JudgeAssessment['annotations']) || [],
+    rubricVersionId: String(a.rubric_version_id),
+    isLocked: Boolean(a.is_locked),
+    reopenedAt: a.reopened_at ? String(a.reopened_at) : undefined,
+    reopenedBy: a.reopened_by ? String(a.reopened_by) : undefined,
+    reopenReason: a.reopen_reason ? String(a.reopen_reason) : undefined,
+    finalizedAt: a.finalized_at ? String(a.finalized_at) : undefined,
+    lastUpdated: String(a.updated_at || a.created_at || '')
+  };
+}
+
+/** Event realtime yang diteruskan ke aplikasi. */
+export interface TenantRealtimeEvent {
+  table: 'judge_assessments' | 'stage_participations' | 'stages' | 'connection';
+  eventType: string;
+  newRow?: Record<string, unknown>;
+  oldRow?: Record<string, unknown>;
+}
+
 export const supabaseDataService = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setTestDatabaseClient(client: any | null): void {
@@ -1436,41 +1491,13 @@ export const supabaseDataService = {
     const spLookup = new Map<string, StageParticipation>();
     stageParticipations.forEach((s) => spLookup.set(s.id, s));
 
-    const assessments: JudgeAssessment[] = (assessmentsRes.data || []).map((a: Record<string, unknown>) => {
-      const spId = String(a.stage_participation_id);
-      const spObj = spLookup.get(spId);
-      const amId = String(a.assigned_maqra_id);
-      const resolvedQuestionId = assignedMaqraIdToQuestionId.get(amId) || amId;
-      const jId = String(a.judge_profile_id);
-      const jInfo = judgeNameByProfileId.get(jId);
-      return {
-        id: String(a.id),
-        tenantId: String(a.tenant_id),
-        stageParticipationId: spId,
-        assignedMaqraId: amId,
-        stageId: spObj?.stageId || '',
-        stageName: spObj?.stageName || 'Penyisihan',
-        participantId: spObj?.participantId || '',
-        judgeId: jId,
-        judgeName: jInfo?.name || 'Dewan Hakim',
-        judgeField: jInfo?.field || 'Dewan Hakim',
-        questionId: resolvedQuestionId,
-        status: (a.status as JudgeAssessment['status']) || 'in_progress',
-        errorCounts: (a.error_counts as Record<string, number>) || {},
-        deductions: {},
-        fieldScores: (a.field_scores as Record<string, number>) || {},
-        totalDeductions: Number(a.total_deductions || 0),
-        finalScore: Number(a.final_score || 100),
-        annotations: (a.annotations as JudgeAssessment['annotations']) || [],
-        rubricVersionId: String(a.rubric_version_id),
-        isLocked: Boolean(a.is_locked),
-        reopenedAt: a.reopened_at ? String(a.reopened_at) : undefined,
-        reopenedBy: a.reopened_by ? String(a.reopened_by) : undefined,
-        reopenReason: a.reopen_reason ? String(a.reopen_reason) : undefined,
-        finalizedAt: a.finalized_at ? String(a.finalized_at) : undefined,
-        lastUpdated: String(a.updated_at || a.created_at || '')
-      };
-    });
+    const assessments: JudgeAssessment[] = (assessmentsRes.data || []).map((a: Record<string, unknown>) =>
+      mapJudgeAssessmentRow(a, {
+        spById: spLookup,
+        questionIdByAssignedMaqraId: assignedMaqraIdToQuestionId,
+        judgeInfoById: judgeNameByProfileId
+      })
+    );
 
     const stageSnapshots: StageResultSnapshot[] = (snapshotsRes.data || []).map((s: Record<string, unknown>) => {
       const stgId = String(s.stage_id);
@@ -4047,59 +4074,49 @@ export const supabaseDataService = {
     };
   },
 
-  subscribeToTenantRealtime(
-    tenantId: string,
-    onChange: (payload: { table: string; eventType: string }) => void
-  ): () => void {
+  /**
+   * Berlangganan perubahan realtime milik satu penyelenggara.
+   * - judge_assessments & stage_participations & stages difilter tenant_id di server (hemat kuota).
+   * - Event 'connection' dikirim saat koneksi realtime pulih setelah terputus, agar aplikasi
+   *   memuat ulang sekali untuk menutup celah perubahan yang terlewat.
+   * Catatan: tabel harus terdaftar di publikasi supabase_realtime (lihat migrasi 20261119).
+   */
+  subscribeToTenantRealtime(tenantId: string, onChange: (event: TenantRealtimeEvent) => void): () => void {
     const client = getActiveClient();
     if (!this.isLive() || !client || !isValidUuid(tenantId) || typeof client.channel !== 'function') {
       return () => {};
     }
 
-    const channelName = `mtq-live-tenant-${tenantId}`;
+    type Payload = { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> };
+    const forward = (table: TenantRealtimeEvent['table']) => (payload: Payload) => {
+      const rowTenantId = String(payload?.new?.tenant_id || payload?.old?.tenant_id || '');
+      // Event DELETE tidak bisa difilter di server dan baris lamanya hanya berisi id: saring di sini bila ada tenant_id
+      if (rowTenantId && rowTenantId !== tenantId) return;
+      onChange({
+        table,
+        eventType: payload?.eventType || 'UPDATE',
+        newRow: payload?.new && Object.keys(payload.new).length > 0 ? payload.new : undefined,
+        oldRow: payload?.old && Object.keys(payload.old).length > 0 ? payload.old : undefined
+      });
+    };
+
+    const filter = `tenant_id=eq.${tenantId}`;
+    let wasDisconnected = false;
     const channel = client
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'judge_assessments'
-        },
-        (payload: { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
-          const rowTenantId = String(payload?.new?.tenant_id || payload?.old?.tenant_id || '');
-          if (!rowTenantId || rowTenantId === tenantId) {
-            onChange({ table: 'judge_assessments', eventType: payload?.eventType || 'UPDATE' });
+      .channel(`mtq-live-tenant-${tenantId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'judge_assessments', filter }, forward('judge_assessments'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stage_participations', filter }, forward('stage_participations'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stages', filter }, forward('stages'))
+      .subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') {
+          if (wasDisconnected) {
+            wasDisconnected = false;
+            onChange({ table: 'connection', eventType: 'RECONNECTED' });
           }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          wasDisconnected = true;
         }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'stage_participations'
-        },
-        (payload: { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
-          const rowTenantId = String(payload?.new?.tenant_id || payload?.old?.tenant_id || '');
-          if (!rowTenantId || rowTenantId === tenantId) {
-            onChange({ table: 'stage_participations', eventType: payload?.eventType || 'UPDATE' });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'stages',
-          filter: `tenant_id=eq.${tenantId}`
-        },
-        (payload: { eventType?: string }) => {
-          onChange({ table: 'stages', eventType: payload?.eventType || 'UPDATE' });
-        }
-      )
-      .subscribe();
+      });
 
     return () => {
       try {
@@ -4112,6 +4129,106 @@ export const supabaseDataService = {
         // Ignore cleanup errors on unmount
       }
     };
+  },
+
+  /* ---------------------------- CMS ringan (Superadmin) ---------------------------- */
+
+  async fetchSiteContentAdmin(key: 'landing'): Promise<RpcServiceResult<{ content: Record<string, unknown>; updatedAt?: string }>> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Konten situs hanya tersedia saat terhubung ke database.' };
+    }
+    const { data, error } = await client.from('site_content').select('content, updated_at').eq('key', key).maybeSingle();
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return {
+      success: true,
+      mode: 'supabase_live',
+      message: 'Konten situs dimuat.',
+      data: { content: (data?.content as Record<string, unknown>) || {}, updatedAt: data?.updated_at ? String(data.updated_at) : undefined }
+    };
+  },
+
+  async saveSiteContent(key: 'landing', content: Record<string, unknown>): Promise<RpcServiceResult> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode Demo: konten tidak disimpan ke database.' };
+    }
+    const { error } = await client.from('site_content').upsert({ key, content }, { onConflict: 'key' });
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Konten landing page tersimpan.' };
+  },
+
+  async fetchSitePagesAdmin(): Promise<RpcServiceResult<Record<string, unknown>[]>> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Halaman hanya tersedia saat terhubung ke database.' };
+    }
+    const { data, error } = await client.from('site_pages').select('*').order('sort_order', { ascending: true });
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Halaman dimuat.', data: (data || []) as Record<string, unknown>[] };
+  },
+
+  async saveSitePage(page: {
+    id?: string;
+    slug: string;
+    title: string;
+    summary: string;
+    category: string;
+    bodyMd: string;
+    status: string;
+    effectiveDate?: string;
+    sortOrder: number;
+    showInFooter: boolean;
+  }): Promise<RpcServiceResult<{ id: string }>> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode Demo: halaman tidak disimpan ke database.' };
+    }
+    const row = {
+      slug: page.slug,
+      title: page.title,
+      summary: page.summary,
+      category: page.category,
+      body_md: page.bodyMd,
+      status: page.status,
+      effective_date: page.effectiveDate || null,
+      sort_order: page.sortOrder,
+      show_in_footer: page.showInFooter
+    };
+    const query = page.id
+      ? client.from('site_pages').update(row).eq('id', page.id).select('id').maybeSingle()
+      : client.from('site_pages').insert(row).select('id').maybeSingle();
+    const { data, error } = await query;
+    if (error) {
+      const msg = /duplicate key|unique/i.test(error.message) ? `Alamat (slug) "${page.slug}" sudah dipakai halaman lain.` : error.message;
+      return { success: false, mode: 'supabase_live', message: msg };
+    }
+    return { success: true, mode: 'supabase_live', message: 'Halaman tersimpan.', data: { id: String(data?.id || page.id || '') } };
+  },
+
+  async deleteSitePage(id: string): Promise<RpcServiceResult> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Mode Demo: halaman tidak dihapus dari database.' };
+    }
+    const { error } = await client.from('site_pages').delete().eq('id', id);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Halaman dihapus.' };
+  },
+
+  async fetchSitePageVersions(pageId: string): Promise<RpcServiceResult<Record<string, unknown>[]>> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, mode: 'local_offline_fallback', message: 'Riwayat hanya tersedia saat terhubung ke database.' };
+    }
+    const { data, error } = await client
+      .from('site_page_versions')
+      .select('id, title, body_md, status, effective_date, created_at')
+      .eq('page_id', pageId)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    return { success: true, mode: 'supabase_live', message: 'Riwayat dimuat.', data: (data || []) as Record<string, unknown>[] };
   },
 
   async fetchSiteSettings(): Promise<RpcServiceResult<SiteSettings>> {

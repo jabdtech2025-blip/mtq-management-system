@@ -19,7 +19,8 @@ const VIEW_PAGE_TITLES: Record<ViewType, string> = {
   superadmin_users: 'Manajemen Akun',
   superadmin_health: 'Kesehatan Sistem (Health Check)',
   superadmin_audit: 'Audit Log Platform',
-  superadmin_settings: 'SEO dan Meta Situs'
+  superadmin_settings: 'SEO dan Meta Situs',
+  superadmin_content: 'Konten Situs'
 };
 
 function upsertMetaTag(attrName: 'name' | 'property', attrValue: string, content: string) {

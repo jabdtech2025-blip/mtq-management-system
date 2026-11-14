@@ -126,27 +126,22 @@ test.describe('E2E: Navigasi Workspace Demo Lokal & Antarmuka Responsif', () => 
     // Verifikasi document.title menggunakan title_template
     await expect(page).toHaveTitle(/SEO dan Meta Situs — Manajemen MTQ/i);
 
-    // Verifikasi konfigurasi Favicon & pratinjau tab browser
+    // Favicon: hanya URL (tanpa unggah berkas) + pratinjau tab
     await expect(page.getByTestId('seo-favicon-section')).toBeVisible();
     const faviconInput = page.getByTestId('seo-input-favicon');
     await expect(faviconInput).toBeVisible();
-    await expect(page.getByTestId('seo-upload-favicon-btn')).toBeVisible();
     await expect(page.getByTestId('seo-favicon-preview-img')).toBeVisible();
     await faviconInput.fill('/icon.svg');
 
-    // Ubah Judul Bawaan & periksa penghitung karakter dan kartu pratinjau Google
-    const defaultTitleInput = page.getByTestId('seo-input-default-title');
-    await defaultTitleInput.fill('MTQ Nasional Digital 2026 — LPTQ Resmi');
+    // Judul bawaan + penghitung karakter
+    await page.getByTestId('seo-input-default-title').fill('MTQ Nasional Digital 2026 — LPTQ Resmi');
     await expect(page.getByTestId('seo-title-counter')).toContainText('38 / 70 karakter');
-    await expect(page.getByTestId('seo-preview-google-card')).toContainText('MTQ Nasional Digital 2026 — LPTQ Resmi');
 
-    // Pilih robots = noindex,nofollow dan klik Simpan -> muncul ConfirmDialog
-    await page.getByTestId('seo-select-robots').selectOption('noindex,nofollow');
+    // Pratinjau tautan landing page bersifat statis (index.html) dan hanya-baca
+    await expect(page.getByTestId('seo-landing-preview')).toContainText(/tidak bisa diubah dari dashboard/i);
+
+    // Simpan
     await page.getByTestId('seo-save-btn').click();
-    await expect(page.getByText(/Konfirmasi Menonaktifkan Indeksasi Mesin Pencari/i)).toBeVisible();
-
-    // Konfirmasi penyimpanan
-    await page.getByRole('button', { name: /Ya, Simpan dengan noindex/i }).click();
     await expect(page.getByTestId('seo-form-success')).toContainText(/berhasil diperbarui/i);
 
     // Periksa tercatat di Audit Log Platform
@@ -199,28 +194,43 @@ test.describe('E2E: Navigasi Workspace Demo Lokal & Antarmuka Responsif', () => 
     await expect(page.getByText(/Dashboard Superadmin MTQ Digital/i).first()).toBeVisible();
 
     // Verifikasi secara default menu operasional tenant TIDAK muncul di sidebar
-    await expect(page.getByRole('button', { name: 'Dashboard Platform' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Kesehatan Sistem (Health Check)' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'SEO dan Meta Situs' })).toBeVisible();
+    const sidebarNav = page.getByRole('navigation', { name: 'Menu Utama' });
+    await expect(sidebarNav.getByRole('button', { name: 'Dashboard Platform' })).toBeVisible();
+    await expect(sidebarNav.getByRole('button', { name: 'Kesehatan Sistem (Health Check)' })).toBeVisible();
+    await expect(sidebarNav.getByRole('button', { name: 'SEO dan Meta Situs' })).toBeVisible();
+    await expect(sidebarNav.getByRole('button', { name: 'Konten Situs' })).toBeVisible();
+    await sidebarNav.getByRole('button', { name: 'Konten Situs' }).click();
+    await expect(page.getByRole('heading', { name: 'Konten Situs' })).toBeVisible();
+    await expect(page.getByText(/Mode Demo: Anda dapat melihat editor/i)).toBeVisible();
+    await page.getByRole('button', { name: /Bagian Utama \(Hero\)/i }).isVisible();
+    await page.getByRole('tab', { name: /Halaman/i }).or(page.getByRole('button', { name: /^Halaman$/ })).first().click();
+    await expect(page.getByRole('button', { name: /Kebijakan Privasi/i }).first()).toBeVisible();
+    await sidebarNav.getByRole('button', { name: 'Dashboard Platform' }).click();
     await expect(page.getByRole('button', { name: 'Master Data & Rubrik' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Bank Soal & Maqra' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Grup & Peserta' })).toHaveCount(0);
 
-    // Klik tombol Supervisi Workspace pada salah satu tenant
-    await page.getByRole('button', { name: /Supervisi Workspace/i }).first().click();
-    await expect(page.getByText(/Supervisi Workspace Tenant/i)).toBeVisible();
+    // Buka daftar Penyelenggara MTQ lalu masuk workspace salah satu penyelenggara dalam mode supervisi
+    await sidebarNav.getByRole('button', { name: /Penyelenggara MTQ/i }).click();
+    await page.getByRole('button', { name: /Buka Workspace/i }).first().click();
+    await expect(page.getByText(/Konfirmasi Masuk Mode Supervisi Workspace/i)).toBeVisible();
 
-    // Konfirmasi masuk workspace tenant dengan alasan
-    await page.getByRole('button', { name: /Masuk Workspace Tenant/i }).click();
+    // Alasan supervisi wajib diisi sebelum tombol masuk aktif
+    const masukBtn = page.getByRole('button', { name: /Masuk Mode Supervisi/i });
+    const reasonInput = page.getByPlaceholder(/Audit operasional/i);
+    await reasonInput.fill('');
+    await expect(masukBtn).toBeDisabled();
+    await reasonInput.fill('Audit operasional pengujian otomatis');
+    await masukBtn.click();
 
     // Verifikasi banner supervisi aktif dan menu operasional tenant muncul
-    await expect(page.getByText(/Mode Supervisi/i).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Master Data & Rubrik' })).toBeVisible();
+    await expect(page.getByText(/Supervisi Aktif/i).first()).toBeVisible();
+    await expect(sidebarNav.getByRole('button', { name: 'Master Data & Rubrik' })).toBeVisible();
 
     // Keluar dari mode supervisi dan kembali ke platform
-    await page.getByRole('button', { name: /Kembali ke Platform/i }).first().click();
-    await expect(page.getByRole('button', { name: 'Dashboard Platform' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Master Data & Rubrik' })).toHaveCount(0);
+    await page.getByRole('button', { name: /Kembali ke Panel Platform/i }).first().click();
+    await expect(sidebarNav.getByRole('button', { name: 'Dashboard Platform' })).toBeVisible();
+    await expect(sidebarNav.getByRole('button', { name: 'Master Data & Rubrik' })).toHaveCount(0);
   });
 });
 

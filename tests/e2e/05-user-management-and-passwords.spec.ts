@@ -45,7 +45,7 @@ test.describe('E2E: Manajemen Pengguna, Input Kata Sandi Baru & Pemetaan Akun Gl
     await expect(page.getByText(/Dashboard Superadmin MTQ Digital/i)).toBeVisible();
 
     // Masuk ke Manajemen Akun
-    await page.getByRole('button', { name: /Manajemen Akun/i }).click();
+    await page.getByRole('navigation', { name: 'Menu Utama' }).getByRole('button', { name: /Manajemen Akun/i }).click();
     await expect(page.getByText(/Manajemen Akun Global/i)).toBeVisible();
     await expect(page.getByText(/Superadmin Platform/i).first()).toBeVisible();
 
@@ -117,7 +117,7 @@ test.describe('E2E: Manajemen Pengguna, Input Kata Sandi Baru & Pemetaan Akun Gl
     await expect(page.getByText(/Hapus Penyelenggara MTQ\?/i)).not.toBeVisible();
 
     // 2. Buka Manajemen Akun Global
-    await page.getByRole('button', { name: /Manajemen Akun/i }).click();
+    await page.getByRole('navigation', { name: 'Menu Utama' }).getByRole('button', { name: /Manajemen Akun/i }).click();
     await expect(page.getByText(/Manajemen Akun Global/i)).toBeVisible();
 
     // Verifikasi tombol Nonaktifkan Akun tersedia dan berfungsi

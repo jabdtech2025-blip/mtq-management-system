@@ -36,6 +36,9 @@ import {
   friendlySyncError,
   retryDelayMs
 } from '../services/outboxSyncService';
+import { mergeLandingContent, landingContent as defaultLandingContent } from '../content/landing';
+import { pageHref, slugFromPath } from '../content/publicRoutes';
+import { LANDING_SEO } from '../content/seo';
 import fs from 'fs';
 import path from 'path';
 
@@ -1986,6 +1989,51 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       dualPanelSrc.includes('const isEditLocked = isAdminMode || Boolean(judgeLockReason)') &&
       dualPanelSrc.includes('data-testid="judge-lock-reason"'),
     'Penjaga isEditLocked / judgeLockReason / activeJudgeAssignments belum lengkap pada PenilaianDualPanelView.tsx'
+  );
+
+  // ===== 38. CMS ringan: penggabungan konten landing, rute halaman publik, meta statis =====
+  const mergedEmpty = mergeLandingContent({ hero: { title: '   ', backgroundImage: '' } });
+  const mergedCustom = mergeLandingContent({
+    hero: { title: 'Judul Baru', backgroundImage: 'https://contoh.id/hero.webp' },
+    features: { cards: [{ title: 'Kartu A', image: '' }, { title: 'Kartu B', image: 'javascript:alert(1)' }] },
+    nav: [{ label: 'Diretas', href: 'https://jahat.example' }]
+  });
+  assert(
+    '38a. CMS: kolom kosong / URL tidak aman memakai bawaan; URL https dipakai; navigasi tidak bisa diubah',
+    mergedEmpty.hero.title === defaultLandingContent.hero.title &&
+      mergedEmpty.hero.backgroundImage === defaultLandingContent.hero.backgroundImage &&
+      mergedCustom.hero.title === 'Judul Baru' &&
+      mergedCustom.hero.backgroundImage === 'https://contoh.id/hero.webp' &&
+      mergedCustom.features.cards.length === 2 &&
+      mergedCustom.features.cards[0].image === defaultLandingContent.features.cards[0].image &&
+      mergedCustom.features.cards[1].image === defaultLandingContent.features.cards[1].image &&
+      mergedCustom.features.cards[1].body === defaultLandingContent.features.cards[1].body &&
+      mergedCustom.nav[0].href === defaultLandingContent.nav[0].href &&
+      mergeLandingContent('rusak' as unknown) === defaultLandingContent,
+    JSON.stringify({ t: mergedCustom.hero.title, img: mergedCustom.features.cards[1].image })
+  );
+  assert(
+    '38b. Rute halaman publik: /panduan, /panduan/…, /privasi, /ketentuan, /halaman/…; rute aplikasi tidak tertangkap',
+    slugFromPath('/panduan') === 'panduan' &&
+      slugFromPath('/panduan/hakim/') === 'panduan/hakim' &&
+      slugFromPath('/privasi') === 'privasi' &&
+      slugFromPath('/halaman/faq') === 'faq' &&
+      slugFromPath('/') === null &&
+      slugFromPath('/app') === null &&
+      slugFromPath('/dashboard') === null &&
+      pageHref('panduan/admin') === '/panduan/admin' &&
+      pageHref('faq') === '/halaman/faq',
+    `${slugFromPath('/panduan/hakim/')}`
+  );
+  const indexHtml = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+  const htmlEsc = (t: string) => t.replace(/&/g, '&amp;');
+  assert(
+    '38c. Meta pratinjau tautan statis di index.html sama dengan src/content/seo.ts (tampil di halaman SEO Superadmin)',
+    indexHtml.includes(`property="og:title" content="${htmlEsc(LANDING_SEO.title)}"`) &&
+      indexHtml.includes(`property="og:description" content="${htmlEsc(LANDING_SEO.description)}"`) &&
+      indexHtml.includes(`property="og:image" content="https://${LANDING_SEO.domain}${LANDING_SEO.ogImagePath}"`) &&
+      indexHtml.includes(`property="og:url" content="${LANDING_SEO.siteUrl}"`),
+    'index.html dan src/content/seo.ts berbeda'
   );
 
   return { passed, failed, results };

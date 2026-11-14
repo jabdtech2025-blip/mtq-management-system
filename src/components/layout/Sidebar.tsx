@@ -16,7 +16,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
-  Activity
+  Activity,
+  FileText
 } from 'lucide-react';
 import { useMtq, ViewType } from '../../context/MtqContext';
 
@@ -69,6 +70,11 @@ export const Sidebar: React.FC = () => {
         id: 'superadmin_audit',
         label: 'Audit Log Platform',
         icon: <ShieldAlert className="w-4 h-4 shrink-0" />
+      },
+      {
+        id: 'superadmin_content',
+        label: 'Konten Situs',
+        icon: <FileText className="w-4 h-4 shrink-0" />
       },
       {
         id: 'superadmin_settings',

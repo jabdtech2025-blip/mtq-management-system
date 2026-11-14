@@ -28,6 +28,12 @@ import {
 import { useMtq } from '../../context/MtqContext';
 import { CanvasStroke, NormalizedPoint, AssignedMaqraItem } from '../../types/mtq';
 import { calculateAssessmentScore } from '../../services/scoringEngine';
+import {
+  detectLocalMushaf,
+  getKnownLocalMushafAvailability,
+  getMushafPageSources,
+  prefetchMushafPages
+} from '../../services/mushafSource';
 
 export const PenilaianDualPanelView: React.FC = () => {
   const {
@@ -145,15 +151,23 @@ export const PenilaianDualPanelView: React.FC = () => {
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isClearPageModalOpen, setIsClearPageModalOpen] = useState(false);
 
-  // Mushaf page image URL builder (High-resolution scan from Mujamma' Malik Fahd)
-  const pagePad = String(currentPage).padStart(3, '0');
-  const imageSources = [
-    `https://android.quran.com/data/width_1260/page${pagePad}.png`,
-    `https://everyayah.com/data/quranpages_hafs_1260/page${pagePad}.png`,
-    `https://raw.githubusercontent.com/the-quran/quran-images/master/images/page${pagePad}.png`
-  ];
+  // Sumber gambar mushaf: file lokal public/mushaf/*.webp BILA tersedia, selain itu pihak ketiga
+  const [hasLocalMushaf, setHasLocalMushaf] = useState<boolean | null>(() => getKnownLocalMushafAvailability());
+  useEffect(() => {
+    if (hasLocalMushaf !== null) return;
+    let cancelled = false;
+    void detectLocalMushaf().then((available) => {
+      if (!cancelled) setHasLocalMushaf(available);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasLocalMushaf]);
+  const imageSources = getMushafPageSources(currentPage, Boolean(hasLocalMushaf));
   const [imageSourceIndex, setImageSourceIndex] = useState<number>(0);
-  const currentImageUrl = imageSources[imageSourceIndex] || imageSources[0];
+  // Tunggu hasil pemeriksaan sumber lokal (sekali per sesi) agar gambar tidak dimuat dua kali
+  const currentImageUrl =
+    hasLocalMushaf === null ? undefined : imageSources[imageSourceIndex] || imageSources[0];
 
   // Reset drawing state when switching participant, judge, stage, or question (TANPA mereset imageLoaded agar mushaf tidak loading terus!)
   useEffect(() => {
@@ -187,6 +201,17 @@ export const PenilaianDualPanelView: React.FC = () => {
       setCurrentPage(targetPage);
     }
   };
+
+  // Unduh lebih dulu halaman maqra aktif (+1 halaman) agar tersimpan di cache tablet untuk kondisi offline
+  useEffect(() => {
+    if (hasLocalMushaf === null || !activeQuestionObj) return;
+    const start = activeQuestionObj.pageStart || activeQuestionObj.pageNumber;
+    const end = activeQuestionObj.pageEnd || start;
+    const pages = activeQuestionObj.pageNumbers?.length
+      ? activeQuestionObj.pageNumbers
+      : Array.from({ length: Math.max(0, end - start) + 1 }, (_, i) => start + i);
+    prefetchMushafPages([...pages, end + 1], hasLocalMushaf);
+  }, [activeQuestionObj, hasLocalMushaf]);
 
   // Reset image state ONLY when currentPage actually changes
   useEffect(() => {

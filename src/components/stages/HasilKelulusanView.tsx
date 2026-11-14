@@ -41,16 +41,10 @@ export const HasilKelulusanView: React.FC = () => {
     refreshSupabaseConnection
   } = useMtq();
 
-  // Sinkronisasi langsung dari database setiap kali halaman Hasil & Kelulusan dibuka
+  // Sekali muat ulang saat halaman Hasil & Kelulusan dibuka (data pengesahan harus paling mutakhir).
+  // Pembaruan selanjutnya datang lewat realtime Supabase; tidak ada polling berkala.
   useEffect(() => {
     void refreshSupabaseConnection();
-    // Sinkron berkala 15 detik (sebelumnya 3 detik memuat ulang seluruh workspace) dan hanya saat tab terlihat
-    const interval = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-        void refreshSupabaseConnection();
-      }
-    }, 15000);
-    return () => clearInterval(interval);
   }, []);
 
   // Deduplikasi nama babak untuk pilihan dropdown babak, namun resolusi objek babak tetap spesifik per cabang (P0-02)
