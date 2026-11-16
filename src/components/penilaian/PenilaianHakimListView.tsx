@@ -1,3 +1,4 @@
+import { stageBelongsToBranch } from '../../services/stageResolver';
 import React, { useState, useMemo } from 'react';
 import {
   BookmarkCheck,
@@ -70,10 +71,15 @@ export const PenilaianHakimListView: React.FC = () => {
       if (myAssignments.length > 0) {
         return myAssignments.some((ja) => {
           const matchesStage = !ja.stageName || ja.stageName === p.stageName;
+          if (ja.status === 'Nonaktif') return false;
+          // Cocokkan cabang dengan ID, atau nama persis. Potongan nama tidak dipakai agar cabang yang
+          // namanya saling memuat ("Tahfizh 1 Juz" vs "Tahfizh 1 Juz dan Tilawah") tidak tertukar.
+          const isAllBranches = !ja.branchName || ja.branchName === 'Semua Cabang';
           const matchesBranch =
-            !ja.branchName ||
-            p.branchName.toLowerCase().includes(ja.branchName.toLowerCase()) ||
-            ja.branchName.toLowerCase().includes(p.branchName.toLowerCase());
+            isAllBranches ||
+            (ja.branchId && p.branchId
+              ? stageBelongsToBranch({ id: '', name: '', branchId: ja.branchId }, { branchId: p.branchId })
+              : ja.branchName.trim().toLowerCase() === p.branchName.trim().toLowerCase());
           return matchesStage && matchesBranch;
         });
       }
@@ -148,7 +154,7 @@ export const PenilaianHakimListView: React.FC = () => {
       (statusFilter === 'Menunggu' && (p.judgeStatus === 'not_started' || p.judgeStatus === 'no_maqra'));
 
     const matchesBranch =
-      branchFilter === 'Semua Cabang' || p.branchName.includes(branchFilter);
+      branchFilter === 'Semua Cabang' || p.branchName === branchFilter;
 
     return matchesSearch && matchesStatus && matchesBranch;
   });

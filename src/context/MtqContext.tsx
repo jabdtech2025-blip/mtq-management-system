@@ -42,8 +42,16 @@ import {
   calculateScore
 } from '../data/mockData';
 import {
+  resolveStageForBranch,
+  resolveStageWithLegacyFallback,
+  missingStageMessage
+} from '../services/stageResolver';
+import {
   calculateAssessmentScore,
   getActiveRubricFields,
+  judgeScopeIncludesField,
+  resolveCategoryField,
+  resolveJudgeFieldScope,
   validateMaqraAssignmentForParticipant
 } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
@@ -369,7 +377,7 @@ interface MtqContextType {
   ) => Promise<{ success: boolean; message: string }>;
 
   // Judge Assignments
-  addJudgeAssignment: (asg: Omit<JudgeAssignment, 'id' | 'tenantId'>) => void;
+  addJudgeAssignment: (asg: Omit<JudgeAssignment, 'id' | 'tenantId'>) => { success: boolean; message: string };
   removeJudgeAssignment: (id: string) => void;
 
   // Superadmin Workspace Delegation Mode
@@ -2543,12 +2551,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addCompetitionRule = (ruleData: Omit<CompetitionRuleConfig, 'id' | 'tenantId'>) => {
-    const matchedBranch = cabangList.find(
-      (c) =>
-        (c.tenantId === currentTenantId || !c.tenantId) &&
-        ruleData.branchName &&
-        (c.name === ruleData.branchName || ruleData.branchName.includes(c.name) || c.name.includes(ruleData.branchName))
-    );
+    // Cocokkan cabang secara persis lebih dulu agar aturan tidak menempel ke cabang yang namanya mirip.
+    const ruleTenantBranches = cabangList.filter((c) => c.tenantId === currentTenantId || !c.tenantId);
+    const matchedBranch = ruleData.branchName
+      ? ruleTenantBranches.find((c) => (ruleData.branchId && c.id === ruleData.branchId) || c.name === ruleData.branchName) ||
+        ruleTenantBranches.find((c) => ruleData.branchName.includes(c.name) || c.name.includes(ruleData.branchName))
+      : undefined;
     const resolvedBranchId = ruleData.branchId || matchedBranch?.id;
 
     // P1-04: Ambil kuota resmi dari Manajemen Babak (CompetitionStage) bila tersedia
@@ -3069,7 +3077,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetJudge = users.find((u) => u.id === judgeId) || currentUser;
     const judgeAssignment =
       stageBranchAssignments.find((ja) => ja.judgeId === judgeId) ||
-      (targetJudge.role === 'judge'
+      // Penugasan cadangan dari profil hanya untuk Mode Demo/lokal; mode live wajib penugasan resmi (server juga menolak)
+      (targetJudge.role === 'judge' && !(supabaseDataService.isLive() && isLiveDbActive)
         ? {
             id: `ja-fallback-${judgeId}`,
             tenantId: currentTenantId,
@@ -3094,34 +3103,30 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // Field-level access restriction: Judge may only score categories within their assigned field
-    if (judgeAssignment.judgeField || judgeAssignment.judgeFieldId) {
+    // Hakim multi-bidang: kategori hanya boleh ditambah bila bidangnya termasuk SALAH SATU bidang tugas
+    // hakim ini di babak tersebut (aturan sama dengan server, get_judge_stage_fields).
+    // Mengurangi (delta < 0) selalu diizinkan agar sisa hitungan lama bisa dibersihkan.
+    if (delta > 0) {
       const cat = errorCategories.find((c) => c.id === categoryId);
       if (cat) {
-        const assignedFieldClean = (judgeAssignment.judgeField || '')
-          .toLowerCase()
-          .replace(/^bidang\s+/i, '')
-          .trim();
-        const matchedRubricField = activeRubric.fields.find((f) => {
-          if (judgeAssignment.judgeFieldId && f.id === judgeAssignment.judgeFieldId) return true;
-          const fClean = f.name.toLowerCase().replace(/^bidang\s+/i, '').trim();
-          return (
-            assignedFieldClean &&
-            (fClean === assignedFieldClean ||
-              fClean.includes(assignedFieldClean) ||
-              assignedFieldClean.includes(fClean))
+        const ownAssignments = stageBranchAssignments.filter((ja) => ja.judgeId === judgeId);
+        const fieldNameById = new Map<string, string>();
+        rubricVersions.forEach((rv) => (rv.fields || []).forEach((f) => fieldNameById.set(f.id, f.name)));
+        const scope = resolveJudgeFieldScope(
+          ownAssignments.length > 0 ? ownAssignments : [judgeAssignment],
+          getActiveRubricFields(activeRubric),
+          fieldNameById
+        );
+        const categoryField = resolveCategoryField(cat, activeRubric);
+        if (!categoryField) {
+          console.warn(`Perubahan nilai ditolak: Kategori "${cat.name}" bukan bagian dari rubrik cabang ${part.branchName}.`);
+          return;
+        }
+        if (!judgeScopeIncludesField(scope, categoryField)) {
+          console.warn(
+            `Perubahan nilai ditolak: Kategori "${cat.name}" (bidang ${categoryField}) bukan bidang tugas hakim (${(scope || []).join(', ')}).`
           );
-        });
-
-        if (cat.fieldId && matchedRubricField) {
-          if (cat.fieldId !== matchedRubricField.id) {
-            const catScopeClean = (cat.scope || '').toLowerCase().replace(/^bidang\s+/i, '').trim();
-            const fClean = matchedRubricField.name.toLowerCase().replace(/^bidang\s+/i, '').trim();
-            if (!catScopeClean.includes(fClean) && !fClean.includes(catScopeClean)) {
-              console.warn(`Perubahan nilai ditolak: Kategori "${cat.name}" bukan bagian dari bidang penugasan hakim.`);
-              return;
-            }
-          }
+          return;
         }
       }
     }
@@ -4156,14 +4161,27 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const newPartId = generateUuid();
     const targetStage = data.stageName || 'Penyisihan';
-    const targetStageObj = stages.find(
-      (s) => s.tenantId === currentTenantId && s.name === targetStage
-    );
-    const stageId = targetStageObj?.id || toDeterministicUuid('stage-penyisihan');
-    const matchedBranch = cabangList.find(
-      (c) => c.name === data.branchName || data.branchName.includes(c.name)
-    );
+    const matchedBranch =
+      cabangList.find((c) => (data.branchId && c.id === data.branchId) || c.name === data.branchName) ||
+      cabangList.find((c) => data.branchName.includes(c.name));
     const branchId = data.branchId || matchedBranch?.id || toDeterministicUuid(data.branchName);
+    // Babak dicari per cabang: nama babak yang sama ada di setiap cabang.
+    const liveStageRules = supabaseDataService.isLive() && isLiveDbActive;
+    const targetStageObj = resolveStageWithLegacyFallback(
+      stages,
+      {
+        tenantId: currentTenantId,
+        stageId: data.stageId,
+        stageName: targetStage,
+        branchId,
+        branchName: data.branchName
+      },
+      !liveStageRules
+    );
+    if (!targetStageObj && liveStageRules) {
+      return { success: false, message: missingStageMessage(targetStage, data.branchName) };
+    }
+    const stageId = targetStageObj?.id || toDeterministicUuid('stage-penyisihan');
 
     const hasQuestion = Boolean(data.questionId && data.questionId.trim() !== '');
 
@@ -4317,26 +4335,32 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? matchedBranch?.id || toDeterministicUuid(`branch-${currentTenantId}-${nextBranchName}`)
         : existing.branchId || matchedBranch?.id || toDeterministicUuid(`branch-${currentTenantId}-${nextBranchName}`));
 
-    const matchedStage =
-      stages.find(
-        (s) =>
-          s.tenantId === currentTenantId &&
-          (updated.stageId ? s.id === updated.stageId : s.name === nextStageName) &&
-          (s.branchId === resolvedBranchId || s.branchName === nextBranchName)
-      ) ||
-      stages.find(
-        (s) =>
-          s.tenantId === currentTenantId &&
-          (updated.stageId ? s.id === updated.stageId : s.name === nextStageName) &&
-          (!s.branchName || s.branchName === 'Semua Cabang')
-      ) ||
-      stages.find((s) => s.tenantId === currentTenantId && s.name === nextStageName);
+    // Babak dicari per cabang. stageId dari formulir hanya dipakai bila babaknya memang milik cabang peserta.
+    const liveStageRules = supabaseDataService.isLive() && isLiveDbActive;
+    const matchedStage = resolveStageWithLegacyFallback(
+      stages,
+      {
+        tenantId: currentTenantId,
+        stageId: updated.stageId,
+        stageName: nextStageName,
+        branchId: resolvedBranchId,
+        branchName: nextBranchName
+      },
+      !liveStageRules
+    );
+    const stageOrBranchChanged =
+      (updated.stageName !== undefined && updated.stageName !== existing.stageName) ||
+      (updated.branchName !== undefined && updated.branchName !== existing.branchName) ||
+      (updated.branchId !== undefined && updated.branchId !== existing.branchId);
+    if (!matchedStage && liveStageRules && stageOrBranchChanged) {
+      return { success: false, message: missingStageMessage(nextStageName, nextBranchName) };
+    }
 
-    const resolvedStageId =
-      updated.stageId ||
-      (updated.stageName && updated.stageName !== existing.stageName
-        ? matchedStage?.id || toDeterministicUuid(`stage-${currentTenantId}-${resolvedBranchId}-${nextStageName}`)
-        : existing.stageId || matchedStage?.id || toDeterministicUuid(`stage-${currentTenantId}-${resolvedBranchId}-${nextStageName}`));
+    // Bila babak/cabang tidak diubah, babak yang sudah tersimpan dipertahankan (server melarang memindahkan partisipasi).
+    const fallbackStageId = toDeterministicUuid(`stage-${currentTenantId}-${resolvedBranchId}-${nextStageName}`);
+    const resolvedStageId = stageOrBranchChanged
+      ? matchedStage?.id || fallbackStageId
+      : existing.stageId || matchedStage?.id || fallbackStageId;
 
     const merged: Participant = {
       ...existing,
@@ -4573,14 +4597,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (data.branchAndLevel && data.branchAndLevel.toLowerCase().includes(j.name.toLowerCase()))
     );
     const targetStageName = data.stageName || data.stage || 'Penyisihan';
-    const matchedStage =
-      stages.find(
-        (s) =>
-          s.tenantId === currentTenantId &&
-          s.name === targetStageName &&
-          (s.branchId === (data.branchId || matchedBranch?.id) || s.branchName === (data.branchName || matchedBranch?.name))
-      ) ||
-      stages.find((s) => s.tenantId === currentTenantId && s.name === targetStageName);
+    // Soal diikat ke babak milik cabangnya sendiri; tidak pernah ke babak cabang lain.
+    const matchedStage = resolveStageForBranch(stages, {
+      tenantId: currentTenantId,
+      stageId: data.stageId,
+      stageName: targetStageName,
+      branchId: data.branchId || matchedBranch?.id,
+      branchName: data.branchName || matchedBranch?.name
+    });
     const resolvedBranchName = data.branchName || matchedBranch?.name || data.branchAndLevel || 'Tilawah Dewasa Putra';
     const resolvedLevelName = data.levelName || matchedLevel?.name || '';
     const computedBranchAndLevel =
@@ -4597,7 +4621,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       branchName: resolvedBranchName,
       levelId: data.levelId || matchedLevel?.id,
       levelName: resolvedLevelName || undefined,
-      stageId: data.stageId || matchedStage?.id,
+      stageId: matchedStage?.id,
       stage: targetStageName,
       stageName: targetStageName,
       branchAndLevel: computedBranchAndLevel
@@ -4642,21 +4666,21 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (rawMerged.levelName && j.name === rawMerged.levelName)
     );
     const targetStageName = rawMerged.stageName || rawMerged.stage || 'Penyisihan';
-    const matchedStage =
-      stages.find(
-        (s) =>
-          s.tenantId === currentTenantId &&
-          s.name === targetStageName &&
-          (s.branchId === (rawMerged.branchId || matchedBranch?.id) || s.branchName === (rawMerged.branchName || matchedBranch?.name))
-      ) ||
-      stages.find((s) => s.tenantId === currentTenantId && s.name === targetStageName);
+    // Soal diikat ke babak milik cabangnya sendiri; tidak pernah ke babak cabang lain.
+    const matchedStage = resolveStageForBranch(stages, {
+      tenantId: currentTenantId,
+      stageId: rawMerged.stageId,
+      stageName: targetStageName,
+      branchId: rawMerged.branchId || matchedBranch?.id,
+      branchName: rawMerged.branchName || matchedBranch?.name
+    });
     const merged: Question = {
       ...rawMerged,
       branchId: rawMerged.branchId || matchedBranch?.id,
       branchName: rawMerged.branchName || matchedBranch?.name,
       levelId: rawMerged.levelId || matchedLevel?.id,
       levelName: rawMerged.levelName || matchedLevel?.name,
-      stageId: rawMerged.stageId || matchedStage?.id,
+      stageId: matchedStage?.id,
       stage: targetStageName,
       stageName: targetStageName
     };
@@ -5002,8 +5026,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stageName: targetStage
     };
 
-    const targetStageObj = stages.find(
-      (s) => s.tenantId === currentTenantId && s.name === targetStage
+    const targetStageObj = resolveStageWithLegacyFallback(
+      stages,
+      {
+        tenantId: currentTenantId,
+        stageName: targetStage,
+        branchId: part.branchId,
+        branchName: part.branchName
+      },
+      !(supabaseDataService.isLive() && isLiveDbActive)
     );
     const existingSp = stageParticipations.find(
       (sp) =>
@@ -5316,7 +5347,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const nowTime = getWibTime();
-    const targetStageObj = stages.find((s) => s.tenantId === currentTenantId && s.name === stageName);
+    const firstDrawnPart = participants.find(
+      (p) => p.id === results[0]?.participantId && p.tenantId === currentTenantId
+    );
+    const targetStageObj = resolveStageWithLegacyFallback(
+      stages,
+      {
+        tenantId: currentTenantId,
+        stageName,
+        branchId: firstDrawnPart?.branchId,
+        branchName:
+          metadata?.branchName && metadata.branchName !== 'Semua Cabang'
+            ? metadata.branchName
+            : firstDrawnPart?.branchName
+      },
+      !(supabaseDataService.isLive() && isLiveDbActive)
+    );
     const stageId = targetStageObj?.id || 'stage-penyisihan';
 
     // Map of participantId -> AssignedMaqraItem[] to add
@@ -5767,8 +5813,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes
     } = options;
 
+    // Peserta berstatus Ditolak tidak diundi (sama dengan aturan server); hanya yang masih menunggu verifikasi yang memblokir.
     const targetParticipants = participants.filter(
-      (p) => participantIds.includes(p.id) && p.tenantId === currentTenantId
+      (p) =>
+        participantIds.includes(p.id) && p.tenantId === currentTenantId && p.verificationStatus !== 'Ditolak'
     );
     if (targetParticipants.length === 0) {
       return {
@@ -5803,13 +5851,27 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    const targetStageObj =
-      stages.find(
-        (s) =>
-          s.tenantId === currentTenantId &&
-          s.name === stageName &&
-          (!branchName || branchName === 'Semua Cabang' || s.branchName === branchName)
-      ) || stages.find((s) => s.tenantId === currentTenantId && s.name === stageName);
+    // Undian berjalan per babak, dan babak adalah milik satu cabang. Cabang diambil dari pilihan
+    // penyaring atau, bila "Semua Cabang", dari peserta yang diundi.
+    const liveStageRules = supabaseDataService.isLive() && isLiveDbActive;
+    const drawBranchNames = Array.from(new Set(targetParticipants.map((p) => p.branchName).filter(Boolean)));
+    const hasExplicitDrawBranch = Boolean(branchName && branchName !== 'Semua Cabang');
+    if (liveStageRules && !hasExplicitDrawBranch && drawBranchNames.length > 1) {
+      return {
+        success: false,
+        message: `Undian dijalankan per cabang. Peserta terpilih berasal dari ${drawBranchNames.length} cabang (${drawBranchNames.join(', ')}). Pilih satu cabang pada penyaring, lalu undi cabang itu.`
+      };
+    }
+    const drawBranchName = hasExplicitDrawBranch ? branchName : targetParticipants[0]?.branchName;
+    const drawBranchId = targetParticipants.find((p) => p.branchName === drawBranchName)?.branchId;
+    const targetStageObj = resolveStageWithLegacyFallback(
+      stages,
+      { tenantId: currentTenantId, stageName, branchId: drawBranchId, branchName: drawBranchName },
+      !liveStageRules
+    );
+    if (!targetStageObj && liveStageRules) {
+      return { success: false, message: missingStageMessage(stageName, drawBranchName) };
+    }
     const stageId = targetStageObj?.id || toDeterministicUuid('stage-penyisihan');
     const resolvedBranchName = branchName || targetParticipants[0]?.branchName || 'Semua Cabang';
     const matchedBranchObj = cabangList.find((c) => c.name === resolvedBranchName);
@@ -7669,21 +7731,63 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Judge Assignment Actions (Tenant Scoped)
-  const addJudgeAssignment = (asg: Omit<JudgeAssignment, 'id' | 'tenantId'>) => {
-    const matchedStage = stages.find(
-      (s) => s.tenantId === currentTenantId && s.name === asg.stageName
-    ) || stages.find((s) => s.tenantId === currentTenantId);
+  const addJudgeAssignment = (
+    asg: Omit<JudgeAssignment, 'id' | 'tenantId'>
+  ): { success: boolean; message: string } => {
+    const tenantBranches = cabangList.filter((c) => c.tenantId === currentTenantId || !c.tenantId);
+    const hasSpecificBranch = Boolean(asg.branchName && asg.branchName !== 'Semua Cabang');
+    // Cocokkan cabang secara persis lebih dulu; pencocokan potongan nama hanya cadangan terakhir.
+    const matchedBranch = hasSpecificBranch
+      ? tenantBranches.find((c) => (asg.branchId && c.id === asg.branchId) || c.name === asg.branchName) ||
+        tenantBranches.find((c) => asg.branchName!.includes(c.name) || c.name.includes(asg.branchName!))
+      : undefined;
 
-    const matchedBranch = cabangList.find(
-      (c) =>
-        (c.tenantId === currentTenantId || !c.tenantId) &&
-        asg.branchName &&
-        (c.name === asg.branchName || asg.branchName.includes(c.name) || c.name.includes(asg.branchName))
+    // Babak dicari per cabang: penugasan hakim harus menempel pada babak milik cabangnya sendiri.
+    const liveStageRules = supabaseDataService.isLive() && isLiveDbActive;
+    const matchedStage = resolveStageWithLegacyFallback(
+      stages,
+      {
+        tenantId: currentTenantId,
+        stageId: asg.stageId,
+        stageName: asg.stageName,
+        branchId: asg.branchId || matchedBranch?.id,
+        branchName: hasSpecificBranch ? asg.branchName : undefined
+      },
+      !liveStageRules
     );
+    if (!matchedStage && liveStageRules) {
+      const message = missingStageMessage(asg.stageName, hasSpecificBranch ? asg.branchName : undefined);
+      setSyncStatus(`Penugasan hakim dibatalkan: ${message}`);
+      return { success: false, message };
+    }
+
+    const duplicate = judgeAssignments.find(
+      (ja) =>
+        ja.tenantId === currentTenantId &&
+        ja.status !== 'Nonaktif' &&
+        ja.judgeId === asg.judgeId &&
+        (matchedStage ? ja.stageId === matchedStage.id : ja.stageName === asg.stageName) &&
+        (ja.branchName || '') === (asg.branchName || '') &&
+        (ja.rubricFieldId || ja.judgeFieldId || ja.judgeField || '') ===
+          (asg.rubricFieldId || asg.judgeFieldId || asg.judgeField || '')
+    );
+    if (duplicate) {
+      return {
+        success: false,
+        message: `${asg.judgeName} sudah ditugaskan pada babak, cabang, dan bidang yang sama.`
+      };
+    }
 
     let resolvedRubricFieldId = asg.rubricFieldId || asg.judgeFieldId;
     if (!resolvedRubricFieldId && asg.judgeField) {
-      for (const rv of rubricVersions) {
+      // Dahulukan rubrik aktif milik cabang ini: nama bidang seperti "Tajwid" ada di lebih dari satu rubrik.
+      const branchRubric = hasSpecificBranch
+        ? getActiveRubricForBranch(asg.branchName!, asg.branchId || matchedBranch?.id, asg.levelId, asg.levelName)
+        : null;
+      const orderedRubrics = branchRubric
+        ? [branchRubric, ...rubricVersions.filter((rv) => rv.id !== branchRubric.id)]
+        : rubricVersions;
+      for (const rv of orderedRubrics) {
         const matchedFld = rv.fields.find(
           (f) =>
             asg.judgeField.toLowerCase().includes(f.name.toLowerCase()) ||
@@ -7696,7 +7800,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    const resolvedStageId = asg.stageId || matchedStage?.id || 'stage-penyisihan';
+    const resolvedStageId = matchedStage?.id || asg.stageId || 'stage-penyisihan';
     const resolvedBranchId = asg.branchId || matchedBranch?.id;
     const resolvedLevelId = asg.levelId;
 
@@ -7733,6 +7837,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
     }
+    return { success: true, message: `Penugasan hakim ${asg.judgeName} berhasil disimpan.` };
   };
 
   const removeJudgeAssignment = (id: string) => {

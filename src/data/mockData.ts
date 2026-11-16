@@ -966,7 +966,9 @@ export const INITIAL_JUDGE_ASSIGNMENTS: JudgeAssignment[] = [
     stageId: 'stage-penyisihan',
     stageName: 'Penyisihan',
     branchName: 'Tilawah Dewasa Putra',
-    judgeField: 'Bidang Tajwid & Makhraj'
+    judgeField: 'Tajwid',
+    judgeFieldId: 'field-tjw',
+    rubricFieldId: 'field-tjw'
   },
   {
     id: 'asg-2',
@@ -976,7 +978,9 @@ export const INITIAL_JUDGE_ASSIGNMENTS: JudgeAssignment[] = [
     stageId: 'stage-penyisihan',
     stageName: 'Penyisihan',
     branchName: 'Tilawah Dewasa Putra',
-    judgeField: 'Bidang Fasahah & Waqf'
+    judgeField: 'Fashahah',
+    judgeFieldId: 'field-fsh',
+    rubricFieldId: 'field-fsh'
   },
   {
     id: 'asg-3',
@@ -986,7 +990,22 @@ export const INITIAL_JUDGE_ASSIGNMENTS: JudgeAssignment[] = [
     stageId: 'stage-penyisihan',
     stageName: 'Penyisihan',
     branchName: 'Tilawah Dewasa Putra',
-    judgeField: 'Bidang Lagu & Suara'
+    judgeField: 'Lagu',
+    judgeFieldId: 'field-lag',
+    rubricFieldId: 'field-lag'
+  },
+  {
+    // Contoh hakim multi-bidang: Hj. Siti Maria memegang Lagu dan Suara
+    id: 'asg-4',
+    tenantId: 'tenant-jabar',
+    judgeId: 'judge-3',
+    judgeName: 'Hj. Siti Maria, M.Ag',
+    stageId: 'stage-penyisihan',
+    stageName: 'Penyisihan',
+    branchName: 'Tilawah Dewasa Putra',
+    judgeField: 'Suara',
+    judgeFieldId: 'field-sua',
+    rubricFieldId: 'field-sua'
   }
 ];
 

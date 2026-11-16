@@ -36,6 +36,10 @@ export const Modal: React.FC<ModalProps> = ({
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = React.useId();
+  const onCloseRef = useRef(onClose);
+  const isBusyRef = useRef(isBusy);
+  onCloseRef.current = onClose;
+  isBusyRef.current = isBusy;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -43,9 +47,9 @@ export const Modal: React.FC<ModalProps> = ({
     const previousActiveElement = document.activeElement as HTMLElement | null;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !isBusy) {
+      if (event.key === 'Escape' && !isBusyRef.current) {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -78,7 +82,7 @@ export const Modal: React.FC<ModalProps> = ({
         previousActiveElement.focus();
       }
     };
-  }, [isOpen, isBusy, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

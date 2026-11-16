@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { resolveStageForBranch } from '../../services/stageResolver';
 import {
   Plus,
   Search,
@@ -275,7 +276,13 @@ export const KafilahPesertaView: React.FC = () => {
 
     const matchedBranch = cabangList.find((c) => c.name === partBranchName);
     const matchedLevel = jenjangList.find((j) => j.name === partLevelName);
-    const matchedStage = stages.find((s) => s.name === partStageName);
+    // Babak dicari per cabang: nama babak yang sama ada di setiap cabang.
+    const matchedStage = resolveStageForBranch(stages, {
+      tenantId: currentTenant.id,
+      stageName: partStageName,
+      branchId: matchedBranch?.id,
+      branchName: partBranchName
+    });
 
     if (editingParticipant) {
       const updRes = updateParticipant(editingParticipant.id, {

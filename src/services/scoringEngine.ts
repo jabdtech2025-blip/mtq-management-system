@@ -214,6 +214,12 @@ export function calculateAssessmentScore(
     const fieldName = resolveCategoryField(cat, rubric);
 
     if (!fieldName) {
+      // Multi-cabang: kategori milik rubrik cabang lain (mis. kategori Tahfizh saat menilai Tilawah)
+      // tidak relevan untuk lembar ini. Selama tidak ada kesalahan yang dicatat padanya, lewati saja,
+      // sama seperti perhitungan resmi di server. Bila ada jumlahnya, tetap ditolak di bawah.
+      if (rawCount === 0) {
+        return;
+      }
       // P0: Kategori tanpa pemetaan valid DILARANG dialihkan ke Tajwid.
       validationErrors.push(
         `Kategori "${cat.name}" (${cat.code}) belum dipetakan ke bidang rubrik aktif yang valid pada rubrik "${rubric.name}". Pemetaan wajib diperbaiki oleh Admin sebelum finalisasi.`
@@ -482,6 +488,114 @@ export function validateMaqraAssignmentForParticipant(
 }
 
 /**
+ * HAKIM MULTI-BIDANG
+ * Cakupan bidang seorang hakim pada satu babak, dari seluruh penugasannya di babak itu.
+ * Mengembalikan daftar nama bidang, atau null bila hakim menilai SEMUA bidang
+ * (ada penugasan tanpa bidang / bidang yang tidak dikenali). Aturan ini identik
+ * dengan fungsi database get_judge_stage_fields.
+ */
+export function resolveJudgeFieldScope(
+  judgeAssignmentsInStage: Array<{
+    rubricFieldId?: string;
+    judgeFieldId?: string;
+    rubricFieldName?: string;
+    judgeField?: string;
+  }>,
+  activeRubricFields: Array<{ id: string; name: string; code?: string }>,
+  fieldNameById: Map<string, string>
+): string[] | null {
+  if (judgeAssignmentsInStage.length === 0) return null;
+  const names: string[] = [];
+  for (const ja of judgeAssignmentsInStage) {
+    const fieldId = ja.rubricFieldId || ja.judgeFieldId;
+    let name: string | undefined;
+    if (fieldId) {
+      name = fieldNameById.get(fieldId);
+    } else {
+      const label = (ja.judgeField || ja.rubricFieldName || '').trim().toLowerCase().replace(/^bidang\s+/, '');
+      if (label) {
+        name = activeRubricFields.find(
+          (f) => f.name.trim().toLowerCase() === label || (f.code || '').trim().toLowerCase() === label
+        )?.name;
+      }
+    }
+    if (!name) return null;
+    if (!names.includes(name)) names.push(name);
+  }
+  return names.length > 0 ? names : null;
+}
+
+/** Benar bila cakupan hakim memuat bidang tersebut (null = semua bidang). */
+export function judgeScopeIncludesField(scope: string[] | null | undefined, fieldName: string): boolean {
+  if (!scope) return true;
+  const target = fieldName.trim().toLowerCase();
+  return scope.some((name) => name.trim().toLowerCase() === target);
+}
+
+/**
+ * Bidang rubrik aktif yang belum dipegang hakim mana pun. Kosong bila ada hakim yang
+ * menilai semua bidang, atau bila belum ada hakim sama sekali.
+ */
+export function findUncoveredRubricFields(
+  judgeScopes: Array<string[] | null>,
+  activeRubricFields: Array<{ name: string }>
+): string[] {
+  if (judgeScopes.length === 0 || judgeScopes.some((scope) => scope === null)) return [];
+  return activeRubricFields
+    .map((f) => f.name)
+    .filter((name) => !judgeScopes.some((scope) => judgeScopeIncludesField(scope, name)));
+}
+
+export interface FieldScopedAggregation {
+  /** Cakupan bidang per hakim (judgeId -> nama bidang, atau null = semua bidang) */
+  judgeFieldScope: Record<string, string[] | null>;
+  /** Bidang aktif rubrik babak ini */
+  rubricFields: Array<{ name: string; maxScore: number; weight?: number }>;
+  startingScore: number;
+}
+
+const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+/**
+ * Total nilai dari sekumpulan lembar dengan rata-rata bidang yang HANYA memakai lembar hakim
+ * pemegang bidang itu. Bidang yang belum dinilai pemegangnya memakai rata-rata seluruh lembar
+ * (peserta belum lengkap). Identik dengan compute_stage_rankings di database.
+ */
+function scopedFieldAverages(
+  sheets: Array<{ judgeId: string; fieldScores?: Record<string, number> }>,
+  scope: FieldScopedAggregation
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  scope.rubricFields.forEach((field) => {
+    const valueOf = (sheet: { fieldScores?: Record<string, number> }) => {
+      const raw = sheet.fieldScores?.[field.name];
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+    };
+    const scopedValues = sheets
+      .filter((sheet) => judgeScopeIncludesField(scope.judgeFieldScope[sheet.judgeId], field.name))
+      .map(valueOf)
+      .filter((v): v is number => v !== null);
+    const allValues = sheets.map(valueOf).filter((v): v is number => v !== null);
+    const values = scopedValues.length > 0 ? scopedValues : allValues;
+    // Bidang tanpa nilai sama sekali dibiarkan kosong (tidak dianggap nilai penuh)
+    if (values.length > 0) {
+      result[field.name] = round2(values.reduce((a, b) => a + b, 0) / values.length);
+    }
+  });
+  return result;
+}
+
+/** null bila ada bidang tanpa nilai (data lembar tidak lengkap): pemanggil memakai rata-rata nilai akhir lembar. */
+function scopedTotal(fieldAvgs: Record<string, number>, scope: FieldScopedAggregation): number | null {
+  if (scope.rubricFields.some((field) => fieldAvgs[field.name] === undefined)) return null;
+  const sum = scope.rubricFields.reduce(
+    (acc, field) => acc + round2(fieldAvgs[field.name] * (field.weight ?? 1)),
+    0
+  );
+  return round2(Math.max(0, Math.min(scope.startingScore, sum)));
+}
+
+/**
  * Agregasi penilaian multi-hakim dan multi-maqra untuk satu peserta pada satu babak.
  * Mendukung isolasi ketat berdasarkan stageId, stageParticipationId, dan questionId/assignedMaqraId
  * agar tidak mencampur penilaian dari cabang, babak, atau maqra lain (P0-04).
@@ -493,7 +607,8 @@ export function aggregateParticipantScores(
   requiredJudgeIds: string[],
   assessments: JudgeAssessment[],
   stageId?: string,
-  stageParticipationId?: string
+  stageParticipationId?: string,
+  fieldScope?: FieldScopedAggregation
 ): {
   isFullyFinalized: boolean;
   finalizedCount: number;
@@ -524,6 +639,9 @@ export function aggregateParticipantScores(
   const validFinalizedScores: number[] = [];
   const allAvailableScores: number[] = [];
   const fieldTotals: Record<string, { sum: number; count: number }> = {};
+  // Lembar per hakim, dipakai agregasi per bidang (hakim multi-bidang)
+  const finalizedSheets: Array<{ judgeId: string; fieldScores?: Record<string, number> }> = [];
+  const availableSheets: Array<{ judgeId: string; fieldScores?: Record<string, number> }> = [];
 
   const perMaqraSummary = stageQuestions.map((q) => {
     const maqraFinalizedScores: number[] = [];
@@ -570,10 +688,12 @@ export function aggregateParticipantScores(
       if (match) {
         allAvailableScores.push(match.finalScore);
         maqraAvailableScores.push(match.finalScore);
+        availableSheets.push({ judgeId, fieldScores: match.fieldScores });
 
         if (match.status === 'finalized') {
           validFinalizedScores.push(match.finalScore);
           maqraFinalizedScores.push(match.finalScore);
+          finalizedSheets.push({ judgeId, fieldScores: match.fieldScores });
 
           // Akumulasi skor bidang
           if (match.fieldScores) {
@@ -624,6 +744,31 @@ export function aggregateParticipantScores(
       fieldAverages[fieldName] = Number((data.sum / data.count).toFixed(2));
     }
   });
+
+  // Hakim multi-bidang: nilai bidang dirata-rata hanya dari hakim pemegang bidang itu,
+  // total = jumlah (rata-rata bidang x bobot). Tanpa rubrik, tetap rata-rata nilai akhir lembar.
+  if (fieldScope && fieldScope.rubricFields.length > 0) {
+    if (finalizedSheets.length > 0) {
+      Object.assign(fieldAverages, scopedFieldAverages(finalizedSheets, fieldScope));
+    }
+    const scopedFinal =
+      isFullyFinalized && finalizedSheets.length > 0
+        ? scopedTotal(scopedFieldAverages(finalizedSheets, fieldScope), fieldScope) ?? averageFinalScore
+        : null;
+    const scopedProvisional =
+      availableSheets.length > 0
+        ? scopedTotal(scopedFieldAverages(availableSheets, fieldScope), fieldScope) ?? provisionalScore
+        : null;
+    return {
+      isFullyFinalized,
+      finalizedCount: validFinalizedScores.length,
+      totalRequiredUnits,
+      averageFinalScore: scopedFinal,
+      provisionalScore: scopedProvisional,
+      fieldAverages,
+      perMaqraSummary
+    };
+  }
 
   return {
     isFullyFinalized,

@@ -18,7 +18,8 @@ export type StageBlockingCode =
   | 'QUOTA_INVALID'
   | 'QUOTA_EXCEEDED'
   | 'MISSING_OVERRIDE_REASON'
-  | 'MULTI_BRANCH_SELECTION';
+  | 'MULTI_BRANCH_SELECTION'
+  | 'FIELD_WITHOUT_JUDGE';
 
 export interface StructuredBlockingReason {
   code: StageBlockingCode;

@@ -56,6 +56,7 @@ export const MasterDataView: React.FC = () => {
     deleteCabang,
     rubricVersions,
     competitionRules,
+    getActiveRubricForBranch,
     addRubricVersion,
     updateRubricVersion,
     activateRubricVersion,
@@ -158,8 +159,9 @@ export const MasterDataView: React.FC = () => {
   const [assignBranchName, setAssignBranchName] = useState(cabangList[0]?.name || 'Semua Cabang');
   const [assignLevelId, setAssignLevelId] = useState('');
   const [assignLevelName, setAssignLevelName] = useState('');
-  const [assignFieldId, setAssignFieldId] = useState('');
-  const [assignField, setAssignField] = useState('');
+  // Hakim multi-bidang: satu penugasan per bidang yang dicentang, atau satu penugasan "Semua Bidang"
+  const [assignFieldIds, setAssignFieldIds] = useState<string[]>([]);
+  const [assignAllFields, setAssignAllFields] = useState(false);
 
   // Feedback notifications
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -456,17 +458,16 @@ export const MasterDataView: React.FC = () => {
   };
 
   // Compute fields available for judge assignment based on selected branch and level
+  // Bidang yang bisa ditugaskan: bidang aktif rubrik resmi cabang terpilih (lewat aturan kompetisi cabang).
+  const assignmentRubric = useMemo(() => {
+    if (!assignBranchName || assignBranchName === 'Semua Cabang') return null;
+    const branchObj = cabangList.find((c) => c.name === assignBranchName);
+    return getActiveRubricForBranch(assignBranchName, branchObj?.id);
+  }, [assignBranchName, cabangList, getActiveRubricForBranch, rubricVersions, competitionRules]);
+
   const availableFieldsForAssignment = useMemo(() => {
-    if (assignBranchName && assignBranchName !== 'Semua Cabang') {
-      const match = rubricVersions.find(
-        (r) =>
-          r.status === 'Aktif' &&
-          (r.branchName === assignBranchName ||
-            (assignLevelId && r.levelId === assignLevelId))
-      );
-      if (match && match.fields.length > 0) {
-        return match.fields;
-      }
+    if (assignmentRubric && assignmentRubric.fields.length > 0) {
+      return assignmentRubric.fields.filter((f) => f.status !== 'Nonaktif' && f.status !== 'Arsip');
     }
     const seen = new Set<string>();
     const list: RubricField[] = [];
@@ -479,7 +480,34 @@ export const MasterDataView: React.FC = () => {
       });
     });
     return list;
-  }, [rubricVersions, assignBranchName, assignLevelId]);
+  }, [assignmentRubric, rubricVersions]);
+
+  // Babak yang dapat dipilih: hanya babak milik cabang terpilih (atau babak umum), tanpa nama kembar.
+  const stageOptionsForAssignment = useMemo(() => {
+    const names = stages
+      .filter(
+        (s) =>
+          assignBranchName === 'Semua Cabang'
+            ? !s.branchName || s.branchName === 'Semua Cabang'
+            : s.branchName === assignBranchName || !s.branchName || s.branchName === 'Semua Cabang'
+      )
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((s) => s.name);
+    return Array.from(new Set(names));
+  }, [stages, assignBranchName]);
+
+  // Penugasan yang sudah ada untuk hakim + babak + cabang terpilih (untuk menandai bidang yang sudah dipegang)
+  const existingAssignmentsForSelection = useMemo(
+    () =>
+      judgeAssignments.filter(
+        (ja) =>
+          ja.judgeId === selectedJudgeId &&
+          ja.stageName === assignStageName &&
+          (ja.branchName || 'Semua Cabang') === assignBranchName &&
+          ja.status !== 'Nonaktif'
+      ),
+    [judgeAssignments, selectedJudgeId, assignStageName, assignBranchName]
+  );
 
   // Save Judge Assignment (P0: Pure DB with Branch, Stage, Jenjang, and Field Relations)
   const handleSaveJudgeAssignment = (e: React.FormEvent) => {
@@ -495,24 +523,55 @@ export const MasterDataView: React.FC = () => {
       return;
     }
 
-    const effectiveStage = assignStageName || stages[0]?.name || 'Penyisihan';
+    const effectiveStage = assignStageName || stageOptionsForAssignment[0] || 'Penyisihan';
     const effectiveBranch = assignBranchName || cabangList[0]?.name || 'Semua Cabang';
     const branchObj = cabangList.find((c) => c.name === effectiveBranch);
     const levelObj = jenjangList.find((j) => j.id === assignLevelId || j.name === assignLevelName);
 
-    addJudgeAssignment({
+    const selectedFields = availableFieldsForAssignment.filter((f) => assignFieldIds.includes(f.id));
+    if (!assignAllFields && selectedFields.length === 0) {
+      setFeedbackMessage({
+        type: 'error',
+        text: 'Pilih minimal satu bidang penilaian, atau centang "Semua bidang".'
+      });
+      return;
+    }
+
+    const base = {
       judgeId: judgeObj.id,
       judgeName: judgeObj.name,
       stageName: effectiveStage,
       branchName: effectiveBranch,
       branchId: branchObj?.id,
       levelId: levelObj?.id,
-      levelName: levelObj?.name,
-      judgeField: assignField || judgeObj.judgeField || 'Bidang Penilaian',
-      judgeFieldId: assignFieldId || undefined
+      levelName: levelObj?.name
+    };
+    // Satu baris penugasan per bidang. "Semua bidang" = satu baris tanpa bidang (hakim menilai seluruh bidang).
+    const requests = assignAllFields
+      ? [{ ...base, judgeField: 'Semua Bidang' }]
+      : selectedFields.map((f) => ({ ...base, judgeField: f.name, judgeFieldId: f.id, rubricFieldId: f.id }));
+
+    const failures: string[] = [];
+    let savedCount = 0;
+    requests.forEach((req) => {
+      const res = addJudgeAssignment(req);
+      if (res.success) savedCount += 1;
+      else failures.push(res.message);
     });
+
     setIsAssignJudgeOpen(false);
-    setFeedbackMessage({ type: 'success', text: `Penugasan hakim ${judgeObj.name} berhasil disimpan ke database.` });
+    if (failures.length > 0) {
+      setFeedbackMessage({
+        type: 'error',
+        text: `${savedCount} penugasan tersimpan, ${failures.length} gagal: ${Array.from(new Set(failures)).join(' ')}`
+      });
+      return;
+    }
+    const fieldLabel = assignAllFields ? 'semua bidang' : `bidang ${selectedFields.map((f) => f.name).join(', ')}`;
+    setFeedbackMessage({
+      type: 'success',
+      text: `${judgeObj.name} ditugaskan pada ${fieldLabel} (babak ${effectiveStage}, ${effectiveBranch}).`
+    });
   };
 
   return (
@@ -1382,13 +1441,15 @@ export const MasterDataView: React.FC = () => {
               onClick={() => {
                 const firstJudge = users.find((u) => u.role === 'judge');
                 setSelectedJudgeId(firstJudge?.id || '');
-                setAssignStageName(stages[0]?.name || 'Penyisihan');
-                setAssignBranchName(cabangList[0]?.name || 'Semua Cabang');
+                const firstBranch = cabangList[0]?.name || 'Semua Cabang';
+                setAssignBranchName(firstBranch);
+                setAssignStageName(
+                  stages.find((s) => s.branchName === firstBranch)?.name || stages[0]?.name || 'Penyisihan'
+                );
                 setAssignLevelId(jenjangList[0]?.id || '');
                 setAssignLevelName(jenjangList[0]?.name || '');
-                const firstField = availableRubricFields[0];
-                setAssignFieldId(firstField?.id || '');
-                setAssignField(firstField?.name || firstJudge?.judgeField || '');
+                setAssignFieldIds([]);
+                setAssignAllFields(false);
                 setIsAssignJudgeOpen(true);
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
@@ -2145,9 +2206,10 @@ export const MasterDataView: React.FC = () => {
                     onChange={(e) => setAssignStageName(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
                   >
-                    {stages.map((s) => (
-                      <option key={s.id} value={s.name}>
-                        {s.name}
+                    {stageOptionsForAssignment.length === 0 && <option value="">Cabang ini belum punya babak</option>}
+                    {stageOptionsForAssignment.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
                       </option>
                     ))}
                   </select>
@@ -2156,7 +2218,15 @@ export const MasterDataView: React.FC = () => {
                   <label className="font-bold text-slate-600 block mb-1">Cabang Lomba</label>
                   <select
                     value={assignBranchName}
-                    onChange={(e) => setAssignBranchName(e.target.value)}
+                    onChange={(e) => {
+                      const nextBranch = e.target.value;
+                      setAssignBranchName(nextBranch);
+                      setAssignFieldIds([]);
+                      const branchStages = stages.filter((s) => s.branchName === nextBranch);
+                      if (!branchStages.some((s) => s.name === assignStageName)) {
+                        setAssignStageName(branchStages[0]?.name || '');
+                      }
+                    }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
                   >
                     <option value="Semua Cabang">Semua Cabang</option>
@@ -2170,25 +2240,57 @@ export const MasterDataView: React.FC = () => {
               </div>
 
               <div>
-                <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian (Dropdown Database)</label>
-                <select
-                  value={assignField}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setAssignField(val);
-                    const match = availableFieldsForAssignment.find((f) => f.name === val);
-                    setAssignFieldId(match?.id || '');
-                  }}
-                  required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-semibold text-slate-800"
-                >
-                  <option value="">-- Pilih Bidang Penilaian --</option>
-                  {availableFieldsForAssignment.map((fld) => (
-                    <option key={fld.id} value={fld.name}>
-                      {fld.name} ({fld.code})
-                    </option>
-                  ))}
-                </select>
+                <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian</label>
+                <p className="text-[11px] text-slate-500 mb-2">
+                  {assignmentRubric
+                    ? `Bidang dari rubrik "${assignmentRubric.name}". Centang satu atau beberapa bidang yang dipegang hakim ini.`
+                    : 'Pilih cabang untuk melihat bidang rubrik resminya. Centang satu atau beberapa bidang.'}
+                </p>
+                <label className="flex items-center gap-2 px-3 py-2 mb-2 border border-slate-200 rounded-lg bg-slate-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={assignAllFields}
+                    onChange={(e) => {
+                      setAssignAllFields(e.target.checked);
+                      if (e.target.checked) setAssignFieldIds([]);
+                    }}
+                  />
+                  <span className="font-semibold text-slate-800">Semua bidang</span>
+                  <span className="text-slate-500">(hakim menilai seluruh bidang rubrik)</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {availableFieldsForAssignment.map((fld) => {
+                    const alreadyHeld = existingAssignmentsForSelection.some(
+                      (ja) => (ja.rubricFieldId || ja.judgeFieldId) === fld.id || ja.judgeField === fld.name
+                    );
+                    const checked = assignFieldIds.includes(fld.id);
+                    return (
+                      <label
+                        key={fld.id}
+                        className={`flex items-center gap-2 px-3 py-2 border rounded-lg ${
+                          assignAllFields || alreadyHeld
+                            ? 'opacity-50 cursor-not-allowed border-slate-200'
+                            : checked
+                              ? 'border-emerald-600 bg-emerald-50 cursor-pointer'
+                              : 'border-slate-300 cursor-pointer'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={assignAllFields || alreadyHeld}
+                          checked={checked || alreadyHeld}
+                          onChange={(e) =>
+                            setAssignFieldIds((prev) =>
+                              e.target.checked ? [...prev, fld.id] : prev.filter((id) => id !== fld.id)
+                            )
+                          }
+                        />
+                        <span className="font-semibold text-slate-800">{fld.name}</span>
+                        {alreadyHeld && <span className="text-[10px] text-slate-500">sudah</span>}
+                      </label>
+                    );
+                  })}
+                </div>
                 {availableFieldsForAssignment.length === 0 && (
                   <p className="text-xs text-amber-700 mt-1">
                     Belum ada bidang penilaian di database. Tambahkan versi rubrik dan bidang terlebih dahulu pada tab Rubrik & Bidang.

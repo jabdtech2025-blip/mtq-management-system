@@ -11,7 +11,13 @@ import {
   CompetitionStage
 } from '../types/mtq';
 import { getBranchRuleConfig, resolveActiveRubricForBranch, INITIAL_RUBRIC_VERSIONS } from './competitionRules';
-import { aggregateParticipantScores, getActiveRubricFields } from './scoringEngine';
+import {
+  aggregateParticipantScores,
+  getActiveRubricFields,
+  resolveJudgeFieldScope,
+  findUncoveredRubricFields,
+  FieldScopedAggregation
+} from './scoringEngine';
 import { StructuredBlockingReason } from './completion';
 
 
@@ -454,7 +460,16 @@ export class RankingService {
       }
     });
 
-    const filteredParticipations = Array.from(dedupedParticipationMap.values());
+    // Peserta berstatus Ditolak tidak diundi dan tidak dinilai, jadi tidak ikut peringkat maupun syarat pengesahan
+    // (sama dengan aturan server). Tanpa ini satu peserta yang ditolak memblokir pengesahan seluruh babak.
+    const rejectedParticipantIds = new Set(
+      participants
+        .filter((p) => p.tenantId === tenantId && p.verificationStatus === 'Ditolak')
+        .map((p) => p.id)
+    );
+    const filteredParticipations = Array.from(dedupedParticipationMap.values()).filter(
+      (sp) => !rejectedParticipantIds.has(sp.participantId)
+    );
 
     if (filteredParticipations.length === 0) {
       const msg = 'Tidak ada peserta terdaftar pada babak dan cabang ini.';
@@ -615,6 +630,59 @@ export class RankingService {
     const effectiveJudgeIdsForScoring =
       requiredJudgeIds.length > 0 ? requiredJudgeIds : assessedJudgeIdsInGroup;
 
+    // Resolusi Konfigurasi Aturan & Validasi Tie-Break terhadap Rubrik Aktif
+    const combinedRubrics = Array.from(
+      new Map(
+        [...customRubricVersions, ...INITIAL_RUBRIC_VERSIONS].map((r) => [r.id, r])
+      ).values()
+    );
+    const effectiveRuleBranch =
+      targetBranch && targetBranch !== 'Semua Cabang'
+        ? targetBranch
+        : firstPartObj?.branchName || 'Tilawah Dewasa Putra';
+    const ruleConfig = getBranchRuleConfig(effectiveRuleBranch, tenantId, customRuleConfigs, targetBranchId);
+    const rubricRes = resolveActiveRubricForBranch({
+      branchName: effectiveRuleBranch,
+      branchId: targetBranchId,
+      tenantId,
+      competitionRules: customRuleConfigs,
+      rubricVersions: combinedRubrics
+    });
+
+    const tieBreakOrder = ruleConfig.tieBreakOrder || [];
+    const activeRubricFields = rubricRes.rubric ? getActiveRubricFields(rubricRes.rubric) : [];
+    const validRubricFieldNames = new Set<string>(
+      activeRubricFields.flatMap((f) => [f.name, f.code].filter(Boolean))
+    );
+
+    // Hakim multi-bidang: cakupan bidang tiap hakim wajib pada babak ini (null = semua bidang).
+    // Nilai tiap bidang dirata-rata hanya dari hakim pemegang bidang itu (sama dengan server).
+    const fieldNameById = new Map<string, string>();
+    combinedRubrics.forEach((rv) => (rv.fields || []).forEach((f) => fieldNameById.set(f.id, f.name)));
+    const judgeFieldScope: Record<string, string[] | null> = {};
+    requiredJudgeIds.forEach((judgeId) => {
+      judgeFieldScope[judgeId] = resolveJudgeFieldScope(
+        relevantAssignments.filter((ja) => ja.judgeId === judgeId),
+        activeRubricFields,
+        fieldNameById
+      );
+    });
+    const uncoveredRubricFields =
+      requiredJudgeIds.length > 0
+        ? findUncoveredRubricFields(
+            requiredJudgeIds.map((judgeId) => judgeFieldScope[judgeId] ?? null),
+            activeRubricFields
+          )
+        : [];
+    const fieldScope: FieldScopedAggregation | undefined =
+      rubricRes.rubric && activeRubricFields.length > 0
+        ? {
+            judgeFieldScope,
+            rubricFields: activeRubricFields.map((f) => ({ name: f.name, maxScore: f.maxScore, weight: f.weight })),
+            startingScore: rubricRes.rubric.startingScore ?? 100
+          }
+        : undefined;
+
     // 3. Hitung skor tiap peserta menggunakan Scoring Engine terpusat dengan isolasi stageId & stageParticipationId
     const evaluatedItems = filteredParticipations.map((sp) => {
       const partObj = participants.find((p) => p.id === sp.participantId && p.tenantId === tenantId);
@@ -659,7 +727,8 @@ export class RankingService {
         effectiveJudgeIdsForScoring,
         tenantAssessments,
         sp.stageId || stageId,
-        sp.id
+        sp.id,
+        fieldScope
       );
 
       const participantSafe: Participant = partObj || {
@@ -695,30 +764,6 @@ export class RankingService {
       };
     });
 
-    // 4. Resolusi Konfigurasi Aturan & Validasi Tie-Break terhadap Rubrik Aktif
-    const combinedRubrics = Array.from(
-      new Map(
-        [...customRubricVersions, ...INITIAL_RUBRIC_VERSIONS].map((r) => [r.id, r])
-      ).values()
-    );
-    const effectiveRuleBranch =
-      targetBranch && targetBranch !== 'Semua Cabang'
-        ? targetBranch
-        : firstPartObj?.branchName || 'Tilawah Dewasa Putra';
-    const ruleConfig = getBranchRuleConfig(effectiveRuleBranch, tenantId, customRuleConfigs, targetBranchId);
-    const rubricRes = resolveActiveRubricForBranch({
-      branchName: effectiveRuleBranch,
-      branchId: targetBranchId,
-      tenantId,
-      competitionRules: customRuleConfigs,
-      rubricVersions: combinedRubrics
-    });
-
-    const tieBreakOrder = ruleConfig.tieBreakOrder || [];
-    const activeRubricFields = rubricRes.rubric ? getActiveRubricFields(rubricRes.rubric) : [];
-    const validRubricFieldNames = new Set<string>(
-      activeRubricFields.flatMap((f) => [f.name, f.code].filter(Boolean))
-    );
 
     const isTieBreakConfigValid =
       Array.isArray(tieBreakOrder) &&
@@ -948,6 +993,11 @@ export class RankingService {
       setBlock(
         'INVALID_TIE_BREAK_CONFIG',
         `Konfigurasi urutan kriteria tie-break pada cabang "${targetBranch}" tidak valid atau memuat bidang di luar rubrik aktif.`
+      );
+    } else if (uncoveredRubricFields.length > 0) {
+      setBlock(
+        'FIELD_WITHOUT_JUDGE',
+        `Bidang ${uncoveredRubricFields.join(', ')} belum dipegang hakim mana pun pada babak "${stageName}" cabang "${targetBranch}". Tugaskan hakim untuk bidang tersebut.`
       );
     } else if (missingMaqraCount > 0) {
       setBlock(

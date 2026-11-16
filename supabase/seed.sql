@@ -185,6 +185,17 @@ SET rubric_field_id = EXCLUDED.rubric_field_id,
     criterion_id = EXCLUDED.criterion_id,
     deduction_rule_id = EXCLUDED.deduction_rule_id;
 
+-- 7b. KATEGORI KESALAHAN RUBRIK TAHFIZH
+-- Kode kategori unik per tenant, jadi kategori Tajwid/Fashahah milik rubrik Tahfizh memakai awalan THF-.
+INSERT INTO error_categories (id, tenant_id, rubric_field_id, code, name, scope, default_deduction, method_type, status, sort_order)
+VALUES
+    ('88888888-8888-4888-8888-888888888811', '11111111-1111-4111-8111-111111111101', '33333333-3333-4333-8333-333333333405', 'THF-LUPA', 'Lupa / Salah Ayat (dibantu hakim)', 'Tahfizh', 1.00, 'Pengurangan tetap', 'Aktif', 11),
+    ('88888888-8888-4888-8888-888888888812', '11111111-1111-4111-8111-111111111101', '33333333-3333-4333-8333-333333333405', 'THF-RAGU', 'Ragu / Mengulang (membetulkan sendiri)', 'Tahfizh', 0.50, 'Pengurangan tetap', 'Aktif', 12),
+    ('88888888-8888-4888-8888-888888888813', '11111111-1111-4111-8111-111111111101', '33333333-3333-4333-8333-333333333406', 'THF-TJW', 'Kesalahan Tajwid (Tahfizh)', 'Tajwid', 0.50, 'Pengurangan tetap', 'Aktif', 13),
+    ('88888888-8888-4888-8888-888888888814', '11111111-1111-4111-8111-111111111101', '33333333-3333-4333-8333-333333333407', 'THF-FSH', 'Kesalahan Fashahah (Tahfizh)', 'Fashahah', 0.50, 'Pengurangan tetap', 'Aktif', 14)
+ON CONFLICT (tenant_id, code) DO UPDATE
+SET rubric_field_id = EXCLUDED.rubric_field_id;
+
 -- 8. KAFILAHS & QUESTIONS
 INSERT INTO kafilahs (id, tenant_id, code, name, region, leader_name, contact_person, contact_phone, status)
 VALUES

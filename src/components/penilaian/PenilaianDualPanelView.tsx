@@ -27,7 +27,13 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { CanvasStroke, NormalizedPoint, AssignedMaqraItem } from '../../types/mtq';
-import { calculateAssessmentScore } from '../../services/scoringEngine';
+import {
+  calculateAssessmentScore,
+  getActiveRubricFields,
+  judgeScopeIncludesField,
+  resolveCategoryField,
+  resolveJudgeFieldScope
+} from '../../services/scoringEngine';
 import {
   detectLocalMushaf,
   getKnownLocalMushafAvailability,
@@ -46,6 +52,7 @@ export const PenilaianDualPanelView: React.FC = () => {
     users,
     monitoringJudgeId,
     errorCategories,
+    rubricVersions,
     assessments,
     initializeAssessment,
     updateErrorCount,
@@ -444,70 +451,36 @@ export const PenilaianDualPanelView: React.FC = () => {
     (currentUser.role === 'judge' ? currentUser.judgeField : '');
   const assignedFieldId = currentJudgeAssignment?.judgeFieldId;
 
-  // Error counting values from active assessment
-  // Restrict judges to accessing and scoring error categories for their assigned field, with flexible field/scope matching
+  // Hakim multi-bidang: cakupan bidang hakim ini pada babak peserta (null = semua bidang).
+  // Aturannya sama persis dengan pemeriksaan server (get_judge_stage_fields / JUDGE_FIELD_VIOLATION),
+  // jadi kategori yang tampil = kategori yang boleh dipotong.
+  const judgeFieldScope = useMemo(() => {
+    if (!activeRubric) return null;
+    if (activeJudgeAssignments.length === 0) {
+      // Mode pengawasan admin / data lama tanpa penugasan resmi: pakai bidang profil hakim bila ada
+      if (!assignedFieldId && !assignedFieldName) return null;
+      return resolveJudgeFieldScope(
+        [{ judgeFieldId: assignedFieldId, judgeField: assignedFieldName }],
+        getActiveRubricFields(activeRubric),
+        new Map(rubricVersions.flatMap((rv) => (rv.fields || []).map((f) => [f.id, f.name] as [string, string])))
+      );
+    }
+    return resolveJudgeFieldScope(
+      activeJudgeAssignments,
+      getActiveRubricFields(activeRubric),
+      new Map(rubricVersions.flatMap((rv) => (rv.fields || []).map((f) => [f.id, f.name] as [string, string])))
+    );
+  }, [activeRubric, activeJudgeAssignments, assignedFieldId, assignedFieldName, rubricVersions]);
+
+  // Kategori kesalahan: hanya kategori milik rubrik cabang peserta, dan hanya bidang yang dipegang hakim ini
   const activeErrorCategories = useMemo(() => {
     const activeOnly = errorCategories.filter((cat) => cat.status !== 'Nonaktif');
-
-    const categoriesForField = (fieldId?: string, fieldName?: string) => {
-      const lowerAssigned = (fieldName || '').toLowerCase();
-      const cleanedAssigned = lowerAssigned.replace(/^bidang\s+/i, '').trim();
-
-      const matchingRubricField = activeRubric?.fields?.find((f) => {
-        if (fieldId && f.id === fieldId) return true;
-        if (!lowerAssigned) return false;
-        const fName = f.name.toLowerCase();
-        const fCode = f.code.toLowerCase();
-        const cleanedFName = fName.replace(/^bidang\s+/i, '').trim();
-        return (
-          fName === lowerAssigned ||
-          fCode === lowerAssigned ||
-          lowerAssigned.includes(fName) ||
-          fName.includes(lowerAssigned) ||
-          (cleanedAssigned && (cleanedFName.includes(cleanedAssigned) || cleanedAssigned.includes(cleanedFName)))
-        );
-      });
-
-      const targetFieldId = fieldId || matchingRubricField?.id;
-      const targetFieldName = (matchingRubricField?.name || fieldName || '').toLowerCase();
-      const cleanedTargetField = targetFieldName.replace(/^bidang\s+/i, '').trim();
-
-      return activeOnly.filter((cat) => {
-        if (targetFieldId && cat.fieldId === targetFieldId) return true;
-        const catScope = (cat.scope || '').toLowerCase();
-        const catName = (cat.name || '').toLowerCase();
-        if (targetFieldName && (catScope.includes(targetFieldName) || targetFieldName.includes(catScope))) return true;
-        if (targetFieldName && (catName.includes(targetFieldName) || targetFieldName.includes(catName))) return true;
-        if (cleanedTargetField && (catScope.includes(cleanedTargetField) || catName.includes(cleanedTargetField))) return true;
-        return false;
-      });
-    };
-
-    // Satu hakim dapat ditugaskan pada beberapa rubrik/bidang di babak yang sama: gabungkan kategorinya
-    const fieldTargets =
-      activeJudgeAssignments.length > 0
-        ? activeJudgeAssignments.map((ja) => ({
-            id: ja.judgeFieldId || ja.rubricFieldId,
-            name: ja.rubricFieldName || ja.judgeField
-          }))
-        : assignedFieldId || assignedFieldName
-          ? [{ id: assignedFieldId, name: assignedFieldName }]
-          : [];
-
-    if (fieldTargets.length > 0) {
-      const seen = new Set<string>();
-      const merged = fieldTargets
-        .flatMap((t) => categoriesForField(t.id, t.name))
-        .filter((cat) => {
-          if (seen.has(cat.id)) return false;
-          seen.add(cat.id);
-          return true;
-        });
-      if (merged.length > 0) return merged;
-    }
-
-    return activeOnly;
-  }, [errorCategories, activeJudgeAssignments, assignedFieldId, assignedFieldName, activeRubric]);
+    if (!activeRubric) return activeOnly;
+    return activeOnly.filter((cat) => {
+      const fieldName = resolveCategoryField(cat, activeRubric);
+      return Boolean(fieldName) && judgeScopeIncludesField(judgeFieldScope, fieldName!);
+    });
+  }, [errorCategories, activeRubric, judgeFieldScope]);
   const errorCounts = currentAssessment?.errorCounts || {};
   const startingScore = activeRubric?.startingScore ?? 100.0;
   const liveScoreCalc = useMemo(() => {
@@ -1034,14 +1007,22 @@ export const PenilaianDualPanelView: React.FC = () => {
                     : 'Ketuk + / - (48px)'}
                 </span>
               </div>
+              {activeRubric && (
+                <p className="text-xs text-slate-600" data-testid="judge-field-scope">
+                  Bidang tugas:{' '}
+                  <span className="font-semibold text-emerald-800">
+                    {judgeFieldScope ? judgeFieldScope.join(', ') : 'Semua bidang'}
+                  </span>
+                </p>
+              )}
 
               <div className="space-y-2.5">
                 {activeErrorCategories.length === 0 ? (
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-center text-xs text-slate-500">
                     <p className="font-semibold text-slate-700">Belum Ada Kategori Kesalahan Terhubung</p>
                     <p className="text-xs mt-1 text-slate-500">
-                      {assignedFieldName
-                        ? `Tidak ada kategori kesalahan untuk bidang "${assignedFieldName}". Hubungkan kategori kesalahan ke bidang ini di Master Data.`
+                      {judgeFieldScope
+                        ? `Tidak ada kategori kesalahan untuk bidang ${judgeFieldScope.join(', ')} pada rubrik cabang ini. Hubungkan kategori kesalahan ke bidang tersebut di Master Data.`
                         : 'Belum ada kategori kesalahan yang dikonfigurasi pada database.'}
                     </p>
                   </div>

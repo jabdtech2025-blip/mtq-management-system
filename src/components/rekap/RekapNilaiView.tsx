@@ -37,6 +37,7 @@ export const RekapNilaiView: React.FC = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStage, setSelectedStage] = useState('Semua Babak');
+  const [selectedBranch, setSelectedBranch] = useState('Semua Cabang');
   const [selectedKafilah, setSelectedKafilah] = useState('Semua Grup');
   const [selectedStatus, setSelectedStatus] = useState('Semua Status');
   const [inspectedParticipant, setInspectedParticipant] = useState<Participant | null>(null);
@@ -77,6 +78,15 @@ export const RekapNilaiView: React.FC = () => {
     return ['Semua Babak', ...Array.from(new Set(list))];
   }, [stages]);
 
+  // Cabang lomba yang benar-benar punya peserta pada tenant ini
+  const branchOptions = useMemo(() => {
+    const list = participants
+      .filter((p) => p.tenantId === currentTenant.id)
+      .map((p) => p.branchName)
+      .filter(Boolean);
+    return ['Semua Cabang', ...Array.from(new Set(list)).sort((a, b) => a.localeCompare(b, 'id'))];
+  }, [participants, currentTenant.id]);
+
   // Available kafilahs from active records
   const kafilahOptions = useMemo(() => {
     const list = kafilahs.map((k) => k.name);
@@ -87,7 +97,23 @@ export const RekapNilaiView: React.FC = () => {
   const activeJudges = useMemo(() => {
     // If specific stage is selected, filter judge assignments for that stage
     if (selectedStage !== 'Semua Babak') {
-      const assigned = judgeAssignments.filter((ja) => ja.stageName === selectedStage);
+      // Hanya hakim babak ini pada cabang terpilih. Satu hakim dengan beberapa bidang tampil satu kolom.
+      const seenJudgeIds = new Set<string>();
+      const assigned = judgeAssignments.filter((ja) => {
+        if (ja.tenantId !== currentTenant.id || ja.status === 'Nonaktif') return false;
+        if (ja.stageName !== selectedStage) return false;
+        if (
+          selectedBranch !== 'Semua Cabang' &&
+          ja.branchName &&
+          ja.branchName !== 'Semua Cabang' &&
+          ja.branchName !== selectedBranch
+        ) {
+          return false;
+        }
+        if (seenJudgeIds.has(ja.judgeId)) return false;
+        seenJudgeIds.add(ja.judgeId);
+        return true;
+      });
       if (assigned.length > 0) {
         return assigned.map((ja) => {
           const userObj = users.find((u) => u.id === ja.judgeId);
@@ -119,7 +145,7 @@ export const RekapNilaiView: React.FC = () => {
       field: u.judgeField || 'Dewan Hakim',
       category: u.judgeCategory || 'Hakim'
     }));
-  }, [selectedStage, judgeAssignments, users, currentTenant.id]);
+  }, [selectedStage, selectedBranch, judgeAssignments, users, currentTenant.id]);
 
   // Filter participants
   const filteredParticipants = useMemo(() => {
@@ -130,6 +156,7 @@ export const RekapNilaiView: React.FC = () => {
         p.lotteryNumber.includes(searchQuery) ||
         p.kafilahName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStage = selectedStage === 'Semua Babak' || p.stageName === selectedStage;
+      const matchesBranch = selectedBranch === 'Semua Cabang' || p.branchName === selectedBranch;
       const matchesKafilah = selectedKafilah === 'Semua Grup' || p.kafilahName === selectedKafilah;
 
       const progress = getParticipantProgress(p.id, p.stageName);
@@ -138,9 +165,9 @@ export const RekapNilaiView: React.FC = () => {
         progress === selectedStatus ||
         p.status === selectedStatus;
 
-      return matchesSearch && matchesStage && matchesKafilah && matchesStatus;
+      return matchesSearch && matchesStage && matchesBranch && matchesKafilah && matchesStatus;
     });
-  }, [participants, searchQuery, selectedStage, selectedKafilah, selectedStatus, getParticipantProgress, assessments]);
+  }, [participants, searchQuery, selectedStage, selectedBranch, selectedKafilah, selectedStatus, getParticipantProgress, assessments]);
 
   const getJudgeAssessment = (
     participantId: string,
@@ -283,6 +310,7 @@ export const RekapNilaiView: React.FC = () => {
           </h1>
           <p className="text-xs text-slate-500 mt-1">
             {currentTenant.eventName} · {selectedStage === 'Semua Babak' ? 'Seluruh Babak' : `Babak ${selectedStage}`}
+            {selectedBranch !== 'Semua Cabang' ? ` · ${selectedBranch}` : ''}
           </p>
         </div>
 
@@ -316,6 +344,19 @@ export const RekapNilaiView: React.FC = () => {
           {stageOptions.map((stg) => (
             <option key={stg} value={stg}>
               {stg === 'Semua Babak' ? 'Semua Babak' : `Babak ${stg}`}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedBranch}
+          onChange={(e) => setSelectedBranch(e.target.value)}
+          aria-label="Saring cabang lomba"
+          className="flex-1 min-w-[150px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700 cursor-pointer hover:border-slate-300"
+        >
+          {branchOptions.map((br) => (
+            <option key={br} value={br}>
+              {br}
             </option>
           ))}
         </select>

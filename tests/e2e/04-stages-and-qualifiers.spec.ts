@@ -31,4 +31,26 @@ test.describe('E2E: Manajemen Babak, Kualifikasi Peserta & Pengumuman Kelulusan'
     // Verifikasi tabel peringkat kualifikasi peserta
     await expect(page.getByText(/Peringkat & Kualifikasi Peserta/i).first()).toBeVisible();
   });
+
+  test('03. Pengetikan Multi-Huruf di Form Modal Tidak Kehilangan Fokus', async ({ page }) => {
+    await page.getByRole('button', { name: /Manajemen Babak/i }).click();
+    await expect(page.getByText(/Manajemen Babak Musabaqah/i)).toBeVisible();
+
+    const triggerBtn = page.getByRole('button', { name: /Tambah Babak/i });
+    await triggerBtn.click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    const nameInput = dialog.getByLabel('Nama Babak');
+    await nameInput.click();
+    await nameInput.pressSequentially('Babak Khusus Tilawah');
+
+    await expect(nameInput).toBeFocused();
+    await expect(nameInput).toHaveValue('Babak Khusus Tilawah');
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(triggerBtn).toBeFocused();
+  });
 });

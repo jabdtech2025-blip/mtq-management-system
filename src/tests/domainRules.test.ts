@@ -292,7 +292,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations,
     participants: participantsList,
     assessments: assessmentsSample,
-    judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 305 }],
     quota: 3
   });
@@ -417,7 +417,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieParticipations,
     participants: [partTied1, partTied2],
     assessments: tieAssessments,
-    judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 305 }],
     quota: 1
   });
@@ -446,7 +446,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       { ...tieAssessments[0] },
       { ...tieAssessments[1], fieldScores: { Tajwid: 28.0, Lagu: 23.0, Fashahah: 25.0, Suara: 14.0 } }
     ],
-    judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 305 }],
     quota: 1
   });
@@ -511,7 +511,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieParticipations,
     participants: [partTied1, partTied2],
     assessments: tieAssessments,
-    judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 305 }],
     quota: 1,
     manualOverrides: { 'p-tie-2': true },
@@ -727,7 +727,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieBreakParts,
     participants: [tieBreakPartA, tieBreakPartB],
     assessments: tieBreakAssessments,
-    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1,
     customRuleConfigs: customLaguFirstConfig
@@ -789,7 +789,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieBreakParts,
     participants: [tieBreakPartA, tieBreakPartB],
     assessments: identicalAssessments,
-    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1
   });
@@ -872,7 +872,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       { id: 'a-til', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', participantId: 'p-til-1', stageParticipationId: 'sp-til', stageId: 'stg-1', stageName: 'Penyisihan', questionId: 'q-1', fieldScores: { Tajwid: 29 }, finalScore: 95, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 5, annotations: [], lastUpdated: '10:00' },
       { id: 'a-tah', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tahfizh', participantId: 'p-tah-1', stageParticipationId: 'sp-tah', stageId: 'stg-2', stageName: 'Penyisihan', questionId: 'q-2', fieldScores: { Tahfizh: 49 }, finalScore: 98, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 2, annotations: [], lastUpdated: '10:00' }
     ],
-    judgeAssignments: [{ id: 'ja-1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra' }],
+    judgeAssignments: [{ id: 'ja-1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Semua Bidang', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1
   });
@@ -890,7 +890,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieBreakParts,
     participants: [tieBreakPartA, tieBreakPartB],
     assessments: tieBreakAssessments,
-    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1,
     manualOverrides: { 'p-tb-b': true, 'p-tb-a': false },
@@ -911,7 +911,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieBreakParts,
     participants: [tieBreakPartA, tieBreakPartB],
     assessments: tieBreakAssessments,
-    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1
   });
@@ -1124,7 +1124,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieBreakParts,
     participants: [tieBreakPartA, tieBreakPartB],
     assessments: tieBreakAssessments,
-    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1,
     customRuleConfigs: invalidTieBreakConfig
@@ -1144,7 +1144,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieBreakParts,
     participants: [tieBreakPartA, tieBreakPartB],
     assessments: tieBreakAssessments,
-    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1,
     manualOverrides: { 'p-tb-b': false }, // p-tb-b adalah peringkat 1 otomatis, digugurkan manual tanpa alasan
@@ -1177,7 +1177,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       { id: 'a-tah', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tahfizh', participantId: 'p-tah-1', stageParticipationId: 'sp-tah', stageId: 'stg-2', stageName: 'Penyisihan', questionId: 'q-2', fieldScores: { Tahfizh: 49, Tajwid: 25, Fashahah: 24 }, finalScore: 98, status: 'finalized', errorCounts: {}, deductions: {}, totalDeductions: 2, annotations: [], lastUpdated: '10:00' }
     ],
     judgeAssignments: [
-      { id: 'ja-1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Tajwid', stageId: 'stg-1', stageName: 'Penyisihan', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra' }
+      { id: 'ja-1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'Hakim', judgeField: 'Semua Bidang', stageId: 'stg-1', stageName: 'Penyisihan', branchId: 'br-tilawah', branchName: 'Tilawah Dewasa Putra' }
     ],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1
@@ -1483,7 +1483,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     participations: tieBreakParts,
     participants: [tieBreakPartA, tieBreakPartB],
     assessments: tieBreakAssessments,
-    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+    judgeAssignments: [{ id: 'ja-tb', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
     quota: 1, // Kuota hanya 1 peserta, tetapi kedua peserta diloloskan (p-tb-b lolos otomatis, p-tb-a diloloskan lewat override)
     manualOverrides: { 'p-tb-a': true },
@@ -1792,18 +1792,20 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       {
         ...tieBreakAssessments[0],
         // Qari A has explicit 0 on Tajwid
-        fieldScores: { Tajwid: 0, Lagu: 25, Fashahah: 25, Suara: 15 },
-        finalScore: 85.0
+        // Data konsisten: total = jumlah nilai bidang (0 + 25 + 30 + 15 = 70)
+        fieldScores: { Tajwid: 0, Lagu: 25, Fashahah: 30, Suara: 15 },
+        finalScore: 70.0
       },
       {
         ...tieBreakAssessments[1],
         // Qari B is missing Tajwid (NULL)
-        fieldScores: { Lagu: 25, Fashahah: 25, Suara: 15 },
-        finalScore: 85.0
+        // Tajwid tidak tercatat (NULL): total memakai nilai akhir lembar
+        fieldScores: { Lagu: 25, Fashahah: 30, Suara: 15 },
+        finalScore: 70.0
       }
     ],
     judgeAssignments: [
-      { id: 'ja-tb-active', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid', status: 'Aktif' },
+      { id: 'ja-tb-active', tenantId: 't-tb', judgeId: 'j-tb', judgeName: 'Hakim TB', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang', status: 'Aktif' },
       { id: 'ja-tb-inactive', tenantId: 't-tb', judgeId: 'j-inactive', judgeName: 'Hakim Cuti', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Lagu', status: 'Nonaktif' }
     ],
     stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 300 }],
@@ -1874,7 +1876,7 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       participations: sps,
       participants: parts,
       assessments: asses,
-      judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Tajwid' }],
+      judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
       stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 305 }],
       quota: opts.quota,
       isFinalStage: opts.isFinalStage,
