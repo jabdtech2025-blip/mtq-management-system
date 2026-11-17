@@ -463,18 +463,23 @@ export function validateMaqraAssignmentForParticipant(
   }
 
   // 3. Validasi Jenjang / Golongan (Level)
+  // Soal berlabel "Umum" / "Semua Jenjang" atau tanpa jenjang khusus berlaku untuk semua jenjang pada cabang yang sama.
   const qLevelName = (question.levelName || '').trim().toLowerCase();
   const pLevelName = (participant.levelName || '').trim().toLowerCase();
-  if (question.levelId && participant.levelId) {
-    if (question.levelId !== participant.levelId) {
+  const isQuestionWildcardLevel =
+    !qLevelName || qLevelName === 'semua jenjang' || qLevelName === 'umum';
+  if (!isQuestionWildcardLevel) {
+    if (question.levelId && participant.levelId) {
+      if (question.levelId !== participant.levelId) {
+        return fail(
+          `Ketidaksesuaian jenjang: Paket soal "${question.code}" (${question.levelName}) tidak sesuai dengan jenjang peserta ${participant.name} (${participant.levelName}).`
+        );
+      }
+    } else if (pLevelName && qLevelName !== pLevelName) {
       return fail(
         `Ketidaksesuaian jenjang: Paket soal "${question.code}" (${question.levelName}) tidak sesuai dengan jenjang peserta ${participant.name} (${participant.levelName}).`
       );
     }
-  } else if (qLevelName && pLevelName && qLevelName !== 'semua jenjang' && qLevelName !== pLevelName) {
-    return fail(
-      `Ketidaksesuaian jenjang: Paket soal "${question.code}" (${question.levelName}) tidak sesuai dengan jenjang peserta ${participant.name} (${participant.levelName}).`
-    );
   }
 
   // 4. Validasi Duplikasi Soal pada Peserta & Babak yang Sama

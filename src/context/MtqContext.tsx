@@ -1319,6 +1319,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const enterOfflineDemoSimulation = () => {
+    authRequestGenRef.current += 1;
+    isOfflineDemoRef.current = true;
     try {
       localStorage.setItem('mtq_offline_demo_simulation_v4', 'true');
     } catch {}
@@ -1352,6 +1354,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const exitOfflineDemoSimulation = async (): Promise<void> => {
+    isOfflineDemoRef.current = false;
     try {
       localStorage.removeItem('mtq_offline_demo_simulation_v4');
     } catch {}
@@ -1396,6 +1399,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Dilindungi oleh `authRequestGenRef` agar respons lama (stale) tidak pernah menimpa sesi login/logout baru.
    */
   const refreshSupabaseConnection = async (): Promise<SupabaseConnectionInfo> => {
+    if (isOfflineDemoRef.current) return connectionInfo;
     const hadAuthorizedSession = Boolean(authenticatedProfileRef.current) && hasHydratedWorkspaceRef.current;
 
     // Saat perangkat offline, jangan memeriksa ulang sesi: pemeriksaan pasti gagal dan akan
@@ -1407,7 +1411,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const reqGen = ++authRequestGenRef.current;
     const info = await supabaseDataService.verifyDatabaseConnection();
-    if (reqGen !== authRequestGenRef.current) return info;
+    if (reqGen !== authRequestGenRef.current || isOfflineDemoRef.current) return info;
 
     // Gangguan jaringan sesaat pada sesi yang sudah sah: pertahankan sesi & data, jangan tampilkan gerbang masuk.
     if (!info.isDatabaseReady && info.state === 'connection_error' && hadAuthorizedSession) {
@@ -1420,7 +1424,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (info.isDatabaseReady) {
       const profile = await supabaseDataService.fetchAuthenticatedUserProfile();
-      if (reqGen !== authRequestGenRef.current) return info;
+      if (reqGen !== authRequestGenRef.current || isOfflineDemoRef.current) return info;
       if (!profile && hadAuthorizedSession && typeof navigator !== 'undefined' && navigator.onLine === false) {
         return info;
       }
@@ -1535,7 +1539,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       const hydration = await supabaseDataService.fetchTenantWorkspaceResult(targetTenantId);
-      if (reqGen !== authRequestGenRef.current) return info;
+      if (reqGen !== authRequestGenRef.current || isOfflineDemoRef.current) return info;
 
       if (hydration.success && hydration.payload) {
         const hydrated = hydration.payload;
@@ -1612,7 +1616,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } else {
       setAuthenticatedProfile(null);
-      if (!isOfflineDemoSimulation) {
+      if (!isOfflineDemoRef.current) {
         setDataSourceMode('supabase_error');
         setWorkspaceError(info.lastError || info.statusLabel);
         setUsers([]);
@@ -1757,10 +1761,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           event === 'USER_UPDATED' ||
           event === 'SIGNED_OUT' ||
           ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && identityChanged);
-        if (!needsRefresh) return;
+        if (!needsRefresh || isOfflineDemoRef.current) return;
         // Gunakan setTimeout(..., 0) agar tidak terjadi race condition / deadlock di dalam lock internal Supabase Auth
         setTimeout(() => {
-          void refreshSupabaseConnection();
+          if (!isOfflineDemoRef.current) {
+            void refreshSupabaseConnection();
+          }
         }, 0);
       });
       return () => {

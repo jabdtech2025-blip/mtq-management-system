@@ -1436,6 +1436,27 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     `wrongLevelValid: ${checkWrongLevel.valid} (${checkWrongLevel.reason}), matchingValid: ${checkMatching3D.valid}, dupValid: ${checkDuplicate3D.valid}`
   );
 
+  const questionGeneralNoId = {
+    ...questionWrongLevel,
+    id: 'q-umum-noid',
+    code: 'MQ-TLW-08',
+    levelId: undefined,
+    levelName: 'Umum',
+    branchAndLevel: 'Tilawah Dewasa Putra'
+  };
+  const questionGeneralWithId = {
+    ...questionGeneralNoId,
+    id: 'q-umum-id',
+    levelId: 'lvl-umum'
+  };
+  const checkGeneralNoId = validateMaqraAssignmentForParticipant(samplePartUlya, questionGeneralNoId, 'Penyisihan', []);
+  const checkGeneralWithId = validateMaqraAssignmentForParticipant(samplePartUlya, questionGeneralWithId, 'Penyisihan', []);
+  assert(
+    '35f2. Soal berjenjang Umum (tanpa levelId maupun dengan levelId Umum) cocok untuk peserta jenjang apa pun pada cabang & babak yang sama',
+    checkGeneralNoId.valid === true && checkGeneralWithId.valid === true,
+    `generalNoId: ${checkGeneralNoId.valid} (${checkGeneralNoId.reason}), generalWithId: ${checkGeneralWithId.valid} (${checkGeneralWithId.reason})`
+  );
+
   // 35g. P0-04 Eliminasi Fallback Longgar Identitas Penilaian (Tanpa Pencocokan Lintas Soal / Lintas Babak)
   const mismatchedQuestionAssessment: JudgeAssessment[] = [
     {

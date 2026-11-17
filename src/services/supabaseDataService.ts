@@ -1097,7 +1097,7 @@ export const supabaseDataService = {
       const lId = q.level_id ? String(q.level_id) : undefined;
       const sId = q.stage_id ? String(q.stage_id) : undefined;
       const resolvedBranchName = (bId && branchMap.get(bId)) || String(q.branch_name || 'Tilawah Dewasa Putra');
-      const resolvedLevelName = (lId && levelMap.get(lId)) || (jenjangList[0]?.name || 'Umum');
+      const resolvedLevelName = (lId && levelMap.get(lId)) || 'Umum';
       const resolvedStageName = (sId && stageMap.get(sId)?.name) || 'Penyisihan';
       const item: Question = {
         id,
@@ -1295,7 +1295,7 @@ export const supabaseDataService = {
         branchId: bId,
         branchName: branchMap.get(bId) || 'Tilawah Dewasa Putra',
         levelId: lId || undefined,
-        levelName: (lId && levelMap.get(lId)) || jenjangList[0]?.name || 'Ulya',
+        levelName: (lId && levelMap.get(lId)) || jenjangList[0]?.name || 'Umum',
         stageId: latestSp?.stageId || sId || undefined,
         stageName: latestSp?.stageName || (sId && stageMap.get(sId)?.name) || 'Penyisihan',
         questionId: latestSp?.questionId || '',
