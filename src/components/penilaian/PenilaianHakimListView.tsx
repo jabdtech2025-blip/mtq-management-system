@@ -1,4 +1,5 @@
 import { stageBelongsToBranch } from '../../services/stageResolver';
+import { buildStageOrderLookup, sortParticipantsForDisplay } from '../../utils/participantSort';
 import React, { useState, useMemo } from 'react';
 import {
   BookmarkCheck,
@@ -23,7 +24,8 @@ export const PenilaianHakimListView: React.FC = () => {
     setSelectedParticipantId,
     setMonitoringJudgeId,
     setCurrentView,
-    cabangList
+    cabangList,
+    stages
   } = useMtq();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -85,9 +87,9 @@ export const PenilaianHakimListView: React.FC = () => {
       }
       if (judgeProfile?.assignedBranch) {
         const matchesStage = !judgeProfile.assignedStage || judgeProfile.assignedStage === p.stageName;
+        // Nama cabang harus persis sama (cabang bernama mirip tidak boleh tertukar)
         const matchesBranch =
-          p.branchName.toLowerCase().includes(judgeProfile.assignedBranch.toLowerCase()) ||
-          judgeProfile.assignedBranch.toLowerCase().includes(p.branchName.toLowerCase());
+          p.branchName.trim().toLowerCase() === judgeProfile.assignedBranch.trim().toLowerCase();
         return matchesStage && matchesBranch;
       }
       return false;
@@ -140,7 +142,14 @@ export const PenilaianHakimListView: React.FC = () => {
     });
   }, [assignedParticipants, assessments, currentTenant.id, activeJudgeId, getParticipantStageQuestions]);
 
-  const filteredParticipants = participantsWithJudgeState.filter((p) => {
+  // Urut cabang, babak, lalu nomor undian (urutan tampil) agar sama dengan urutan maju peserta
+  const stageOrder = useMemo(() => buildStageOrderLookup(stages), [stages]);
+  const sortedParticipants = useMemo(
+    () => sortParticipantsForDisplay(participantsWithJudgeState, { stageOrder }),
+    [participantsWithJudgeState, stageOrder]
+  );
+
+  const filteredParticipants = sortedParticipants.filter((p) => {
     const matchesSearch =
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.participantId.toLowerCase().includes(searchQuery.toLowerCase()) ||

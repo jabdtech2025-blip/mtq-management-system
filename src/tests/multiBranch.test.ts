@@ -12,6 +12,11 @@ import {
   resolveStageWithLegacyFallback,
   stageBelongsToBranch
 } from '../services/stageResolver';
+import {
+  buildStageOrderLookup,
+  sortParticipantsByName,
+  sortParticipantsForDisplay
+} from '../utils/participantSort';
 import { ErrorCategory, JudgeAssessment, JudgeAssignment, Participant, StageParticipation } from '../types/mtq';
 
 type TestResult = { name: string; success: boolean; details?: string };
@@ -308,6 +313,40 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
     expect(covered.blockingReasonDetail?.code !== 'FIELD_WITHOUT_JUDGE', `masih diblokir: ${covered.blockingReason}`);
     const score = covered.evaluatedParticipants[0]?.displayScore;
     expect(score === 94.5, `skor peringkat harus 94.5, dapat ${score}`);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Urutan peserta (nomor undian per cabang, nama A–Z)
+  // ---------------------------------------------------------------------------
+  const sortSample = [
+    { name: 'Zaid', lotteryNumber: '10', branchName: 'Tilawah Dewasa Putra', stageName: 'Penyisihan' },
+    { name: 'Budi', lotteryNumber: '2', branchName: 'Tilawah Dewasa Putra', stageName: 'Penyisihan' },
+    { name: 'Ahmad', lotteryNumber: '', branchName: 'Tilawah Dewasa Putra', stageName: 'Penyisihan' },
+    { name: 'Fatimah', lotteryNumber: '01', branchName: 'Tilawah Dewasa Putri', stageName: 'Penyisihan' },
+    { name: 'Umar', lotteryNumber: '01', branchName: 'Tilawah Dewasa Putra', stageName: 'Final' },
+    { name: 'Hasan', lotteryNumber: '01', branchName: 'Tilawah Dewasa Putra', stageName: 'Penyisihan' }
+  ];
+
+  check('SORT-01. Urutan tampil: per cabang, babak sesuai urutan, lalu nomor undian sebagai angka; tanpa nomor di akhir', () => {
+    const order = buildStageOrderLookup([
+      { name: 'Penyisihan', order: 1, branchName: 'Tilawah Dewasa Putra' },
+      { name: 'Final', order: 2, branchName: 'Tilawah Dewasa Putra' },
+      { name: 'Penyisihan', order: 1, branchName: 'Tilawah Dewasa Putri' }
+    ]);
+    const names = sortParticipantsForDisplay(sortSample, { stageOrder: order }).map((p) => p.name);
+    expect(
+      JSON.stringify(names) === JSON.stringify(['Hasan', 'Budi', 'Zaid', 'Ahmad', 'Umar', 'Fatimah']),
+      `urutan: ${names.join(', ')}`
+    );
+  });
+
+  check('SORT-02. Urutan nama A–Z untuk memilih peserta di Bank Soal (tidak peka huruf besar)', () => {
+    const names = sortParticipantsByName([
+      { name: 'zaid' },
+      { name: 'Ahmad' },
+      { name: 'budi' }
+    ]).map((p) => p.name);
+    expect(JSON.stringify(names) === JSON.stringify(['Ahmad', 'budi', 'zaid']), `urutan: ${names.join(', ')}`);
   });
 
   const passed = results.filter((r) => r.success).length;

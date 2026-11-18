@@ -18,10 +18,11 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
-import { Question } from '../../types/mtq';
+import { CompetitionStage, Question } from '../../types/mtq';
 import { AppModal } from '../common/AppModal';
 import { formatDateTimeWIB } from '../../utils/dateTime';
 import { validateMaqraAssignmentForParticipant } from '../../services/scoringEngine';
+import { sortParticipantsByName } from '../../utils/participantSort';
 import {
   getAllSurahs,
   getSurah,
@@ -41,6 +42,42 @@ import {
   ValidatedQuestionRow
 } from '../../utils/excelHelper';
 
+
+
+/** Cabang sama persis (abaikan huruf besar/kecil); toleran format lama "Cabang - Jenjang". */
+function isSameBranch(value: string | undefined, target: string): boolean {
+  const a = (value || '').trim().toLowerCase();
+  const b = (target || '').trim().toLowerCase();
+  if (!a || !b) return false;
+  return a === b || a.startsWith(`${b} - `);
+}
+
+/**
+ * Data lama (lokal) hanya menyimpan label gabungan "Cabang Jenjang" atau "Cabang - Jenjang".
+ * Cocok bila label persis nama cabang, atau diawali nama cabang diikuti spasi/tanda hubung.
+ */
+function isLegacyBranchLabelOf(label: string | undefined, branchName: string | undefined): boolean {
+  const l = (label || '').trim().toLowerCase();
+  const b = (branchName || '').trim().toLowerCase();
+  if (!l || !b) return false;
+  return l === b || l.startsWith(`${b} - `) || l.startsWith(`${b} `);
+}
+
+/** Nama babak unik milik cabang tertentu (plus babak umum), urut sesuai urutan babak. */
+function stageNamesForBranch(list: CompetitionStage[], branchName: string): string[] {
+  const allBranches = !branchName || branchName === 'Semua Cabang';
+  const names = list
+    .filter(
+      (s) =>
+        allBranches ||
+        !s.branchName ||
+        s.branchName === 'Semua Cabang' ||
+        isSameBranch(s.branchName, branchName)
+    )
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((s) => s.name);
+  return Array.from(new Set(names));
+}
 
 export const BankSoalView: React.FC = () => {
   const {
@@ -143,6 +180,36 @@ export const BankSoalView: React.FC = () => {
   const [formBranchName, setFormBranchName] = useState('');
   const [formStage, setFormStage] = useState('Penyisihan');
   const [formDesc, setFormDesc] = useState('');
+
+  // Babak hanya dari cabang yang dipilih (nama babak berulang di tiap cabang)
+  const formStageOptions = useMemo(
+    () => stageNamesForBranch(activeStages, formBranchName),
+    [activeStages, formBranchName]
+  );
+  const filterStageOptions = useMemo(
+    () => stageNamesForBranch(stages, selectedBranch),
+    [stages, selectedBranch]
+  );
+  const lotteryStageOptions = useMemo(
+    () => stageNamesForBranch(stages, lotteryBranch),
+    [stages, lotteryBranch]
+  );
+
+  // Ganti cabang di formulir: babak yang tidak dimiliki cabang baru diganti babak pertama cabang itu
+  useEffect(() => {
+    if (!isAddModalOpen) return;
+    if (editingQuestion && editingQuestion.stageName === formStage && editingQuestion.branchName === formBranchName) return;
+    if (formStageOptions.length > 0 && !formStageOptions.includes(formStage)) {
+      setFormStage(formStageOptions[0]);
+    }
+  }, [formBranchName, formStageOptions, isAddModalOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ganti cabang di filter: babak yang tidak ada di cabang itu dikembalikan ke "Semua Babak"
+  useEffect(() => {
+    if (selectedStage !== 'Semua Babak' && !filterStageOptions.includes(selectedStage)) {
+      setSelectedStage('Semua Babak');
+    }
+  }, [filterStageOptions]); // eslint-disable-line react-hooks/exhaustive-deps
   const [formError, setFormError] = useState('');
 
   const selectedSurahInfo = useMemo(
@@ -173,7 +240,7 @@ export const BankSoalView: React.FC = () => {
         q.surahName.toLowerCase().includes(searchQuery.toLowerCase());
       const qBranch = q.branchName || q.branchAndLevel || '';
       const matchesBranch =
-        selectedBranch === 'Semua Cabang' || qBranch.includes(selectedBranch);
+        selectedBranch === 'Semua Cabang' || isSameBranch(qBranch, selectedBranch);
       const matchesStage =
         selectedStage === 'Semua Babak' || q.stageName === selectedStage;
       return matchesSearch && matchesBranch && matchesStage;
@@ -271,7 +338,7 @@ export const BankSoalView: React.FC = () => {
         r.questionTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
         r.kafilahName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesBranch =
-        selectedBranch === 'Semua Cabang' || r.branchName.includes(selectedBranch);
+        selectedBranch === 'Semua Cabang' || isSameBranch(r.branchName, selectedBranch);
       const matchesStage =
         selectedStage === 'Semua Babak' || r.stageName === selectedStage;
       return matchesSearch && matchesBranch && matchesStage;
@@ -310,7 +377,7 @@ export const BankSoalView: React.FC = () => {
     return participants.filter((p) => {
       const matchStage = !lotteryStage || p.stageName === lotteryStage;
       const matchBranch =
-        lotteryBranch === 'Semua Cabang' || p.branchName.includes(lotteryBranch);
+        lotteryBranch === 'Semua Cabang' || isSameBranch(p.branchName, lotteryBranch);
       return matchStage && matchBranch;
     });
   }, [participants, lotteryStage, lotteryBranch]);
@@ -321,7 +388,7 @@ export const BankSoalView: React.FC = () => {
       const matchStage = !lotteryStage || q.stageName === lotteryStage;
       const qBranch = q.branchName || q.branchAndLevel || '';
       const matchBranch =
-        lotteryBranch === 'Semua Cabang' || qBranch.includes(lotteryBranch);
+        lotteryBranch === 'Semua Cabang' || isSameBranch(qBranch, lotteryBranch);
       return matchStage && matchBranch && q.status !== 'Nonaktif';
     });
   }, [questions, lotteryStage, lotteryBranch]);
@@ -338,13 +405,13 @@ export const BankSoalView: React.FC = () => {
   const syncLotteryPoolsOnFilterChange = (newStage: string, newBranch: string) => {
     const newParts = participants.filter((p) => {
       const matchStage = !newStage || p.stageName === newStage;
-      const matchBranch = newBranch === 'Semua Cabang' || p.branchName.includes(newBranch);
+      const matchBranch = newBranch === 'Semua Cabang' || isSameBranch(p.branchName, newBranch);
       return matchStage && matchBranch;
     });
     const newQs = questions.filter((q) => {
       const matchStage = !newStage || q.stageName === newStage;
       const qBranch = q.branchName || q.branchAndLevel || '';
-      const matchBranch = newBranch === 'Semua Cabang' || qBranch.includes(newBranch);
+      const matchBranch = newBranch === 'Semua Cabang' || isSameBranch(qBranch, newBranch);
       return matchStage && matchBranch && q.status !== 'Nonaktif';
     });
     setSelectedParticipantIds(newParts.map((p) => p.id));
@@ -449,7 +516,8 @@ export const BankSoalView: React.FC = () => {
   // Open Add Question
   const handleOpenAdd = () => {
     const defaultCabang = activeCabangList[0]?.name || cabangList[0]?.name || '';
-    const defaultStage = activeStages[0]?.name || stages[0]?.name || 'Penyisihan';
+    const defaultStage =
+      stageNamesForBranch(activeStages, defaultCabang)[0] || activeStages[0]?.name || 'Penyisihan';
 
     setEditingQuestion(null);
     setFormCode(`MQ-TLW-${String(questions.length + 1).padStart(2, '0')}`);
@@ -546,6 +614,13 @@ export const BankSoalView: React.FC = () => {
     const pageNums: number[] = [];
     for (let p = startP; p <= endP; p++) {
       pageNums.push(p);
+    }
+
+    if (!formStage) {
+      setFormError(
+        `Cabang "${formBranchName}" belum memiliki babak. Buat babaknya di Master Data & Rubrik > Babak Musabaqah.`
+      );
+      return;
     }
 
     const matchedBranch = cabangList.find((c) => c.name === formBranchName);
@@ -645,21 +720,45 @@ export const BankSoalView: React.FC = () => {
   };
 
   // Open Single Question Manual Assignment (P0-03: 3D relational filter for candidate participants)
+  // Label lama "Cabang Jenjang": ambil cabang terdaftar dengan awalan terpanjang yang cocok
+  const legacyBranchOf = (label?: string) => {
+    const matches = cabangList
+      .map((c) => c.name)
+      .filter((name) => isLegacyBranchLabelOf(label, name))
+      .sort((a, b) => b.length - a.length);
+    return matches[0] || label || '';
+  };
+
+  // Calon penerima soal: hanya peserta di cabang & babak soal itu, urut nama A–Z
+  const getManualAssignCandidates = (q: Question) =>
+    sortParticipantsByName(
+      participants.filter((p) => {
+        const sameBranch =
+          q.branchId && p.branchId
+            ? q.branchId === p.branchId
+            : q.branchName
+            ? isSameBranch(p.branchName, q.branchName)
+            : isSameBranch(p.branchName, legacyBranchOf(q.branchAndLevel));
+        const sameStage = !q.stageName || p.stageName === q.stageName;
+        return sameBranch && sameStage;
+      })
+    );
+
+  const manualAssignCandidates = useMemo(
+    () => (manualAssignQuestion ? getManualAssignCandidates(manualAssignQuestion) : []),
+    [manualAssignQuestion, participants] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const handleOpenManualAssign = (q: Question) => {
     setManualAssignQuestion(q);
-    const matchingParts = participants.filter((p) => {
+    const candidates = getManualAssignCandidates(q);
+    const firstEligible = candidates.find((p) => {
       const existingStageQIds = (p.assignedQuestions || [])
         .filter((aq) => !aq.stageName || aq.stageName === q.stageName)
         .map((aq) => aq.questionId);
       return validateMaqraAssignmentForParticipant(p, q, q.stageName, existingStageQIds).valid;
     });
-
-    const defaultP =
-      matchingParts[0]?.id ||
-      participants.find((p) => !q.stageName || p.stageName === q.stageName)?.id ||
-      participants[0]?.id ||
-      '';
-    setTargetParticipantId(defaultP);
+    setTargetParticipantId(firstEligible?.id || '');
     setManualAssignFeedback(null);
   };
 
@@ -833,9 +932,9 @@ export const BankSoalView: React.FC = () => {
           className="flex-1 min-w-[150px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-medium text-slate-700 cursor-pointer hover:border-slate-300"
         >
           <option value="Semua Babak">Semua Babak</option>
-          {stages.map((stg) => (
-            <option key={stg.id} value={stg.name}>
-              Babak {stg.name}
+          {filterStageOptions.map((name) => (
+            <option key={name} value={name}>
+              Babak {name}
             </option>
           ))}
         </select>
@@ -1298,7 +1397,8 @@ export const BankSoalView: React.FC = () => {
               </button>
               <button
                 onClick={handleAddQuestionToParticipant}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer"
+                disabled={!targetParticipantId}
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer"
               >
                 Tambahkan ke Peserta
               </button>
@@ -1382,12 +1482,22 @@ export const BankSoalView: React.FC = () => {
               <label className="text-xs font-bold text-slate-700 block">
                 Pilih Peserta untuk Diberikan Maqra Ini:
               </label>
+              <p className="text-[11px] text-slate-500">
+                Hanya peserta cabang {manualAssignQuestion.branchName || manualAssignQuestion.branchAndLevel} babak{' '}
+                {manualAssignQuestion.stageName} ({manualAssignCandidates.length} peserta), urut nama A–Z.
+              </p>
               <select
                 value={targetParticipantId}
                 onChange={(e) => setTargetParticipantId(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 bg-white"
               >
-                {participants.map((p, idx) => {
+                {manualAssignCandidates.length === 0 && (
+                  <option value="">Belum ada peserta di cabang & babak ini</option>
+                )}
+                {!targetParticipantId && manualAssignCandidates.length > 0 && (
+                  <option value="">— Pilih peserta —</option>
+                )}
+                {manualAssignCandidates.map((p, idx) => {
                   const matchesStage = !manualAssignQuestion.stageName || p.stageName === manualAssignQuestion.stageName;
                   const alreadyHas =
                     (p.questionId === manualAssignQuestion.id && (!p.stageName || p.stageName === manualAssignQuestion.stageName)) ||
@@ -1412,7 +1522,7 @@ export const BankSoalView: React.FC = () => {
                       value={p.id}
                       disabled={alreadyHas || !matchesStage}
                     >
-                      #{p.lotteryNumber} - {p.name} ({p.participantId} · {p.branchName}) · {note}{stageNote}
+                      {p.name} (No. {p.lotteryNumber || '-'} · {p.participantId}) · {note}{stageNote}
                     </option>
                   );
                 })}
@@ -1486,9 +1596,9 @@ export const BankSoalView: React.FC = () => {
                   }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                 >
-                  {stages.map((stg) => (
-                    <option key={stg.id} value={stg.name}>
-                      {stg.name}
+                  {lotteryStageOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
                   ))}
                 </select>
@@ -1500,10 +1610,16 @@ export const BankSoalView: React.FC = () => {
                   value={lotteryBranch}
                   onChange={(e) => {
                     const newBr = e.target.value;
+                    const branchStages = stageNamesForBranch(stages, newBr);
+                    const nextStage =
+                      branchStages.includes(lotteryStage) || branchStages.length === 0
+                        ? lotteryStage
+                        : branchStages[0];
                     setLotteryBranch(newBr);
+                    setLotteryStage(nextStage);
                     setLotteryDrawResults(null);
                     setLotteryFeedback('');
-                    syncLotteryPoolsOnFilterChange(lotteryStage, newBr);
+                    syncLotteryPoolsOnFilterChange(nextStage, newBr);
                   }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                 >
@@ -1979,14 +2095,17 @@ export const BankSoalView: React.FC = () => {
                   onChange={(e) => setFormStage(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
                 >
-                  {activeStages.map((stg) => (
-                    <option key={stg.id} value={stg.name}>
-                      {stg.name}
+                  {formStageOptions.length === 0 && (
+                    <option value="">Cabang ini belum punya babak</option>
+                  )}
+                  {formStageOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
                   ))}
                   {editingQuestion &&
                     formStage &&
-                    !activeStages.some((s) => s.name === formStage) && (
+                    !formStageOptions.includes(formStage) && (
                       <option value={formStage}>{formStage} (Historis)</option>
                     )}
                 </select>

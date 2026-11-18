@@ -214,7 +214,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageStart: 305,
     pageEnd: 306,
     pageNumbers: [305, 306],
-    branchAndLevel: 'Tilawah Dewasa Putra Ulya',
+    branchName: 'Tilawah Dewasa Putra',
+    branchAndLevel: 'Tilawah Dewasa Putra',
     stageName: 'Penyisihan',
     status: 'Aktif',
     description: "Dibaca dengan riwayat Hafs 'an 'Ashim Thariq Asy-Syathibiyyah..."
@@ -232,7 +233,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageStart: 140,
     pageEnd: 141,
     pageNumbers: [140, 141],
-    branchAndLevel: 'Tilawah Dewasa Putra Ulya',
+    branchName: 'Tilawah Dewasa Putra',
+    branchAndLevel: 'Tilawah Dewasa Putra',
     stageName: 'Penyisihan',
     status: 'Perlu Verifikasi',
     description: "Dibaca dengan tartil dan riwayat Hafs. Diawali Bayyati..."
@@ -250,7 +252,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageStart: 260,
     pageEnd: 261,
     pageNumbers: [260, 261],
-    branchAndLevel: 'Tilawah Dewasa Putra Ulya',
+    branchName: 'Tilawah Dewasa Putra',
+    branchAndLevel: 'Tilawah Dewasa Putra',
     stageName: 'Penyisihan',
     status: 'Perlu Verifikasi',
     description: 'Penekanan pada hukum waqf dan ibtida pada doa Nabi Ibrahim...'
@@ -268,7 +271,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageStart: 303,
     pageEnd: 304,
     pageNumbers: [303, 304],
-    branchAndLevel: 'Tilawah Dewasa Putri Ulya',
+    branchName: 'Tilawah Dewasa Putri',
+    branchAndLevel: 'Tilawah Dewasa Putri',
     stageName: 'Penyisihan',
     status: 'Perlu Verifikasi',
     description: 'Khatam surat Al-Kahf dengan nada penutup Bayyati/Sika.'
@@ -286,7 +290,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageStart: 87,
     pageEnd: 88,
     pageNumbers: [87, 88],
-    branchAndLevel: 'Tilawah Dewasa Putra Ulya',
+    branchName: 'Tilawah Dewasa Putra',
+    branchAndLevel: 'Tilawah Dewasa Putra',
     stageName: 'Penyisihan',
     status: 'Aktif',
     description: 'Ayat tentang amanah dan ketaatan kepada ulil amri.'
@@ -304,7 +309,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     pageStart: 235,
     pageEnd: 236,
     pageNumbers: [235, 236],
-    branchAndLevel: 'Tilawah Dewasa Putra Ulya',
+    branchName: 'Tilawah Dewasa Putra',
+    branchAndLevel: 'Tilawah Dewasa Putra',
     stageName: 'Semifinal',
     status: 'Aktif',
     description: 'Kisah Nabi Yusuf as dengan penekanan pada fashahah.'

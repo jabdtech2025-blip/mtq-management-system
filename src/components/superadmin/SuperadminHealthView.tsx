@@ -11,7 +11,9 @@ import {
   Wrench,
   CheckSquare
 } from 'lucide-react';
-import { useMtq } from '../../context/MtqContext';
+import { useMtq, ViewType } from '../../context/MtqContext';
+import { Tenant } from '../../types/mtq';
+import { SupervisionModal } from './SupervisionModal';
 import {
   PlatformHealthCheckItem,
   PlatformHealthCheckKey
@@ -293,6 +295,17 @@ export const SuperadminHealthView: React.FC = () => {
     (m) => Boolean(siteSettings.manualChecks?.[m.id])
   ).length;
 
+  // Membuka data penyelenggara selalu lewat Mode Supervisi (alasan + audit log)
+  const [supervisionTarget, setSupervisionTarget] = useState<{ tenant: Tenant; nextView: ViewType } | null>(null);
+  const openSupervision = (tenantId: string | undefined, nextView: ViewType) => {
+    const tenant = tenantId ? tenants.find((t) => t.id === tenantId) : undefined;
+    if (!tenant) {
+      setCurrentView('superadmin_tenants');
+      return;
+    }
+    setSupervisionTarget({ tenant, nextView });
+  };
+
   const handleNavigateFromHealthItem = (item: PlatformHealthCheckItem) => {
     const firstTenantId = item.detail?.[0]?.tenant_id;
     switch (item.key) {
@@ -304,29 +317,17 @@ export const SuperadminHealthView: React.FC = () => {
         break;
       case 'unmapped_error_categories':
       case 'rubrics_without_official_source':
-        if (firstTenantId && firstTenantId !== 'system') {
-          enterTenantWorkspace(firstTenantId);
-        }
-        setCurrentView('master_data');
+        openSupervision(firstTenantId && firstTenantId !== 'system' ? firstTenantId : undefined, 'master_data');
         break;
       case 'stages_without_judges':
-        if (firstTenantId) {
-          enterTenantWorkspace(firstTenantId);
-        }
-        setCurrentView('stage_management');
+        openSupervision(firstTenantId, 'stage_management');
         break;
       case 'pending_verifications':
-        if (firstTenantId) {
-          enterTenantWorkspace(firstTenantId);
-        }
-        setCurrentView('kafilah');
+        openSupervision(firstTenantId, 'kafilah');
         break;
       case 'stalled_assessments':
       case 'borrowed_maqra_sheets':
-        if (firstTenantId) {
-          enterTenantWorkspace(firstTenantId);
-        }
-        setCurrentView('penilaian_hakim');
+        openSupervision(firstTenantId, 'penilaian_hakim');
         break;
       default:
         setCurrentView('superadmin_tenants');
@@ -661,6 +662,14 @@ export const SuperadminHealthView: React.FC = () => {
           </div>
         </div>
       </section>
+
+      <SupervisionModal
+        tenant={supervisionTarget?.tenant || null}
+        onClose={() => setSupervisionTarget(null)}
+        onConfirm={(tenantId, reason) =>
+          enterTenantWorkspace(tenantId, reason, supervisionTarget?.nextView || 'dashboard')
+        }
+      />
     </div>
   );
 };

@@ -114,6 +114,13 @@ function getActiveClient() {
 
 const SYSTEM_TENANT_UUID = '00000000-0000-0000-0000-000000000000';
 
+/** Pesan RPC berkode ("MOVE_BLOCKED: ...") ditampilkan tanpa kode teknisnya. */
+function friendlyRpcMessage(raw: string | undefined): string {
+  const text = (raw || '').trim();
+  const match = text.match(/^[A-Z][A-Z_]+:\s*(.+)$/s);
+  return match ? match[1] : text || 'Permintaan ditolak server.';
+}
+
 /**
  * Service Data Terpusat untuk Operasi Database Supabase, Validasi UUID & Keberadaan FK, Autentikasi, & RPC.
  * - Tidak pernah menggunakan service_role key di frontend.
@@ -918,7 +925,23 @@ export const supabaseDataService = {
       };
     }
 
-    const allMemberships = (membershipsRes.data || []) as Array<Record<string, unknown>>;
+    // Satu akun bisa punya beberapa baris keanggotaan (mis. setelah dipindahkan, baris lama
+    // dinonaktifkan). Daftar pengguna menampilkan satu baris per akun, jadi urutkan dulu:
+    // keanggotaan Aktif, lalu penyelenggara yang sedang dibuka, lalu yang terbaru.
+    const isPlatformView = rawTenantId === 'platform';
+    const allMemberships = ((membershipsRes.data || []) as Array<Record<string, unknown>>)
+      .slice()
+      .sort((a, b) => {
+        const activeA = (a.status || 'Aktif') === 'Aktif' ? 0 : 1;
+        const activeB = (b.status || 'Aktif') === 'Aktif' ? 0 : 1;
+        if (activeA !== activeB) return activeA - activeB;
+        if (!isPlatformView) {
+          const hereA = String(a.tenant_id) === tenantUuid ? 0 : 1;
+          const hereB = String(b.tenant_id) === tenantUuid ? 0 : 1;
+          if (hereA !== hereB) return hereA - hereB;
+        }
+        return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+      });
     const allProfiles = (profilesRes.data || []) as Array<Record<string, unknown>>;
     const profileById = new Map<string, Record<string, unknown>>();
     allProfiles.forEach((p) => {
@@ -928,7 +951,7 @@ export const supabaseDataService = {
     const userCountByTenant = new Map<string, number>();
     allMemberships.forEach((m) => {
       const tId = String(m.tenant_id || '');
-      if (tId) {
+      if (tId && (m.status || 'Aktif') === 'Aktif') {
         userCountByTenant.set(tId, (userCountByTenant.get(tId) || 0) + 1);
       }
     });
@@ -2885,6 +2908,106 @@ export const supabaseDataService = {
     });
 
     return !error;
+  },
+
+  /**
+   * Superadmin: audit log lintas penyelenggara untuk halaman Audit Log Platform.
+   * RLS audit_logs sudah mengizinkan Superadmin membaca semua penyelenggara.
+   */
+  async fetchPlatformAuditLogs(params: { tenantId?: string; limit?: number } = {}): Promise<{
+    success: boolean;
+    message: string;
+    logs: AuditLogItem[];
+  }> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, message: 'Mode lokal aktif.', logs: [] };
+    }
+    const limit = Math.min(Math.max(params.limit ?? 300, 1), 1000);
+    let query = client
+      .from('audit_logs')
+      .select('*, tenants(name)')
+      .neq('tenant_id', SYSTEM_TENANT_UUID)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (params.tenantId && isValidUuid(params.tenantId)) {
+      query = query.eq('tenant_id', params.tenantId);
+    }
+    const { data, error } = await query;
+    if (error) {
+      return { success: false, message: `Gagal memuat audit log platform: ${error.message}`, logs: [] };
+    }
+    const logs: AuditLogItem[] = (data || []).map((al: Record<string, unknown>) => {
+      const rawTenant = al.tenants as Record<string, unknown> | Record<string, unknown>[] | null | undefined;
+      const tenantRow = Array.isArray(rawTenant) ? rawTenant[0] : rawTenant;
+      return {
+        id: String(al.id),
+        timestamp: String(al.created_at || ''),
+        actor: String(al.actor_name || ''),
+        action: String(al.action || ''),
+        target: String(al.target || ''),
+        tenantId: al.tenant_id ? String(al.tenant_id) : undefined,
+        tenantName: tenantRow?.name ? String(tenantRow.name) : 'Penyelenggara',
+        summary: String(al.summary || ''),
+        reason: al.reason ? String(al.reason) : undefined,
+        outcome: ((al.outcome as string) || 'Success') as 'Success' | 'Failed' | 'Warning'
+      };
+    });
+    return { success: true, message: `${logs.length} catatan dimuat.`, logs };
+  },
+
+  /** Superadmin masuk/keluar Mode Supervisi: dicatat di audit log penyelenggara itu. */
+  async recordSupervisionEvent(params: {
+    tenantId: string;
+    event: 'STARTED' | 'ENDED';
+    reason?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, message: 'Mode lokal aktif.' };
+    }
+    if (!isValidUuid(params.tenantId)) {
+      return { success: false, message: 'ID penyelenggara tidak valid.' };
+    }
+    const { error } = await client.rpc('record_supervision_event', {
+      p_tenant_id: params.tenantId,
+      p_event: params.event,
+      p_reason: params.reason ?? null
+    });
+    if (error) {
+      return { success: false, message: friendlyRpcMessage(error.message) };
+    }
+    return { success: true, message: 'Tercatat di audit log.' };
+  },
+
+  /** Superadmin memindahkan pengguna: keanggotaan lama dinonaktifkan, baru diaktifkan (satu transaksi). */
+  async moveMemberToTenant(params: {
+    profileId: string;
+    fromTenantId: string;
+    toTenantId: string;
+    reason?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, message: 'Mode lokal aktif.' };
+    }
+    const check = this.validateReferences({
+      profile_id: params.profileId,
+      from_tenant_id: params.fromTenantId,
+      to_tenant_id: params.toTenantId
+    });
+    if (!check.valid) return { success: false, message: check.message! };
+    const { data, error } = await client.rpc('move_member_to_tenant', {
+      p_profile_id: params.profileId,
+      p_from_tenant_id: params.fromTenantId,
+      p_to_tenant_id: params.toTenantId,
+      p_reason: params.reason ?? null
+    });
+    if (error) {
+      return { success: false, message: friendlyRpcMessage(error.message) };
+    }
+    const payload = (data || {}) as { message?: string };
+    return { success: true, message: payload.message || 'Pengguna berhasil dipindahkan.' };
   },
 
   async deleteKafilah(tenantId: string, kafilahId: string): Promise<RpcServiceResult> {

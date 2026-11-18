@@ -21,6 +21,7 @@ export const SuperadminUsersView: React.FC = () => {
     users,
     addUser,
     updateUser,
+    moveUserToTenant,
     toggleUserStatus,
     deleteUser,
     retryUserProvisioning,
@@ -47,6 +48,9 @@ export const SuperadminUsersView: React.FC = () => {
   // Tenant reassignment confirmation modal
   const [reassignModalUser, setReassignModalUser] = useState<User | null>(null);
   const [targetTenantId, setTargetTenantId] = useState('');
+  const [reassignReason, setReassignReason] = useState('');
+  const [reassignError, setReassignError] = useState('');
+  const [isReassigning, setIsReassigning] = useState(false);
 
   // Form states
   const [formName, setFormName] = useState('');
@@ -159,16 +163,29 @@ export const SuperadminUsersView: React.FC = () => {
     setReassignModalUser(u);
     const otherTenant = tenants.find((t) => t.id !== u.tenantId);
     setTargetTenantId(otherTenant ? otherTenant.id : tenants[0]?.id || '');
+    setReassignReason('');
+    setReassignError('');
   };
 
   const handleConfirmReassign = async () => {
-    if (reassignModalUser && targetTenantId) {
-      const res = await updateUser(reassignModalUser.id, { tenantId: targetTenantId });
-      setOperationBanner({
-        type: res.success ? 'success' : 'warning',
-        message: res.message
-      });
+    if (!reassignModalUser || !targetTenantId || isReassigning) return;
+    if (targetTenantId === reassignModalUser.tenantId) {
+      setReassignError('Pilih penyelenggara tujuan yang berbeda dari penyelenggara saat ini.');
+      return;
+    }
+    setIsReassigning(true);
+    setReassignError('');
+    try {
+      const res = await moveUserToTenant(reassignModalUser.id, targetTenantId, reassignReason.trim() || undefined);
+      if (!res.success) {
+        // Modal tetap terbuka supaya alasan penolakan terbaca
+        setReassignError(res.message);
+        return;
+      }
+      setOperationBanner({ type: 'success', message: res.message });
       setReassignModalUser(null);
+    } finally {
+      setIsReassigning(false);
     }
   };
 
@@ -456,7 +473,18 @@ export const SuperadminUsersView: React.FC = () => {
                 : 'Konfirmasi Pemindahan Tenant'}
             </h3>
             <p className="text-xs text-slate-600 leading-relaxed mb-4">
-              Anda akan menetapkan hak akses akun <strong>{reassignModalUser.name}</strong> ke penyelenggara MTQ tujuan.
+              {reassignModalUser.tenantId === 'unassigned' ? (
+                <>
+                  Anda akan menetapkan hak akses akun <strong>{reassignModalUser.name}</strong> ke penyelenggara MTQ
+                  tujuan.
+                </>
+              ) : (
+                <>
+                  Akun <strong>{reassignModalUser.name}</strong> akan dipindahkan. Aksesnya di penyelenggara saat ini
+                  dinonaktifkan dan penugasan hakimnya di sana dilepas. Riwayat dan nilai lama tetap tersimpan.
+                  Pemindahan ditolak bila hakim masih punya lembar penilaian yang belum selesai.
+                </>
+              )}
             </p>
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 space-y-2 text-xs">
@@ -473,27 +501,58 @@ export const SuperadminUsersView: React.FC = () => {
                   onChange={(e) => setTargetTenantId(e.target.value)}
                   className="px-2 py-1 border border-slate-300 rounded-md font-semibold text-slate-900 bg-white"
                 >
-                  {tenants.map((t, idx) => (
-                    <option key={`${t.id}-${idx}`} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
+                  {tenants
+                    .filter((t) => t.id !== reassignModalUser.tenantId)
+                    .map((t, idx) => (
+                      <option key={`${t.id}-${idx}`} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
                 </select>
               </div>
             </div>
 
+            {reassignModalUser.tenantId !== 'unassigned' && (
+              <div className="mb-4 space-y-1">
+                <label htmlFor="reassign-reason" className="text-xs font-bold text-slate-700">
+                  Alasan pemindahan (dicatat di audit log, opsional)
+                </label>
+                <input
+                  id="reassign-reason"
+                  type="text"
+                  value={reassignReason}
+                  maxLength={300}
+                  onChange={(e) => setReassignReason(e.target.value)}
+                  placeholder="Contoh: rotasi dewan hakim antar-provinsi"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                />
+              </div>
+            )}
+
+            {reassignError && (
+              <p className="mb-4 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                {reassignError}
+              </p>
+            )}
+
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setReassignModalUser(null)}
-                className="px-4 py-2 border rounded-lg text-xs font-semibold"
+                disabled={isReassigning}
+                className="px-4 py-2 border rounded-lg text-xs font-semibold disabled:opacity-50"
               >
                 Batal
               </button>
               <button
                 onClick={handleConfirmReassign}
-                className="px-4 py-2 bg-purple-800 text-white rounded-lg text-xs font-bold"
+                disabled={isReassigning || !targetTenantId}
+                className="px-4 py-2 bg-purple-800 text-white rounded-lg text-xs font-bold disabled:opacity-50"
               >
-                Simpan Penugasan MTQ
+                {isReassigning
+                  ? 'Memproses...'
+                  : reassignModalUser.tenantId === 'unassigned'
+                  ? 'Simpan Penugasan MTQ'
+                  : 'Pindahkan Pengguna'}
               </button>
             </div>
           </div>

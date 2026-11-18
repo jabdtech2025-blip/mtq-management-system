@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ShieldAlert,
   Search,
@@ -6,22 +6,49 @@ import {
   AlertTriangle,
   XCircle,
   Clock,
-  Filter
+  Filter,
+  RefreshCw
 } from 'lucide-react';
+import { AuditLogItem } from '../../types/mtq';
 import { useMtq } from '../../context/MtqContext';
 import { formatDateTimeWIB } from '../../utils/dateTime';
 
 export const SuperadminAuditView: React.FC = () => {
-  const { auditLogs } = useMtq();
+  const { tenants, fetchPlatformAuditLogs } = useMtq();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOutcome, setSelectedOutcome] = useState('Semua Status');
+  const [selectedTenantId, setSelectedTenantId] = useState('');
+  const [platformLogs, setPlatformLogs] = useState<AuditLogItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
-  const filteredLogs = auditLogs.filter((log) => {
+  // Log dimuat dari semua penyelenggara (bukan hanya penyelenggara yang terakhir dibuka)
+  const loadLogs = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError('');
+    try {
+      const res = await fetchPlatformAuditLogs(selectedTenantId || undefined);
+      if (res.success) {
+        setPlatformLogs(res.logs);
+      } else {
+        setLoadError(res.message);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchPlatformAuditLogs, selectedTenantId]);
+
+  useEffect(() => {
+    void loadLogs();
+  }, [selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filteredLogs = platformLogs.filter((log) => {
     const matchesSearch =
       log.actor.toLowerCase().includes(searchQuery.toLowerCase()) ||
       log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
       log.target.toLowerCase().includes(searchQuery.toLowerCase()) ||
       log.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (log.reason || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       log.tenantName.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesOutcome =
@@ -70,7 +97,35 @@ export const SuperadminAuditView: React.FC = () => {
           <option value="Warning">Warning</option>
           <option value="Failed">Failed</option>
         </select>
+
+        <select
+          value={selectedTenantId}
+          onChange={(e) => setSelectedTenantId(e.target.value)}
+          aria-label="Filter penyelenggara"
+          className="flex-1 sm:max-w-xs min-w-[180px] px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none bg-white font-medium text-slate-700"
+        >
+          <option value="">Semua Penyelenggara</option>
+          {tenants.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={() => void loadLogs()}
+          disabled={isLoading}
+          className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          Muat Ulang
+        </button>
       </div>
+
+      {loadError && (
+        <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">{loadError}</div>
+      )}
 
       {/* Audit Log Table */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
@@ -102,6 +157,11 @@ export const SuperadminAuditView: React.FC = () => {
                   <td className="px-4 py-3.5 font-medium text-slate-800">{log.target}</td>
                   <td className="px-5 py-3.5 text-slate-600 leading-relaxed max-w-xs">
                     {log.summary}
+                    {log.reason && (
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        <span className="font-semibold">Alasan:</span> {log.reason}
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3.5 text-center">
                     <span

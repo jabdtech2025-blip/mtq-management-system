@@ -11,6 +11,7 @@ import {
   Clock
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
+import { buildStageOrderLookup, sortParticipantsForDisplay } from '../../utils/participantSort';
 import { Participant, JudgeAssessment } from '../../types/mtq';
 
 export const RekapNilaiView: React.FC = () => {
@@ -148,8 +149,10 @@ export const RekapNilaiView: React.FC = () => {
   }, [selectedStage, selectedBranch, judgeAssignments, users, currentTenant.id]);
 
   // Filter participants
+  // Urut cabang, babak, lalu nomor undian (urutan tampil); dipakai juga untuk ekspor CSV
+  const stageOrder = useMemo(() => buildStageOrderLookup(stages), [stages]);
   const filteredParticipants = useMemo(() => {
-    return participants.filter((p) => {
+    return sortParticipantsForDisplay(participants, { stageOrder }).filter((p) => {
       const matchesSearch =
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.participantId.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -167,7 +170,7 @@ export const RekapNilaiView: React.FC = () => {
 
       return matchesSearch && matchesStage && matchesBranch && matchesKafilah && matchesStatus;
     });
-  }, [participants, searchQuery, selectedStage, selectedBranch, selectedKafilah, selectedStatus, getParticipantProgress, assessments]);
+  }, [participants, stageOrder, searchQuery, selectedStage, selectedBranch, selectedKafilah, selectedStatus, getParticipantProgress, assessments]);
 
   const getJudgeAssessment = (
     participantId: string,
@@ -514,6 +517,9 @@ export const RekapNilaiView: React.FC = () => {
                           <p className="text-xs text-slate-500 mt-0.5">
                             {p.participantId} · {p.kafilahName}
                           </p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            {p.branchName} · {p.stageName}
+                          </p>
                         </td>
                         <td className="px-3 py-3 border-r border-slate-200 text-center">
                           <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
@@ -571,6 +577,9 @@ export const RekapNilaiView: React.FC = () => {
                           <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {p.participantId} · {p.kafilahName}
+                          </p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            {p.branchName} · {p.stageName}
                           </p>
                         </td>
                         <td className="px-3 py-3 border-r border-slate-200 text-center">
@@ -670,6 +679,9 @@ export const RekapNilaiView: React.FC = () => {
                               </p>
                               <p className="text-xs text-slate-500 mt-0.5">
                                 {p.participantId} · {p.kafilahName}
+                              </p>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                {p.branchName} · {p.stageName}
                               </p>
                             </td>
 

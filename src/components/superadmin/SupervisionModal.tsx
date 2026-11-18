@@ -1,155 +1,132 @@
-import React, { useState } from 'react';
-import { ShieldAlert, AlertTriangle, ArrowRight } from 'lucide-react';
-import { Modal, Button, Textarea } from '../ui';
+import React, { useEffect, useState } from 'react';
+import { AlertTriangle, ExternalLink, ShieldAlert } from 'lucide-react';
 import { Tenant } from '../../types/mtq';
 
 interface SupervisionModalProps {
-  isOpen: boolean;
-  onClose: () => void;
   tenant: Tenant | null;
-  onConfirm: (tenantId: string, reason: string) => void;
+  onClose: () => void;
+  /** Mencatat supervisi lalu masuk workspace. Modal tetap terbuka bila pencatatan gagal. */
+  onConfirm: (tenantId: string, reason: string) => Promise<{ success: boolean; message: string }>;
 }
 
-const PRESET_REASONS = [
-  'Investigasi kendala penilaian hakim',
-  'Audit konfigurasi babak dan kelulusan',
-  'Pemeriksaan kepatuhan rubrik cabang lomba',
-  'Dukungan teknis darurat penyelenggara'
-];
+const DEFAULT_REASON = 'Audit operasional dan pemantauan berkas musabaqah';
+const MIN_REASON_LENGTH = 5;
 
-export const SupervisionModal: React.FC<SupervisionModalProps> = ({
-  isOpen,
-  onClose,
-  tenant,
-  onConfirm
-}) => {
-  const [selectedPreset, setSelectedPreset] = useState<string>(PRESET_REASONS[0]);
-  const [customReason, setCustomReason] = useState<string>('');
-  const [useCustom, setUseCustom] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+/**
+ * Konfirmasi masuk Mode Supervisi workspace penyelenggara.
+ * Dipakai di semua jalur masuk (Penyelenggara MTQ, Dashboard Platform, Health Check)
+ * supaya setiap supervisi punya alasan dan tercatat di audit log penyelenggara itu.
+ */
+export const SupervisionModal: React.FC<SupervisionModalProps> = ({ tenant, onClose, onConfirm }) => {
+  const [reason, setReason] = useState(DEFAULT_REASON);
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen || !tenant) return null;
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const finalReason = useCustom ? customReason.trim() : selectedPreset;
-    if (!finalReason || finalReason.length < 5) {
-      setError('Harap berikan alasan supervisi yang jelas (minimal 5 karakter).');
-      return;
+  useEffect(() => {
+    if (tenant) {
+      setReason(DEFAULT_REASON);
+      setError('');
+      setIsSubmitting(false);
     }
-    setError(null);
-    onConfirm(tenant.id, finalReason);
-    onClose();
+  }, [tenant]);
+
+  if (!tenant) return null;
+
+  const cleanReason = reason.trim();
+  const canSubmit = cleanReason.length >= MIN_REASON_LENGTH && !isSubmitting;
+
+  const handleConfirm = async () => {
+    if (!canSubmit) return;
+    setIsSubmitting(true);
+    setError('');
+    try {
+      const res = await onConfirm(tenant.id, cleanReason);
+      if (!res.success) {
+        setError(res.message);
+        return;
+      }
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title="Supervisi Workspace Tenant"
-      maxWidthClass="max-w-lg"
-    >
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Notice Info */}
-        <div className="p-3.5 rounded-md bg-purple-50 border border-purple-200 text-xs text-purple-900 flex items-start gap-3">
-          <ShieldAlert className="w-5 h-5 text-purple-700 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="font-bold">Akses Supervisi Terkendali</p>
-            <p className="leading-relaxed text-purple-800">
-              Anda akan memasuki workspace operasional penyelenggara{' '}
-              <strong className="text-purple-950">{tenant.name}</strong> ({tenant.region || 'Wilayah'}).
-              Aktivitas supervisi dicatat secara permanen di Log Audit Platform demi akuntabilitas kepatuhan lomba.
-            </p>
+    <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-white rounded-xl max-w-lg w-full shadow-lg border border-slate-200 p-6 space-y-4"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center shrink-0">
+            <ShieldAlert className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-base text-slate-900">Konfirmasi Masuk Mode Supervisi Workspace</h3>
+            <p className="text-xs text-slate-500">Superadmin membuka data operasional milik penyelenggara.</p>
           </div>
         </div>
 
-        {/* Preset Reason Selector */}
-        <div className="space-y-2">
-          <label className="block text-xs font-bold text-slate-700">
-            Pilih Alasan Supervisi:
+        <div className="p-3.5 rounded-lg bg-purple-50/70 border border-purple-200 text-xs text-purple-900 space-y-1.5">
+          <p className="font-bold">
+            Penyelenggara: {tenant.name}
+            {tenant.code ? ` (${tenant.code})` : ''}
+          </p>
+          <p className="text-slate-600">
+            Masuk dan keluar Mode Supervisi dicatat di audit log penyelenggara ini beserta alasannya, dan terlihat
+            di Audit Log Platform. Tombol kembali ke panel platform selalu tersedia di bilah atas.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label htmlFor="supervision-reason" className="text-xs font-bold text-slate-700">
+            Alasan / Keperluan Supervisi:
           </label>
-          <div className="space-y-1.5">
-            {PRESET_REASONS.map((preset) => (
-              <label
-                key={preset}
-                className={`flex items-center gap-2.5 p-2.5 rounded-md border text-xs cursor-pointer transition-colors ${
-                  !useCustom && selectedPreset === preset
-                    ? 'bg-purple-50/80 border-purple-300 font-semibold text-purple-900'
-                    : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="supervision_preset"
-                  checked={!useCustom && selectedPreset === preset}
-                  onChange={() => {
-                    setSelectedPreset(preset);
-                    setUseCustom(false);
-                  }}
-                  className="text-purple-800 focus:ring-purple-700"
-                />
-                <span>{preset}</span>
-              </label>
-            ))}
-
-            <label
-              className={`flex items-center gap-2.5 p-2.5 rounded-md border text-xs cursor-pointer transition-colors ${
-                useCustom
-                  ? 'bg-purple-50/80 border-purple-300 font-semibold text-purple-900'
-                  : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
-              }`}
-            >
-              <input
-                type="radio"
-                name="supervision_preset"
-                checked={useCustom}
-                onChange={() => setUseCustom(true)}
-                className="text-purple-800 focus:ring-purple-700"
-              />
-              <span>Alasan Khusus Lainnya...</span>
-            </label>
-          </div>
+          <input
+            id="supervision-reason"
+            type="text"
+            value={reason}
+            maxLength={300}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleConfirm();
+            }}
+            placeholder="Contoh: Audit operasional, pemantauan dewan hakim, atau bantuan teknis"
+            className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 text-slate-800 font-medium"
+          />
+          {cleanReason.length > 0 && cleanReason.length < MIN_REASON_LENGTH && (
+            <p className="text-[11px] text-slate-500">Alasan minimal {MIN_REASON_LENGTH} karakter.</p>
+          )}
         </div>
-
-        {useCustom && (
-          <div className="space-y-1">
-            <label className="block text-xs font-bold text-slate-700">
-              Catatan Alasan Spesifik:
-            </label>
-            <Textarea
-              rows={3}
-              value={customReason}
-              onChange={(e) => setCustomReason(e.target.value)}
-              placeholder="Jelaskan kebutuhan inspeksi teknis atau kendala yang dilaporkan..."
-              className="text-xs"
-              autoFocus
-            />
-          </div>
-        )}
 
         {error && (
-          <p className="text-xs text-rose-600 font-medium flex items-center gap-1.5">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-            {error}
+          <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>{error}</span>
           </p>
         )}
 
-        {/* Action Buttons */}
-        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-          <Button type="button" variant="secondary" size="md" onClick={onClose}>
-            Batal
-          </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            size="md"
-            className="bg-purple-800 hover:bg-purple-900 border-purple-800"
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
           >
-            <span>Masuk Workspace Tenant</span>
-            <ArrowRight className="w-4 h-4" />
-          </Button>
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => void handleConfirm()}
+            className="px-4 py-2 bg-purple-800 hover:bg-purple-900 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>{isSubmitting ? 'Mencatat...' : 'Masuk Mode Supervisi'}</span>
+          </button>
         </div>
-      </form>
-    </Modal>
+      </div>
+    </div>
   );
 };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Building,
   Users,
@@ -11,6 +11,8 @@ import {
   Settings
 } from 'lucide-react';
 import { useMtq, ViewType } from '../../context/MtqContext';
+import { Tenant } from '../../types/mtq';
+import { SupervisionModal } from './SupervisionModal';
 
 export const SuperadminDashboardView: React.FC = () => {
   const {
@@ -26,8 +28,10 @@ export const SuperadminDashboardView: React.FC = () => {
   const totalJudges = users.filter((u) => u.role === 'judge').length;
   const totalAdmins = users.filter((u) => u.role === 'admin').length;
 
+  const [superviseTenant, setSuperviseTenant] = useState<Tenant | null>(null);
+
   const handleOpenTenantWorkspace = (tId: string) => {
-    enterTenantWorkspace(tId);
+    setSuperviseTenant(tenants.find((t) => t.id === tId) || null);
   };
 
   return (
@@ -256,6 +260,12 @@ export const SuperadminDashboardView: React.FC = () => {
           ))}
         </div>
       </div>
+
+      <SupervisionModal
+        tenant={superviseTenant}
+        onClose={() => setSuperviseTenant(null)}
+        onConfirm={(tenantId, reason) => enterTenantWorkspace(tenantId, reason)}
+      />
     </div>
   );
 };

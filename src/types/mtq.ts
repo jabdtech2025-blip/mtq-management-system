@@ -443,6 +443,8 @@ export interface AuditLogItem {
   action: string;
   target: string;
   tenantName: string;
+  /** id penyelenggara pemilik catatan (dipakai filter Audit Log Platform) */
+  tenantId?: string;
   summary: string;
   reason?: string;
   outcome: 'Success' | 'Failed' | 'Warning';

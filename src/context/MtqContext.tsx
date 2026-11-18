@@ -132,6 +132,12 @@ interface MtqContextType {
   setCurrentUserId: (id: string) => void;
   addUser: (user: Omit<User, 'id'> & { initialPassword?: string }) => Promise<{ success: boolean; message: string }>;
   updateUser: (id: string, updated: Partial<User>) => Promise<{ success: boolean; message: string }>;
+  /** Superadmin: pindahkan akun ke penyelenggara lain (keanggotaan lama dinonaktifkan). */
+  moveUserToTenant: (
+    id: string,
+    toTenantId: string,
+    reason?: string
+  ) => Promise<{ success: boolean; message: string }>;
   retryUserProvisioning: (id: string) => Promise<{ success: boolean; message: string }>;
   toggleUserStatus: (id: string) => Promise<{ success: boolean; message: string }>;
   deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
@@ -389,8 +395,15 @@ interface MtqContextType {
 
   // Superadmin Workspace Delegation Mode
   isSuperadminWorkspaceMode: boolean;
-  enterTenantWorkspace: (tenantId: string) => void;
+  /** Masuk Mode Supervisi: alasan wajib, dicatat di audit log penyelenggara sebelum masuk. */
+  enterTenantWorkspace: (
+    tenantId: string,
+    reason: string,
+    nextView?: ViewType
+  ) => Promise<{ success: boolean; message: string }>;
   exitTenantWorkspace: () => void;
+  /** Superadmin: audit log lintas penyelenggara (mode live), atau log lokal di Mode Demo. */
+  fetchPlatformAuditLogs: (tenantId?: string) => Promise<{ success: boolean; message: string; logs: AuditLogItem[] }>;
 
   // Demo Account Modal & Prototype Storage Reset
   isDemoAccountModalOpen: boolean;
@@ -1377,14 +1390,109 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const isSuperadminWorkspaceMode =
     currentUser.role === 'superadmin' && currentTenantId !== 'platform';
 
-  const enterTenantWorkspace = (tenantId: string) => {
+  // Supervisi yang sedang berjalan (untuk mencatat keluar beserta durasinya)
+  const activeSupervisionRef = useRef<{ tenantId: string; startedAt: number } | null>(null);
+
+  const enterTenantWorkspace = async (
+    tenantId: string,
+    reason: string,
+    nextView: ViewType = 'dashboard'
+  ): Promise<{ success: boolean; message: string }> => {
+    if (currentUser.role !== 'superadmin') {
+      return { success: false, message: 'Hanya Superadmin yang dapat masuk Mode Supervisi.' };
+    }
+    const cleanReason = (reason || '').trim();
+    if (cleanReason.length < 5) {
+      return { success: false, message: 'Alasan supervisi wajib diisi (minimal 5 karakter).' };
+    }
+    const tenant = tenants.find((t) => t.id === tenantId);
+    if (!tenant) {
+      return { success: false, message: 'Penyelenggara tidak ditemukan.' };
+    }
+
+    if (isLiveDbActive) {
+      // Catat dulu; bila pencatatan gagal, supervisi tidak dibuka (akuntabilitas)
+      const res = await supabaseDataService.recordSupervisionEvent({
+        tenantId,
+        event: 'STARTED',
+        reason: cleanReason
+      });
+      if (!res.success) {
+        return {
+          success: false,
+          message: `Supervisi tidak dibuka karena gagal dicatat di audit log: ${res.message}`
+        };
+      }
+    } else {
+      setAuditLogs((prev) => [
+        {
+          id: `audit-supervision-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          actor: `${currentUser.name} (superadmin)`,
+          action: 'SUPERVISION_STARTED',
+          target: `Workspace: ${tenant.name}`,
+          tenantId,
+          tenantName: tenant.name,
+          summary: `Superadmin masuk Mode Supervisi workspace "${tenant.name}".`,
+          reason: cleanReason,
+          outcome: 'Success'
+        },
+        ...prev
+      ]);
+    }
+
+    activeSupervisionRef.current = { tenantId, startedAt: Date.now() };
     setCurrentTenantId(tenantId);
-    setCurrentView('dashboard');
+    setCurrentView(nextView);
+    return { success: true, message: `Mode Supervisi "${tenant.name}" dibuka dan dicatat di audit log.` };
   };
 
   const exitTenantWorkspace = () => {
+    const active = activeSupervisionRef.current;
+    activeSupervisionRef.current = null;
+    if (active) {
+      const minutes = Math.max(1, Math.round((Date.now() - active.startedAt) / 60000));
+      const durationNote = `Durasi supervisi sekitar ${minutes} menit.`;
+      const tenant = tenants.find((t) => t.id === active.tenantId);
+      if (isLiveDbActive) {
+        void supabaseDataService
+          .recordSupervisionEvent({ tenantId: active.tenantId, event: 'ENDED', reason: durationNote })
+          .then((res) => {
+            if (!res.success) setSyncStatus(`Catatan keluar supervisi gagal disimpan: ${res.message}`);
+          });
+      } else {
+        setAuditLogs((prev) => [
+          {
+            id: `audit-supervision-end-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            actor: `${currentUser.name} (superadmin)`,
+            action: 'SUPERVISION_ENDED',
+            target: `Workspace: ${tenant?.name || active.tenantId}`,
+            tenantId: active.tenantId,
+            tenantName: tenant?.name || 'Penyelenggara',
+            summary: `Superadmin keluar dari Mode Supervisi workspace "${tenant?.name || active.tenantId}".`,
+            reason: durationNote,
+            outcome: 'Success'
+          },
+          ...prev
+        ]);
+      }
+    }
     setCurrentTenantId('platform');
     setCurrentView('superadmin_dashboard');
+  };
+
+  const fetchPlatformAuditLogs = async (
+    tenantId?: string
+  ): Promise<{ success: boolean; message: string; logs: AuditLogItem[] }> => {
+    if (isLiveDbActive) {
+      return supabaseDataService.fetchPlatformAuditLogs({ tenantId, limit: 300 });
+    }
+    const tenantName = tenants.find((t) => t.id === tenantId)?.name;
+    const logs = tenantId
+      ? auditLogs.filter((l) => l.tenantId === tenantId || (!l.tenantId && l.tenantName === tenantName))
+      : auditLogs;
+    return { success: true, message: `${logs.length} catatan (Mode Demo).`, logs };
   };
 
   // Reset prototype storage helper
@@ -6719,6 +6827,57 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  const isRealTenantId = (tenantId?: string) =>
+    Boolean(tenantId) && tenantId !== 'platform' && tenantId !== 'unassigned';
+
+  const moveUserToTenant = async (
+    id: string,
+    toTenantId: string,
+    reason?: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const existing = users.find((u) => u.id === id);
+    if (!existing) return { success: false, message: 'Pengguna tidak ditemukan.' };
+    if (existing.role === 'superadmin') {
+      return { success: false, message: 'Akun Superadmin tidak terikat penyelenggara.' };
+    }
+    if (!isRealTenantId(toTenantId) || !tenants.some((t) => t.id === toTenantId)) {
+      return { success: false, message: 'Penyelenggara tujuan tidak ditemukan.' };
+    }
+    if (existing.tenantId === toTenantId) {
+      return { success: false, message: 'Pengguna sudah berada di penyelenggara tersebut.' };
+    }
+    const toName = tenants.find((t) => t.id === toTenantId)?.name || 'penyelenggara tujuan';
+
+    // Belum punya penyelenggara: cukup tetapkan (tidak ada keanggotaan lama untuk dinonaktifkan)
+    if (!isRealTenantId(existing.tenantId)) {
+      return updateUser(id, { tenantId: toTenantId });
+    }
+
+    if (isLiveDbActive) {
+      setSyncStatus('Memindahkan pengguna antar-penyelenggara...');
+      const res = await supabaseDataService.moveMemberToTenant({
+        profileId: id,
+        fromTenantId: existing.tenantId,
+        toTenantId,
+        reason
+      });
+      if (!res.success) {
+        setSyncStatus(`Gagal memindahkan pengguna: ${res.message}`);
+        return res;
+      }
+      setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, tenantId: toTenantId, status: 'Aktif' } : u)));
+      // Penugasan hakim lama sudah dinonaktifkan server; hapus dari tampilan
+      setJudgeAssignments((prev) => prev.filter((a) => !(a.judgeId === id && a.tenantId === existing.tenantId)));
+      setSyncStatus('Pengguna dipindahkan');
+      setLastSyncTime(getWibTime());
+      return res;
+    }
+
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, tenantId: toTenantId, status: 'Aktif' } : u)));
+    setJudgeAssignments((prev) => prev.filter((a) => !(a.judgeId === id && a.tenantId === existing.tenantId)));
+    return { success: true, message: `Pengguna dipindahkan ke "${toName}" (Mode Demo).` };
+  };
+
   const updateUser = async (
     id: string,
     updated: Partial<User>
@@ -6726,6 +6885,25 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const existing = users.find((u) => u.id === id);
     if (!existing) {
       return { success: false, message: 'Pengguna tidak ditemukan.' };
+    }
+    // Ganti penyelenggara lewat formulir edit: pindahkan dulu (nonaktifkan keanggotaan lama),
+    // lalu simpan perubahan lain ke penyelenggara baru. Tanpa ini keanggotaan lama tetap aktif.
+    if (
+      isLiveDbActive &&
+      updated.tenantId &&
+      updated.tenantId !== existing.tenantId &&
+      isRealTenantId(existing.tenantId) &&
+      isRealTenantId(updated.tenantId) &&
+      existing.role !== 'superadmin'
+    ) {
+      const moved = await moveUserToTenant(id, updated.tenantId);
+      if (!moved.success) return moved;
+      const { tenantId: _ignored, ...rest } = updated;
+      const hasOtherChanges = Object.entries(rest).some(
+        ([key, value]) => (existing as unknown as Record<string, unknown>)[key] !== value
+      );
+      if (!hasOtherChanges) return moved;
+      // lanjut: merged di bawah sudah memakai tenantId baru, sehingga upsert menuju penyelenggara baru
     }
     const merged: User = {
       ...existing,
@@ -8284,6 +8462,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isSuperadminWorkspaceMode,
         enterTenantWorkspace,
         exitTenantWorkspace,
+        fetchPlatformAuditLogs,
+        moveUserToTenant,
         isDemoAccountModalOpen,
         setIsDemoAccountModalOpen,
         resetPrototypeData,

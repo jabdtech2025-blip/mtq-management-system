@@ -539,6 +539,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261121_remove_levels_usage.sql'),
     'utf-8'
   );
+  const moveMember20261122Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261122_move_member_and_supervision_log.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -660,6 +664,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(realtimeCms20261119Sql);
       await pg.exec(multiBranch20261120Sql);
       await pg.exec(removeLevels20261121Sql);
+      await pg.exec(moveMember20261122Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -3984,6 +3989,69 @@ export async function runSupabaseTests(): Promise<{
         s8ReorderStage.ok === false &&
         s8StatusStage.ok === true,
       `rename: ${s8RenameStage.ok} ${s8RenameStage.error}, reorder: ${s8ReorderStage.ok}, status: ${s8StatusStage.ok} ${s8StatusStage.error}`
+    );
+
+    // ---------- 97c. Pindah pengguna antar-penyelenggara & catatan Mode Supervisi ----------
+    const mvSuperId = bootstrapUserId; // Superadmin hasil bootstrap (tes 52)
+    const mvJudgeId = generateUuid();
+    await asSuper(`
+      INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+        ('${mvJudgeId}', 'hakim-mv@jabar.mtq.id', '{"name": "Hakim Pindah", "username": "hakim_mv"}'::jsonb)
+      ON CONFLICT (id) DO NOTHING;
+      INSERT INTO tenant_memberships (tenant_id, profile_id, role, judge_category, judge_field, status)
+      VALUES ('${tenantJabarId}', '${mvJudgeId}', 'judge', 'Hakim Tajwid', 'Bidang Tajwid', 'Aktif')
+      ON CONFLICT (tenant_id, profile_id) DO NOTHING;
+    `);
+    const mvByAdmin = await runAs(
+      igAdminId,
+      `SELECT public.move_member_to_tenant('${mvJudgeId}', '${tenantJabarId}', '${tenantDkiId}', 'uji') AS r`
+    );
+    const mvBySuper = await runAs(
+      mvSuperId,
+      `SELECT public.move_member_to_tenant('${mvJudgeId}', '${tenantJabarId}', '${tenantDkiId}', 'rotasi hakim') AS r`
+    );
+    const mvMemberships = await pg.query<{ tenant_id: string; status: string }>(
+      `SELECT tenant_id::text, status FROM tenant_memberships WHERE profile_id = '${mvJudgeId}'`
+    );
+    const mvAudit = await pg.query<{ action: string }>(
+      `SELECT action FROM audit_logs WHERE action IN ('USER_MOVED_OUT', 'USER_MOVED_IN') AND reason = 'rotasi hakim'`
+    );
+    const mvOld = mvMemberships.rows.find((r) => r.tenant_id === tenantJabarId)?.status;
+    const mvNew = mvMemberships.rows.find((r) => r.tenant_id === tenantDkiId)?.status;
+    assert(
+      '97c. Pindah Pengguna: hanya Superadmin; keanggotaan lama Nonaktif, keanggotaan baru Aktif, tercatat di audit log kedua penyelenggara',
+      mvByAdmin.ok === false &&
+        mvByAdmin.error.includes('MOVE_DENIED') &&
+        mvBySuper.ok === true &&
+        mvOld === 'Nonaktif' &&
+        mvNew === 'Aktif' &&
+        mvAudit.rows.length === 2,
+      `admin: ${mvByAdmin.error}, super: ${mvBySuper.ok} ${mvBySuper.error}, old: ${mvOld}, new: ${mvNew}, audit: ${mvAudit.rows.length}`
+    );
+
+    const supShort = await runAs(mvSuperId, `SELECT public.record_supervision_event('${tenantDkiId}', 'STARTED', 'abc') AS r`);
+    const supStart = await runAs(
+      mvSuperId,
+      `SELECT public.record_supervision_event('${tenantDkiId}', 'STARTED', 'Audit operasional pengujian') AS r`
+    );
+    const supEnd = await runAs(mvSuperId, `SELECT public.record_supervision_event('${tenantDkiId}', 'ENDED', NULL) AS r`);
+    const supByAdmin = await runAs(
+      igAdminId,
+      `SELECT public.record_supervision_event('${tenantJabarId}', 'STARTED', 'Audit operasional') AS r`
+    );
+    const supRows = await pg.query<{ action: string; reason: string | null }>(
+      `SELECT action, reason FROM audit_logs WHERE tenant_id = '${tenantDkiId}' AND action LIKE 'SUPERVISION_%' ORDER BY created_at`
+    );
+    assert(
+      '97d. Mode Supervisi tercatat: masuk (dengan alasan) dan keluar tercatat di audit log penyelenggara; alasan pendek dan non-Superadmin ditolak',
+      supShort.ok === false &&
+        supStart.ok === true &&
+        supEnd.ok === true &&
+        supByAdmin.ok === false &&
+        supByAdmin.error.includes('SUPERVISION_DENIED') &&
+        supRows.rows.some((r) => r.action === 'SUPERVISION_STARTED' && r.reason === 'Audit operasional pengujian') &&
+        supRows.rows.some((r) => r.action === 'SUPERVISION_ENDED'),
+      `short: ${supShort.ok}, start: ${supStart.ok} ${supStart.error}, end: ${supEnd.ok}, admin: ${supByAdmin.error}, rows: ${JSON.stringify(supRows.rows)}`
     );
 
     // ---------- 98. J6: tidak ada lagi tebakan bidang berdasarkan nama ----------
