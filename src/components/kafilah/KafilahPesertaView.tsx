@@ -24,11 +24,16 @@ import { Kafilah, Participant } from '../../types/mtq';
 import { AppModal } from '../common/AppModal';
 import {
   downloadParticipantExcelTemplate,
+  downloadKafilahExcelTemplate,
   parseWorkbookToRows,
   validateParticipantImportRows,
+  validateKafilahImportRows,
   downloadImportErrorReport,
   ImportValidationResult,
-  ValidatedParticipantRow
+  ValidatedParticipantRow,
+  ParsedKafilahImportRow,
+  PARTICIPANT_IMPORT_HEADERS,
+  KAFILAH_IMPORT_HEADERS
 } from '../../utils/excelHelper';
 
 export const KafilahPesertaView: React.FC = () => {
@@ -38,7 +43,6 @@ export const KafilahPesertaView: React.FC = () => {
     kafilahs,
     participants,
     cabangList,
-    jenjangList,
     stages,
     addKafilah,
     updateKafilah,
@@ -47,7 +51,8 @@ export const KafilahPesertaView: React.FC = () => {
     updateParticipant,
     deleteParticipant,
     verifyParticipant,
-    importParticipantsBatch
+    importParticipantsBatch,
+    importKafilahsBatch
   } = useMtq();
 
   const groupLabel = currentTenant?.groupLabel || 'Kafilah / Utusan';
@@ -63,7 +68,6 @@ export const KafilahPesertaView: React.FC = () => {
   // Per Peserta Filters & Sorting
   const [filterKafilahId, setFilterKafilahId] = useState<string>('ALL');
   const [filterBranch, setFilterBranch] = useState<string>('ALL');
-  const [filterLevel, setFilterLevel] = useState<string>('ALL');
   const [filterStage, setFilterStage] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterVerification, setFilterVerification] = useState<string>('ALL');
@@ -85,6 +89,12 @@ export const KafilahPesertaView: React.FC = () => {
   const [importValidation, setImportValidation] = useState<ImportValidationResult<ValidatedParticipantRow> | null>(null);
   const [importFileName, setImportFileName] = useState<string>('');
   const [isImporting, setIsImporting] = useState(false);
+  // Impor Grup / Kafilah
+  const [isKafilahImportOpen, setIsKafilahImportOpen] = useState(false);
+  const [kafilahImportValidation, setKafilahImportValidation] =
+    useState<ImportValidationResult<ParsedKafilahImportRow> | null>(null);
+  const [kafilahImportFileName, setKafilahImportFileName] = useState('');
+  const [isImportingKafilah, setIsImportingKafilah] = useState(false);
   const [isImportDropdownOpen, setIsImportDropdownOpen] = useState(false);
   const importDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -106,10 +116,6 @@ export const KafilahPesertaView: React.FC = () => {
   const activeCabangList = useMemo(
     () => cabangList.filter((c) => c.status === 'Aktif'),
     [cabangList]
-  );
-  const activeJenjangList = useMemo(
-    () => jenjangList.filter((j) => j.status === 'Aktif'),
-    [jenjangList]
   );
   const activeStages = useMemo(
     () => stages.filter((s) => s.status === 'Aktif' || s.status === 'Menunggu'),
@@ -147,12 +153,25 @@ export const KafilahPesertaView: React.FC = () => {
   const [partOriginRegion, setPartOriginRegion] = useState<string>('');
   const [partOriginInstitution, setPartOriginInstitution] = useState<string>('');
   const [partKafilahId, setPartKafilahId] = useState<string>('');
-  const [partLevelName, setPartLevelName] = useState<string>('');
   const [partBranchName, setPartBranchName] = useState<string>('');
   const [partStageName, setPartStageName] = useState<string>('');
   const [partStatus, setPartStatus] = useState<'Menunggu' | 'Berlangsung' | 'Lolos' | 'Gugur' | 'Final'>('Menunggu');
   const [partLottery, setPartLottery] = useState<string>('');
   const [partFormError, setPartFormError] = useState<string>('');
+  // Babak yang tersedia di formulir: milik cabang terpilih atau babak umum, diurutkan, tanpa nama kembar
+  const stagesForSelectedBranch = useMemo(() => {
+    const names = activeStages
+      .filter(
+        (s) =>
+          !partBranchName ||
+          s.branchName === partBranchName ||
+          !s.branchName ||
+          s.branchName === 'Semua Cabang'
+      )
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((s) => s.name);
+    return Array.from(new Set(names));
+  }, [activeStages, partBranchName]);
 
   const filteredKafilahs = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -170,7 +189,6 @@ export const KafilahPesertaView: React.FC = () => {
       .filter((p) => {
         if (filterKafilahId !== 'ALL' && p.kafilahId !== filterKafilahId) return false;
         if (filterBranch !== 'ALL' && p.branchName !== filterBranch) return false;
-        if (filterLevel !== 'ALL' && p.levelName !== filterLevel) return false;
         if (filterStage !== 'ALL' && p.stageName !== filterStage) return false;
         if (filterStatus !== 'ALL' && p.status !== filterStatus) return false;
         const verStatus = p.verificationStatus || 'Diverifikasi';
@@ -185,8 +203,7 @@ export const KafilahPesertaView: React.FC = () => {
           (p.originRegion || '').toLowerCase().includes(q) ||
           (p.originInstitution || '').toLowerCase().includes(q) ||
           p.kafilahName.toLowerCase().includes(q) ||
-          p.branchName.toLowerCase().includes(q) ||
-          p.levelName.toLowerCase().includes(q)
+          p.branchName.toLowerCase().includes(q)
         );
       })
       .sort((a, b) => {
@@ -205,7 +222,7 @@ export const KafilahPesertaView: React.FC = () => {
         }
         return a.name.localeCompare(b.name);
       });
-  }, [participants, searchQuery, filterKafilahId, filterBranch, filterLevel, filterStage, filterStatus, filterVerification, sortBy]);
+  }, [participants, searchQuery, filterKafilahId, filterBranch, filterStage, filterStatus, filterVerification, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(filteredParticipants.length / pageSize));
   const paginatedParticipants = useMemo(() => {
@@ -217,7 +234,6 @@ export const KafilahPesertaView: React.FC = () => {
   const openAddParticipantModal = (preselectedKafilah?: Kafilah) => {
     const defaultKafilah = preselectedKafilah || selectedKafilah || activeKafilahs[0] || kafilahs[0];
     const defaultCabang = activeCabangList[0]?.name || cabangList[0]?.name || '';
-    const defaultJenjang = activeJenjangList[0]?.name || jenjangList[0]?.name || 'Dewasa';
     const defaultStage = activeStages[0]?.name || stages[0]?.name || 'Penyisihan';
     const nextSeq = String(participants.length + 1).padStart(3, '0');
 
@@ -231,7 +247,6 @@ export const KafilahPesertaView: React.FC = () => {
     setPartOriginRegion(defaultKafilah?.region || 'Jawa Barat');
     setPartOriginInstitution('');
     setPartKafilahId(defaultKafilah?.id || '');
-    setPartLevelName(defaultJenjang);
     setPartBranchName(defaultCabang);
     setPartStageName(defaultStage);
     setPartStatus('Menunggu');
@@ -251,7 +266,6 @@ export const KafilahPesertaView: React.FC = () => {
     setPartOriginRegion(p.originRegion || '');
     setPartOriginInstitution(p.originInstitution || '');
     setPartKafilahId(p.kafilahId);
-    setPartLevelName(p.levelName || activeJenjangList[0]?.name || 'Dewasa');
     setPartBranchName(p.branchName);
     setPartStageName(p.stageName || 'Penyisihan');
     setPartStatus(p.status);
@@ -275,7 +289,6 @@ export const KafilahPesertaView: React.FC = () => {
     }
 
     const matchedBranch = cabangList.find((c) => c.name === partBranchName);
-    const matchedLevel = jenjangList.find((j) => j.name === partLevelName);
     // Babak dicari per cabang: nama babak yang sama ada di setiap cabang.
     const matchedStage = resolveStageForBranch(stages, {
       tenantId: currentTenant.id,
@@ -296,8 +309,6 @@ export const KafilahPesertaView: React.FC = () => {
         originInstitution: partOriginInstitution.trim(),
         kafilahId: targetKafilah.id,
         kafilahName: targetKafilah.name,
-        levelId: matchedLevel?.id,
-        levelName: partLevelName,
         branchId: matchedBranch?.id,
         branchName: partBranchName,
         stageId: matchedStage?.id,
@@ -329,8 +340,6 @@ export const KafilahPesertaView: React.FC = () => {
       originInstitution: partOriginInstitution.trim(),
       kafilahId: targetKafilah.id,
       kafilahName: targetKafilah.name,
-      levelId: matchedLevel?.id,
-      levelName: partLevelName || activeJenjangList[0]?.name || 'Dewasa',
       branchId: matchedBranch?.id,
       branchName: partBranchName || activeCabangList[0]?.name || '',
       stageId: matchedStage?.id,
@@ -416,13 +425,18 @@ export const KafilahPesertaView: React.FC = () => {
     setImportFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
-      const rows = await parseWorkbookToRows(buffer);
+      const rows = await parseWorkbookToRows(buffer, PARTICIPANT_IMPORT_HEADERS);
+      if (rows.length === 0) {
+        setImportValidation(null);
+        setFeedbackMessage({ type: 'error', text: 'Berkas tidak berisi baris data peserta.' });
+        return;
+      }
       const validation = validateParticipantImportRows(rows, {
         kafilahs,
         cabangList,
-        jenjangList,
         stages,
-        existingParticipants: participants
+        existingParticipants: participants,
+        tenantId: currentTenant.id
       });
       setImportValidation(validation);
     } catch (err) {
@@ -450,6 +464,49 @@ export const KafilahPesertaView: React.FC = () => {
       }
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const handleKafilahExcelFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setKafilahImportFileName(file.name);
+    try {
+      const rows = await parseWorkbookToRows(await file.arrayBuffer(), KAFILAH_IMPORT_HEADERS);
+      if (rows.length === 0) {
+        setKafilahImportValidation(null);
+        setFeedbackMessage({ type: 'error', text: 'Berkas tidak berisi baris data grup.' });
+        return;
+      }
+      setKafilahImportValidation(validateKafilahImportRows(rows, { existingKafilahs: kafilahs }));
+    } catch (err) {
+      setKafilahImportValidation(null);
+      setFeedbackMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Gagal membaca file Excel grup.'
+      });
+    }
+  };
+
+  const handleCommitKafilahImport = async () => {
+    if (!kafilahImportValidation || kafilahImportValidation.validRows.length === 0) return;
+    setIsImportingKafilah(true);
+    try {
+      const res = await importKafilahsBatch(kafilahImportValidation.validRows);
+      const errDetail = res.errors.length > 0 ? ` (${res.errors.slice(0, 2).join('; ')})` : '';
+      setFeedbackMessage({
+        type: res.failed === 0 ? 'success' : 'error',
+        text: `Impor grup: ${res.created} ditambahkan, ${res.updated} diperbarui.${res.failed > 0 ? ` Gagal: ${res.failed}${errDetail}` : ''}`
+      });
+      if (res.failed === 0) {
+        setIsKafilahImportOpen(false);
+        setKafilahImportValidation(null);
+        setKafilahImportFileName('');
+        setViewMode('grup');
+      }
+    } finally {
+      setIsImportingKafilah(false);
     }
   };
 
@@ -498,19 +555,45 @@ export const KafilahPesertaView: React.FC = () => {
                   className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 flex items-center gap-2 cursor-pointer transition-colors"
                 >
                   <Upload className="w-4 h-4 text-emerald-700 shrink-0" />
-                  <span>Import Excel (.xlsx)</span>
+                  <span>Import Peserta (.xlsx)</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="open-kafilah-import-btn"
+                  onClick={() => {
+                    setIsImportDropdownOpen(false);
+                    setKafilahImportValidation(null);
+                    setKafilahImportFileName('');
+                    setIsKafilahImportOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Upload className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>Import Grup (.xlsx)</span>
                 </button>
                 <button
                   type="button"
                   data-testid="download-participant-template-btn"
                   onClick={() => {
                     setIsImportDropdownOpen(false);
-                    downloadParticipantExcelTemplate({ kafilahs, cabangList, jenjangList, stages });
+                    downloadParticipantExcelTemplate({ kafilahs, cabangList, stages });
                   }}
                   className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors"
                 >
                   <Download className="w-4 h-4 text-slate-500 shrink-0" />
-                  <span>Download Template</span>
+                  <span>Template Peserta</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="download-kafilah-template-btn"
+                  onClick={() => {
+                    setIsImportDropdownOpen(false);
+                    downloadKafilahExcelTemplate({ groupLabel });
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Download className="w-4 h-4 text-slate-500 shrink-0" />
+                  <span>Template Grup</span>
                 </button>
               </div>
             )}
@@ -1333,7 +1416,7 @@ export const KafilahPesertaView: React.FC = () => {
             setEditingParticipant(null);
           }}
           title={editingParticipant ? `Edit Data Peserta: ${editingParticipant.name}` : 'Daftarkan Peserta Baru'}
-          subtitle="Seluruh pilihan Cabang, Jenjang, Babak, dan Grup bersumber langsung dari Master Data Kompetisi"
+          subtitle="Seluruh pilihan Cabang, Babak, dan Grup bersumber langsung dari Master Data Kompetisi"
           maxWidthClass="max-w-2xl"
           footer={
             <div className="flex justify-end gap-2">
@@ -1545,13 +1628,17 @@ export const KafilahPesertaView: React.FC = () => {
                   onChange={(e) => setPartStageName(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg outline-none"
                 >
-                  {activeStages.map((stg) => (
-                    <option key={stg.id} value={stg.name}>
-                      {stg.name}
+                  {/* Hanya babak milik cabang terpilih (atau babak umum), tanpa nama kembar */}
+                  {stagesForSelectedBranch.length === 0 && (
+                    <option value="">Cabang ini belum punya babak</option>
+                  )}
+                  {stagesForSelectedBranch.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
                   ))}
                   {editingParticipant &&
-                    !activeStages.some((s) => s.name === editingParticipant.stageName) && (
+                    !stagesForSelectedBranch.includes(editingParticipant.stageName) && (
                       <option value={editingParticipant.stageName}>
                         {editingParticipant.stageName} (Historis)
                       </option>
@@ -1597,7 +1684,7 @@ export const KafilahPesertaView: React.FC = () => {
           onClose={() => setIsImportModalOpen(false)}
           isBusy={isImporting}
           title="Import Data Peserta dari Excel (.xlsx)"
-          subtitle="Validasi otomatis terhadap Master Data Grup/Kafilah, Cabang, Jenjang, dan Babak sebelum disimpan"
+          subtitle="Validasi otomatis terhadap Master Data Grup/Kafilah, Cabang, dan Babak sebelum disimpan"
           maxWidthClass="max-w-3xl"
           footer={
             <div className="flex items-center justify-between">
@@ -1646,10 +1733,10 @@ export const KafilahPesertaView: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs font-bold text-slate-900">
-                    {importFileName || 'Pilih file Excel (.xlsx / .xls) sesuai Template Peserta'}
+                    {importFileName || 'Pilih file Excel (.xlsx) atau CSV sesuai Template Peserta'}
                   </p>
                   <p className="text-xs text-slate-500">
-                    Pastikan nama Grup/Kafilah, Cabang, Jenjang, dan Babak sesuai dengan sheet Referensi Master Data.
+                    Pastikan nama Grup/Kafilah, Cabang, dan Babak sesuai dengan sheet Referensi Master Data. Babak harus milik cabang peserta. Golongan dan jenis kelamin menjadi bagian dari nama cabang (mis. Tilawah Anak Putra).
                   </p>
                 </div>
               </div>
@@ -1657,8 +1744,11 @@ export const KafilahPesertaView: React.FC = () => {
                 Pilih File Excel
                 <input
                   type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleExcelFileChange}
+                  accept=".xlsx,.csv"
+                  onChange={(e) => {
+                    void handleExcelFileChange(e);
+                    e.target.value = '';
+                  }}
                   data-testid="participant-excel-file-input"
                   className="hidden"
                 />
@@ -1718,7 +1808,7 @@ export const KafilahPesertaView: React.FC = () => {
                             <th className="py-1.5 px-3">ID</th>
                             <th className="py-1.5 px-3">Nama Peserta</th>
                             <th className="py-1.5 px-3">Grup</th>
-                            <th className="py-1.5 px-3">Cabang & Jenjang</th>
+                            <th className="py-1.5 px-3">Cabang</th>
                             <th className="py-1.5 px-3">Babak</th>
                           </tr>
                         </thead>
@@ -1730,10 +1820,151 @@ export const KafilahPesertaView: React.FC = () => {
                               </td>
                               <td className="py-1.5 px-3 font-semibold text-slate-900">{r.name}</td>
                               <td className="py-1.5 px-3">{r.kafilahName}</td>
-                              <td className="py-1.5 px-3">
-                                {r.branchName} ({r.levelName})
-                              </td>
+                              <td className="py-1.5 px-3">{r.branchName}</td>
                               <td className="py-1.5 px-3 font-mono">{r.stageName}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </AppModal>
+      )}
+
+      {/* Modal Impor Grup / Kafilah */}
+      {isKafilahImportOpen && (
+        <AppModal
+          isOpen={isKafilahImportOpen}
+          onClose={() => setIsKafilahImportOpen(false)}
+          isBusy={isImportingKafilah}
+          title="Import Data Grup dari Excel (.xlsx)"
+          subtitle="Impor grup lebih dulu, lalu impor peserta. Kode grup yang sudah ada diperbarui, bukan digandakan."
+          maxWidthClass="max-w-3xl"
+          footer={
+            <div className="flex items-center justify-between">
+              <div>
+                {kafilahImportValidation && kafilahImportValidation.errors.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => downloadImportErrorReport(kafilahImportValidation.errors, 'Error_Import_Grup_MTQ.xlsx')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Unduh Laporan Baris Error ({kafilahImportValidation.errors.length})</span>
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsKafilahImportOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={!kafilahImportValidation || kafilahImportValidation.validRows.length === 0 || isImportingKafilah}
+                  onClick={handleCommitKafilahImport}
+                  data-testid="commit-kafilah-import-btn"
+                  className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 disabled:bg-slate-300 rounded-lg"
+                >
+                  {isImportingKafilah ? 'Mengimpor...' : `Impor ${kafilahImportValidation?.validRows.length || 0} Grup Valid`}
+                </button>
+              </div>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="p-4 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-900">
+                    {kafilahImportFileName || 'Pilih file Excel (.xlsx) atau CSV sesuai Template Grup'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Kolom wajib: Kode_Grup dan Nama_Grup. Kolom lain (Wilayah, Penanggung_Jawab, Telepon, Status) opsional.
+                  </p>
+                </div>
+              </div>
+              <label className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg cursor-pointer shrink-0">
+                Pilih File Excel
+                <input
+                  type="file"
+                  accept=".xlsx,.csv"
+                  onChange={handleKafilahExcelFileChange}
+                  data-testid="kafilah-excel-file-input"
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {kafilahImportValidation && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <span className="text-slate-500 block">Total Baris Dibaca</span>
+                    <span className="text-base font-extrabold text-slate-900 font-mono">{kafilahImportValidation.totalRows}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                    <span className="text-emerald-700 block">Baris Valid (Siap Impor)</span>
+                    <span className="text-base font-extrabold text-emerald-900 font-mono">{kafilahImportValidation.validRows.length}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
+                    <span className="text-rose-700 block">Baris Ditolak / Error</span>
+                    <span className="text-base font-extrabold text-rose-900 font-mono">{kafilahImportValidation.errors.length}</span>
+                  </div>
+                </div>
+
+                {kafilahImportValidation.errors.length > 0 && (
+                  <div className="border border-rose-200 rounded-xl overflow-hidden">
+                    <div className="bg-rose-50 px-3 py-2 text-xs font-bold text-rose-900 border-b border-rose-200">
+                      Detail Baris Ditolak ({kafilahImportValidation.errors.length})
+                    </div>
+                    <div className="max-h-40 overflow-y-auto divide-y divide-rose-100 text-xs">
+                      {kafilahImportValidation.errors.map((err, i) => (
+                        <div key={i} className="px-3 py-2 flex items-start gap-2 text-rose-800">
+                          <span className="font-mono font-bold shrink-0">Baris #{err.rowNumber}:</span>
+                          <span>
+                            <strong>{err.identifier}</strong> — {err.reasons.join(' ')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {kafilahImportValidation.validRows.length > 0 && (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 border-b border-slate-200">
+                      Pratinjau Grup Valid ({kafilahImportValidation.validRows.length})
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                          <tr>
+                            <th className="py-1.5 px-3">Kode</th>
+                            <th className="py-1.5 px-3">Nama Grup</th>
+                            <th className="py-1.5 px-3">Wilayah</th>
+                            <th className="py-1.5 px-3">Penanggung Jawab</th>
+                            <th className="py-1.5 px-3">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {kafilahImportValidation.validRows.slice(0, 30).map((r, i) => (
+                            <tr key={i}>
+                              <td className="py-1.5 px-3 font-mono font-bold text-emerald-700">{r.code}</td>
+                              <td className="py-1.5 px-3 font-semibold text-slate-900">{r.name}</td>
+                              <td className="py-1.5 px-3">{r.region}</td>
+                              <td className="py-1.5 px-3">{r.contactPerson || '-'}</td>
+                              <td className="py-1.5 px-3">{r.existingId ? 'Diperbarui' : 'Baru'}</td>
                             </tr>
                           ))}
                         </tbody>

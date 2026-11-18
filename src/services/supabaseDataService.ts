@@ -1097,7 +1097,6 @@ export const supabaseDataService = {
       const lId = q.level_id ? String(q.level_id) : undefined;
       const sId = q.stage_id ? String(q.stage_id) : undefined;
       const resolvedBranchName = (bId && branchMap.get(bId)) || String(q.branch_name || 'Tilawah Dewasa Putra');
-      const resolvedLevelName = (lId && levelMap.get(lId)) || 'Umum';
       const resolvedStageName = (sId && stageMap.get(sId)?.name) || 'Penyisihan';
       const item: Question = {
         id,
@@ -1113,10 +1112,11 @@ export const supabaseDataService = {
         pageEnd: Number(q.page_end || q.page_number || 1),
         branchId: bId,
         branchName: resolvedBranchName,
-        levelId: lId,
-        levelName: resolvedLevelName,
+        // Jenjang tidak dipakai lagi (golongan = bagian dari nama cabang)
+        levelId: undefined,
+        levelName: undefined,
         stageId: sId,
-        branchAndLevel: lId ? `${resolvedBranchName} - ${resolvedLevelName}` : resolvedBranchName,
+        branchAndLevel: resolvedBranchName,
         stage: resolvedStageName,
         stageName: resolvedStageName,
         status: (q.status as 'Aktif' | 'Nonaktif') || 'Aktif',
@@ -1294,8 +1294,8 @@ export const supabaseDataService = {
         kafilahName: kafilahMap.get(kId) || 'Kafilah',
         branchId: bId,
         branchName: branchMap.get(bId) || 'Tilawah Dewasa Putra',
-        levelId: lId || undefined,
-        levelName: (lId && levelMap.get(lId)) || jenjangList[0]?.name || 'Umum',
+        levelId: undefined,
+        levelName: undefined,
         stageId: latestSp?.stageId || sId || undefined,
         stageName: latestSp?.stageName || (sId && stageMap.get(sId)?.name) || 'Penyisihan',
         questionId: latestSp?.questionId || '',
@@ -1424,7 +1424,7 @@ export const supabaseDataService = {
         branchId: rv.branch_id ? String(rv.branch_id) : undefined,
         branchCode: String(rv.branch_code || ''),
         branchName: String(rv.branch_name || ''),
-        levelId: rv.level_id ? String(rv.level_id) : undefined,
+        levelId: undefined,
         version: String(rv.version || '2025.1'),
         description: String(rv.description || ''),
         officialSource: sourceStr,
@@ -1443,7 +1443,7 @@ export const supabaseDataService = {
         id: String(r.id),
         tenantId: String(r.tenant_id),
         branchId: bId,
-        levelId: lId,
+        levelId: undefined, // jenjang tidak dipakai
         branchName: String(r.branch_name || (bId && branchMap.get(bId)) || 'Tilawah Dewasa Putra'),
         rubricVersionId: String(r.rubric_version_id),
         tieBreakOrder: Array.isArray(r.tie_break_order)
@@ -1482,8 +1482,8 @@ export const supabaseDataService = {
             : 'Semua Cabang'),
         judgeField: jField,
         rubricFieldId: ja.rubric_field_id ? String(ja.rubric_field_id) : undefined,
-        levelId: ja.level_id ? String(ja.level_id) : undefined,
-        levelName: ja.level_name ? String(ja.level_name) : undefined,
+        levelId: undefined,
+        levelName: undefined,
         status: (ja.status as 'Aktif' | 'Nonaktif') || 'Aktif'
       };
     });
@@ -1997,8 +1997,8 @@ export const supabaseDataService = {
       p_stage_name: params.stageName,
       p_branch_id: params.branchId || null,
       p_branch_name: params.branchName || null,
-      p_level_id: params.levelId || null,
-      p_level_name: params.levelName || null,
+      p_level_id: null,
+      p_level_name: null,
       p_actor_id: null,
       p_actor_name: null,
       p_results: params.results,
@@ -2105,7 +2105,7 @@ export const supabaseDataService = {
       p_tenant_id: params.tenantId,
       p_stage_id: params.stageId,
       p_branch_id: params.branchId && isValidUuid(params.branchId) ? params.branchId : null,
-      p_level_id: params.levelId && isValidUuid(params.levelId) ? params.levelId : null,
+      p_level_id: null, // jenjang tidak dipakai
       p_questions_per_participant: params.questionsPerParticipant || 1,
       p_draw_mode: params.drawMode || 'both',
       p_notes: params.notes || null,
@@ -2456,8 +2456,7 @@ export const supabaseDataService = {
     }
 
     const resolvedLevelId =
-      (levelId && isValidUuid(levelId) ? levelId : null) ||
-      (participant.levelId && isValidUuid(participant.levelId) ? participant.levelId : null);
+      null; // jenjang tidak dipakai
 
     const baseParticipantPayload = {
       id: participant.id,
@@ -2738,7 +2737,7 @@ export const supabaseDataService = {
     };
     const extendedQuestionPayload = {
       ...baseQuestionPayload,
-      level_id: effectiveLevelId && isValidUuid(effectiveLevelId) ? effectiveLevelId : null
+      level_id: null // jenjang tidak dipakai
     };
     let { error } = await client.from('questions').upsert(extendedQuestionPayload);
     if (error && (error.message?.includes('column') || error.code === 'PGRST204')) {
@@ -2769,8 +2768,8 @@ export const supabaseDataService = {
       stage_name: log.stageName,
       branch_id: log.branchId && isValidUuid(log.branchId) ? log.branchId : null,
       branch_name: log.branchName,
-      level_id: log.levelId && isValidUuid(log.levelId) ? log.levelId : null,
-      level_name: log.levelName || null,
+      level_id: null,
+      level_name: null,
       actor_id: log.actorId && isValidUuid(log.actorId) ? log.actorId : null,
       actor_name: log.actorName,
       questions_per_participant: log.questionsPerParticipant,
@@ -2823,8 +2822,8 @@ export const supabaseDataService = {
       tenant_id: assignment.tenantId,
       stage_id: assignment.stageId,
       branch_id: assignment.branchId && isValidUuid(assignment.branchId) ? assignment.branchId : null,
-      level_id: assignment.levelId && isValidUuid(assignment.levelId) ? assignment.levelId : null,
-      level_name: assignment.levelName || null,
+      level_id: null,
+      level_name: null,
       rubric_field_id: assignment.rubricFieldId && isValidUuid(assignment.rubricFieldId) ? assignment.rubricFieldId : null,
       judge_field: assignment.judgeField,
       judge_profile_id: assignment.judgeId,
@@ -2988,7 +2987,7 @@ export const supabaseDataService = {
     const baseUpdatePayload = {
       kafilah_id: participant.kafilahId,
       branch_id: effectiveBranchId,
-      level_id: effectiveLevelId && isValidUuid(effectiveLevelId) ? effectiveLevelId : null,
+      level_id: null, // jenjang tidak dipakai
       participant_code: participant.participantId,
       name: participant.name,
       gender: participant.gender,

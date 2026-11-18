@@ -34,6 +34,7 @@ import {
   fisherYatesShuffle,
   downloadQuestionExcelTemplate,
   parseWorkbookToRows,
+  QUESTION_IMPORT_HEADERS,
   validateQuestionImportRows,
   downloadImportErrorReport,
   ImportValidationResult,
@@ -43,6 +44,7 @@ import {
 
 export const BankSoalView: React.FC = () => {
   const {
+    currentTenant,
     questions,
     addQuestion,
     updateQuestion,
@@ -55,25 +57,19 @@ export const BankSoalView: React.FC = () => {
     lotteryDrawLogs,
     importQuestionsBatch,
     stages,
-    cabangList,
-    jenjangList
+    cabangList
   } = useMtq();
 
   const [activeTab, setActiveTab] = useState<'daftar_soal' | 'penetapan_soal' | 'riwayat_undian'>('daftar_soal');
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('Semua Cabang');
-  const [selectedLevel, setSelectedLevel] = useState('Semua Jenjang');
   const [selectedStage, setSelectedStage] = useState('Semua Babak');
 
   // Active Master Data lists (exclude Nonaktif for new entries)
   const activeCabangList = useMemo(
     () => cabangList.filter((c) => c.status === 'Aktif'),
     [cabangList]
-  );
-  const activeJenjangList = useMemo(
-    () => jenjangList.filter((j) => j.status === 'Aktif'),
-    [jenjangList]
   );
   const activeStages = useMemo(
     () => stages.filter((s) => s.status === 'Aktif' || s.status === 'Menunggu'),
@@ -95,7 +91,6 @@ export const BankSoalView: React.FC = () => {
   const [isLotteryModalOpen, setIsLotteryModalOpen] = useState(false);
   const [lotteryStage, setLotteryStage] = useState('Penyisihan');
   const [lotteryBranch, setLotteryBranch] = useState('Semua Cabang');
-  const [lotteryLevel, setLotteryLevel] = useState('Semua Jenjang');
   const [lotteryQuestionsPerParticipant, setLotteryQuestionsPerParticipant] = useState<number>(1);
   const [lotteryDrawMode, setLotteryDrawMode] = useState<'lottery_number' | 'maqra' | 'both'>('both');
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
@@ -132,7 +127,7 @@ export const BankSoalView: React.FC = () => {
     };
   }, [isImportDropdownOpen]);
 
-  // Add / Edit Form Modal (Separated Cabang, Jenjang, Babak + 114 Surah Index)
+  // Add / Edit Form Modal (Cabang, Babak + 114 Surah Index)
   const allSurahs = useMemo(() => getAllSurahs(), []);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
@@ -146,7 +141,6 @@ export const BankSoalView: React.FC = () => {
   const [formPageEnd, setFormPageEnd] = useState(306);
   const [allowManualPageOverride, setAllowManualPageOverride] = useState(false);
   const [formBranchName, setFormBranchName] = useState('');
-  const [formLevelName, setFormLevelName] = useState('');
   const [formStage, setFormStage] = useState('Penyisihan');
   const [formDesc, setFormDesc] = useState('');
   const [formError, setFormError] = useState('');
@@ -178,16 +172,13 @@ export const BankSoalView: React.FC = () => {
         q.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
         q.surahName.toLowerCase().includes(searchQuery.toLowerCase());
       const qBranch = q.branchName || q.branchAndLevel || '';
-      const qLevel = q.levelName || q.branchAndLevel || '';
       const matchesBranch =
         selectedBranch === 'Semua Cabang' || qBranch.includes(selectedBranch);
-      const matchesLevel =
-        selectedLevel === 'Semua Jenjang' || qLevel.includes(selectedLevel);
       const matchesStage =
         selectedStage === 'Semua Babak' || q.stageName === selectedStage;
-      return matchesSearch && matchesBranch && matchesLevel && matchesStage;
+      return matchesSearch && matchesBranch && matchesStage;
     });
-  }, [questions, searchQuery, selectedBranch, selectedLevel, selectedStage]);
+  }, [questions, searchQuery, selectedBranch, selectedStage]);
 
   // Assigned Maqra Rows for Tab 2 (Setiap satu maqra satu baris)
   const assignedMaqraRows = useMemo(() => {
@@ -281,13 +272,11 @@ export const BankSoalView: React.FC = () => {
         r.kafilahName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesBranch =
         selectedBranch === 'Semua Cabang' || r.branchName.includes(selectedBranch);
-      const matchesLevel =
-        selectedLevel === 'Semua Jenjang' || r.levelName.includes(selectedLevel);
       const matchesStage =
         selectedStage === 'Semua Babak' || r.stageName === selectedStage;
-      return matchesSearch && matchesBranch && matchesLevel && matchesStage;
+      return matchesSearch && matchesBranch && matchesStage;
     });
-  }, [participants, questions, searchQuery, selectedBranch, selectedLevel, selectedStage]);
+  }, [participants, questions, searchQuery, selectedBranch, selectedStage]);
 
   // Pages list for active preview question — derived from 114-surah 604-page Mushaf index when valid
   const previewPages = useMemo(() => {
@@ -316,31 +305,26 @@ export const BankSoalView: React.FC = () => {
     return pages.length > 0 ? pages : [previewQuestion.pageNumber];
   }, [previewQuestion]);
 
-  // Participants filtered for lottery (by Stage + Branch + Level)
+  // Participants filtered for lottery (by Stage + Branch)
   const eligibleLotteryParticipants = useMemo(() => {
     return participants.filter((p) => {
       const matchStage = !lotteryStage || p.stageName === lotteryStage;
       const matchBranch =
         lotteryBranch === 'Semua Cabang' || p.branchName.includes(lotteryBranch);
-      const matchLevel =
-        lotteryLevel === 'Semua Jenjang' || (p.levelName || '').includes(lotteryLevel);
-      return matchStage && matchBranch && matchLevel;
+      return matchStage && matchBranch;
     });
-  }, [participants, lotteryStage, lotteryBranch, lotteryLevel]);
+  }, [participants, lotteryStage, lotteryBranch]);
 
-  // Questions available for lottery (by Stage + Branch + Level)
+  // Questions available for lottery (by Stage + Branch)
   const eligibleLotteryQuestions = useMemo(() => {
     return questions.filter((q) => {
       const matchStage = !lotteryStage || q.stageName === lotteryStage;
       const qBranch = q.branchName || q.branchAndLevel || '';
-      const qLevel = q.levelName || q.branchAndLevel || '';
       const matchBranch =
         lotteryBranch === 'Semua Cabang' || qBranch.includes(lotteryBranch);
-      const matchLevel =
-        lotteryLevel === 'Semua Jenjang' || qLevel.includes(lotteryLevel);
-      return matchStage && matchBranch && matchLevel && q.status !== 'Nonaktif';
+      return matchStage && matchBranch && q.status !== 'Nonaktif';
     });
-  }, [questions, lotteryStage, lotteryBranch, lotteryLevel]);
+  }, [questions, lotteryStage, lotteryBranch]);
 
   // Initialize lottery participant & question pool selection when opening modal
   const handleOpenLotteryWorkflow = () => {
@@ -351,20 +335,17 @@ export const BankSoalView: React.FC = () => {
     setIsLotteryModalOpen(true);
   };
 
-  const syncLotteryPoolsOnFilterChange = (newStage: string, newBranch: string, newLevel: string) => {
+  const syncLotteryPoolsOnFilterChange = (newStage: string, newBranch: string) => {
     const newParts = participants.filter((p) => {
       const matchStage = !newStage || p.stageName === newStage;
       const matchBranch = newBranch === 'Semua Cabang' || p.branchName.includes(newBranch);
-      const matchLevel = newLevel === 'Semua Jenjang' || (p.levelName || '').includes(newLevel);
-      return matchStage && matchBranch && matchLevel;
+      return matchStage && matchBranch;
     });
     const newQs = questions.filter((q) => {
       const matchStage = !newStage || q.stageName === newStage;
       const qBranch = q.branchName || q.branchAndLevel || '';
-      const qLevel = q.levelName || q.branchAndLevel || '';
       const matchBranch = newBranch === 'Semua Cabang' || qBranch.includes(newBranch);
-      const matchLevel = newLevel === 'Semua Jenjang' || qLevel.includes(newLevel);
-      return matchStage && matchBranch && matchLevel && q.status !== 'Nonaktif';
+      return matchStage && matchBranch && q.status !== 'Nonaktif';
     });
     setSelectedParticipantIds(newParts.map((p) => p.id));
     setSelectedQuestionPoolIds(newQs.map((q) => q.id));
@@ -427,7 +408,6 @@ export const BankSoalView: React.FC = () => {
       const drawRes = await drawLotteryServer({
         stageName: lotteryStage,
         branchName: lotteryBranch !== 'Semua Cabang' ? lotteryBranch : undefined,
-        levelName: lotteryLevel !== 'Semua Jenjang' ? lotteryLevel : undefined,
         participantIds: selectedParticipantIds,
         questionPoolIds: selectedQuestionPoolIds,
         questionsPerParticipant: lotteryQuestionsPerParticipant,
@@ -455,7 +435,6 @@ export const BankSoalView: React.FC = () => {
     const res = commitLotteryDrawResults(lotteryDrawResults, lotteryStage, {
       questionPoolIds: selectedQuestionPoolIds,
       branchName: lotteryBranch !== 'Semua Cabang' ? lotteryBranch : undefined,
-      levelName: lotteryLevel !== 'Semua Jenjang' ? lotteryLevel : undefined
     });
 
     if (res.success) {
@@ -470,7 +449,6 @@ export const BankSoalView: React.FC = () => {
   // Open Add Question
   const handleOpenAdd = () => {
     const defaultCabang = activeCabangList[0]?.name || cabangList[0]?.name || '';
-    const defaultJenjang = activeJenjangList[0]?.name || jenjangList[0]?.name || 'Dewasa';
     const defaultStage = activeStages[0]?.name || stages[0]?.name || 'Penyisihan';
 
     setEditingQuestion(null);
@@ -484,7 +462,6 @@ export const BankSoalView: React.FC = () => {
     setFormPageEnd(306);
     setAllowManualPageOverride(false);
     setFormBranchName(defaultCabang);
-    setFormLevelName(defaultJenjang);
     setFormStage(defaultStage);
     setFormDesc('');
     setFormError('');
@@ -499,11 +476,6 @@ export const BankSoalView: React.FC = () => {
       q.branchAndLevel ||
       activeCabangList[0]?.name ||
       'Tilawah Dewasa Putra';
-    const matchedJenjang =
-      q.levelName ||
-      jenjangList.find((j) => q.branchAndLevel.includes(j.name))?.name ||
-      activeJenjangList[0]?.name ||
-      'Dewasa';
 
     const resolvedSurah = getSurah(q.surahNumber) || findSurahByName(q.surahName);
     const check = validateMaqraRange({
@@ -527,7 +499,6 @@ export const BankSoalView: React.FC = () => {
     setFormPageEnd(q.pageEnd || q.pageNumber);
     setAllowManualPageOverride(check.warnings.length > 0);
     setFormBranchName(matchedCabang);
-    setFormLevelName(matchedJenjang);
     setFormStage(q.stageName);
     setFormDesc(q.description || '');
     setFormError('');
@@ -578,8 +549,7 @@ export const BankSoalView: React.FC = () => {
     }
 
     const matchedBranch = cabangList.find((c) => c.name === formBranchName);
-    const matchedLevel = jenjangList.find((j) => j.name === formLevelName);
-    const combinedBranchAndLevel = [formBranchName, formLevelName].filter(Boolean).join(' ');
+    const combinedBranchAndLevel = formBranchName;
 
     if (editingQuestion) {
       updateQuestion(editingQuestion.id, {
@@ -595,8 +565,6 @@ export const BankSoalView: React.FC = () => {
         pageNumbers: pageNums,
         branchId: matchedBranch?.id,
         branchName: formBranchName,
-        levelId: matchedLevel?.id,
-        levelName: formLevelName,
         branchAndLevel: combinedBranchAndLevel,
         stageName: formStage,
         status: 'Aktif',
@@ -617,8 +585,6 @@ export const BankSoalView: React.FC = () => {
         pageNumbers: pageNums,
         branchId: matchedBranch?.id,
         branchName: formBranchName,
-        levelId: matchedLevel?.id,
-        levelName: formLevelName,
         branchAndLevel: combinedBranchAndLevel,
         stageName: formStage,
         status: 'Aktif',
@@ -637,12 +603,17 @@ export const BankSoalView: React.FC = () => {
     setImportFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
-      const rows = await parseWorkbookToRows(buffer);
+      const rows = await parseWorkbookToRows(buffer, QUESTION_IMPORT_HEADERS);
+      if (rows.length === 0) {
+        setImportValidation(null);
+        setFeedbackMessage({ type: 'error', text: 'Berkas tidak berisi baris data soal.' });
+        return;
+      }
       const validation = validateQuestionImportRows(rows, {
         cabangList,
-        jenjangList,
         stages,
-        existingQuestions: questions
+        existingQuestions: questions,
+        tenantId: currentTenant.id
       });
       setImportValidation(validation);
     } catch (err) {
@@ -728,7 +699,7 @@ export const BankSoalView: React.FC = () => {
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Kelola paket maqra terstruktur (Cabang, Jenjang, Babak), import Excel, serta undian acak Fisher-Yates
+            Kelola paket maqra terstruktur (Cabang, Babak), import Excel, serta undian acak Fisher-Yates
           </p>
         </div>
 
@@ -767,7 +738,7 @@ export const BankSoalView: React.FC = () => {
                   data-testid="download-question-template-btn"
                   onClick={() => {
                     setIsImportDropdownOpen(false);
-                    downloadQuestionExcelTemplate({ cabangList, jenjangList, stages });
+                    downloadQuestionExcelTemplate({ cabangList, stages });
                   }}
                   className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors"
                 >
@@ -1136,9 +1107,6 @@ export const BankSoalView: React.FC = () => {
             lotteryDrawLogs
               .filter((log) => {
                 if (selectedBranch !== 'Semua Cabang' && log.branchName && log.branchName !== selectedBranch) {
-                  return false;
-                }
-                if (selectedLevel !== 'Semua Jenjang' && log.levelName && log.levelName !== selectedLevel) {
                   return false;
                 }
                 if (selectedStage !== 'Semua Babak' && log.stageName !== selectedStage) {
@@ -1514,7 +1482,7 @@ export const BankSoalView: React.FC = () => {
                     setLotteryStage(newStg);
                     setLotteryDrawResults(null);
                     setLotteryFeedback('');
-                    syncLotteryPoolsOnFilterChange(newStg, lotteryBranch, lotteryLevel);
+                    syncLotteryPoolsOnFilterChange(newStg, lotteryBranch);
                   }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                 >
@@ -1535,7 +1503,7 @@ export const BankSoalView: React.FC = () => {
                     setLotteryBranch(newBr);
                     setLotteryDrawResults(null);
                     setLotteryFeedback('');
-                    syncLotteryPoolsOnFilterChange(lotteryStage, newBr, lotteryLevel);
+                    syncLotteryPoolsOnFilterChange(lotteryStage, newBr);
                   }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                 >
@@ -1630,7 +1598,7 @@ export const BankSoalView: React.FC = () => {
                               </span>
                               <span className="font-semibold text-slate-800">{p.name}</span>
                               <span className="text-xs text-slate-400 block">
-                                {p.branchName} · {p.levelName || 'Umum'}
+                                {p.branchName}
                               </span>
                             </div>
                           </div>
@@ -1770,13 +1738,13 @@ export const BankSoalView: React.FC = () => {
         </AppModal>
       )}
 
-      {/* Add / Edit Question Modal (Separated Cabang, Jenjang, Babak) */}
+      {/* Add / Edit Question Modal (Cabang & Babak) */}
       {isAddModalOpen && (
         <AppModal
           isOpen={isAddModalOpen}
           onClose={() => setIsAddModalOpen(false)}
           title={editingQuestion ? 'Edit Soal / Maqra' : 'Tambah Soal / Maqra Baru'}
-          subtitle="Pilih Cabang, Jenjang, dan Babak secara terpisah sesuai Master Data"
+          subtitle="Pilih Cabang dan Babak sesuai Master Data. Golongan menjadi bagian dari nama cabang."
           maxWidthClass="max-w-xl"
           footer={
             <div className="flex items-center justify-end gap-2.5">
@@ -2048,7 +2016,7 @@ export const BankSoalView: React.FC = () => {
           onClose={() => setIsImportModalOpen(false)}
           isBusy={isImporting}
           title="Import Bank Soal / Maqra dari Excel (.xlsx)"
-          subtitle="Validasi otomatis terhadap Cabang, Jenjang, Babak, dan rentang halaman Mushaf Madinah (1-604)"
+          subtitle="Validasi otomatis terhadap Cabang, Babak milik cabang itu, dan rentang halaman Mushaf Madinah (1-604)"
           maxWidthClass="max-w-3xl"
           footer={
             <div className="flex items-center justify-between">
@@ -2097,10 +2065,10 @@ export const BankSoalView: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs font-bold text-slate-900">
-                    {importFileName || 'Pilih file Excel (.xlsx / .xls) sesuai Template Bank Soal'}
+                    {importFileName || 'Pilih file Excel (.xlsx) atau CSV sesuai Template Bank Soal'}
                   </p>
                   <p className="text-xs text-slate-500">
-                    Pastikan nama Cabang, Jenjang, dan Babak sesuai dengan sheet Referensi Master Data.
+                    Pastikan nama Cabang dan Babak sesuai dengan sheet Referensi Master Data. Babak harus milik cabang soal.
                   </p>
                 </div>
               </div>
@@ -2108,8 +2076,11 @@ export const BankSoalView: React.FC = () => {
                 Pilih File Excel
                 <input
                   type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleExcelFileChange}
+                  accept=".xlsx,.csv"
+                  onChange={(e) => {
+                    void handleExcelFileChange(e);
+                    e.target.value = '';
+                  }}
                   data-testid="question-excel-file-input"
                   className="hidden"
                 />
@@ -2169,7 +2140,7 @@ export const BankSoalView: React.FC = () => {
                             <th className="py-1.5 px-3">Kode</th>
                             <th className="py-1.5 px-3">Judul Maqra</th>
                             <th className="py-1.5 px-3">Halaman</th>
-                            <th className="py-1.5 px-3">Cabang & Jenjang</th>
+                            <th className="py-1.5 px-3">Cabang & Babak</th>
                             <th className="py-1.5 px-3">Babak</th>
                           </tr>
                         </thead>
@@ -2184,7 +2155,7 @@ export const BankSoalView: React.FC = () => {
                                 {r.pageStart}-{r.pageEnd}
                               </td>
                               <td className="py-1.5 px-3">
-                                {r.branchName} ({r.levelName})
+                                {r.branchName} ({r.stageName})
                               </td>
                               <td className="py-1.5 px-3 font-mono">{r.stageName}</td>
                             </tr>

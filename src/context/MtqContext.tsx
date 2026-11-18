@@ -75,7 +75,8 @@ import { outboxSyncService, OutboxSummary, OutboxRecord, friendlySyncError } fro
 import {
   fisherYatesShuffle,
   ParsedParticipantImportRow,
-  ParsedQuestionImportRow
+  ParsedQuestionImportRow,
+  ParsedKafilahImportRow
 } from '../utils/excelHelper';
 
 export type ViewType =
@@ -109,6 +110,9 @@ export interface LocalNotification {
   isRead: boolean;
   module?: string;
 }
+
+/** Hasil penyimpanan ke database (mode live). undefined = mode lokal/demo, tersimpan di perangkat. */
+export type PersistPromise = Promise<{ success: boolean; message: string }>;
 
 interface MtqContextType {
   notifications: LocalNotification[];
@@ -250,11 +254,11 @@ interface MtqContextType {
   ) => AssignedMaqraItem[];
 
   // Master Data & Config (Tenant Scoped)
-  addKafilah: (kafilah: Omit<Kafilah, 'id' | 'tenantId'>) => void;
-  updateKafilah: (id: string, updated: Partial<Kafilah>) => void;
+  addKafilah: (kafilah: Omit<Kafilah, 'id' | 'tenantId'>) => PersistPromise | undefined;
+  updateKafilah: (id: string, updated: Partial<Kafilah>) => PersistPromise | undefined;
   deleteKafilah: (id: string) => { success: boolean; message: string };
-  addParticipant: (part: Omit<Participant, 'id' | 'tenantId'>) => { success: boolean; message: string };
-  updateParticipant: (id: string, updated: Partial<Participant>) => { success: boolean; message: string };
+  addParticipant: (part: Omit<Participant, 'id' | 'tenantId'>) => { success: boolean; message: string; persisted?: PersistPromise };
+  updateParticipant: (id: string, updated: Partial<Participant>) => { success: boolean; message: string; persisted?: PersistPromise };
   deleteParticipant: (id: string) => { success: boolean; message: string };
   verifyParticipant: (
     participantId: string,
@@ -264,12 +268,15 @@ interface MtqContextType {
   importParticipantsBatch: (
     rows: ParsedParticipantImportRow[]
   ) => Promise<{ total: number; succeeded: number; failed: number; errors: string[] }>;
-  addQuestion: (q: Omit<Question, 'id' | 'tenantId'>) => void;
-  updateQuestion: (id: string, updated: Partial<Question>) => void;
+  addQuestion: (q: Omit<Question, 'id' | 'tenantId'>) => PersistPromise | undefined;
+  updateQuestion: (id: string, updated: Partial<Question>) => PersistPromise | undefined;
   deleteQuestion: (id: string) => { success: boolean; message: string };
   importQuestionsBatch: (
     rows: ParsedQuestionImportRow[]
   ) => Promise<{ total: number; succeeded: number; failed: number; errors: string[] }>;
+  importKafilahsBatch: (
+    rows: ParsedKafilahImportRow[]
+  ) => Promise<{ total: number; succeeded: number; failed: number; errors: string[]; created: number; updated: number }>;
   assignMaqraToParticipant: (
     participantId: string,
     questionId: string,
@@ -353,8 +360,8 @@ interface MtqContextType {
   deleteErrorCategory: (id: string) => { success: boolean; message: string };
 
   // Stages & Progressions
-  addStage: (stage: Omit<CompetitionStage, 'id' | 'tenantId'>) => void;
-  updateStage: (id: string, updated: Partial<CompetitionStage>) => void;
+  addStage: (stage: Omit<CompetitionStage, 'id' | 'tenantId'>) => { success: boolean; message: string };
+  updateStage: (id: string, updated: Partial<CompetitionStage>) => { success: boolean; message: string };
   deleteStage: (id: string) => { success: boolean; message: string };
   advanceQualifiers: (
     currentStageNameOrParams:
@@ -3103,7 +3110,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Resolusi rubrik aktif dinamis sesuai cabang lomba peserta (P0)
-    const activeRubric = getActiveRubricForBranch(part.branchName, part.branchId, part.levelId, part.levelName);
+    const activeRubric = getActiveRubricForBranch(part.branchName, part.branchId);
     if (!activeRubric) {
       console.warn(`Pembaruan nilai dibatalkan: Cabang "${part.branchName}" belum memiliki rubrik aktif yang valid.`);
       return;
@@ -4030,7 +4037,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Kafilah Actions (Tenant Scoped)
-  const addKafilah = (data: Omit<Kafilah, 'id' | 'tenantId'>) => {
+  const addKafilah = (data: Omit<Kafilah, 'id' | 'tenantId'>): PersistPromise | undefined => {
+    let persisted: PersistPromise | undefined;
     const newKafilah: Kafilah = {
       ...data,
       id: generateUuid(),
@@ -4039,7 +4047,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setKafilahs((prev) => [...prev, newKafilah]);
     if (isLiveDbActive) {
       setSyncStatus('Menyimpan kafilah ke database...');
-      void supabaseDataService
+      persisted = supabaseDataService
         .upsertKafilah({
           ...newKafilah,
           tenantId: toDeterministicUuid(currentTenantId)
@@ -4052,11 +4060,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setSyncStatus('Kafilah Tersimpan di Database');
             setLastSyncTime(getWibTime());
           }
+          return res;
         });
     }
+    return persisted;
   };
 
-  const updateKafilah = (id: string, updated: Partial<Kafilah>) => {
+  const updateKafilah = (id: string, updated: Partial<Kafilah>): PersistPromise | undefined => {
+    let persisted: PersistPromise | undefined;
     const existing = kafilahs.find((k) => k.id === id && k.tenantId === currentTenantId);
     if (!existing) return;
     const merged: Kafilah = { ...existing, ...updated };
@@ -4076,7 +4087,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (isLiveDbActive) {
       setSyncStatus('Memperbarui kafilah di database...');
-      void supabaseDataService
+      persisted = supabaseDataService
         .upsertKafilah({
           ...merged,
           id: toDeterministicUuid(merged.id),
@@ -4092,8 +4103,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setSyncStatus('Kafilah Diperbarui di Database');
             setLastSyncTime(getWibTime());
           }
+          return res;
         });
     }
+    return persisted;
   };
 
   const deleteKafilah = (id: string): { success: boolean; message: string } => {
@@ -4135,7 +4148,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Participant Actions (Tenant Scoped)
-  const addParticipant = (data: Omit<Participant, 'id' | 'tenantId'>): { success: boolean; message: string } => {
+  const addParticipant = (
+    data: Omit<Participant, 'id' | 'tenantId'>
+  ): { success: boolean; message: string; persisted?: PersistPromise } => {
+    let persisted: PersistPromise | undefined;
     const idTrimmed = (data.participantId || '').trim();
     if (idTrimmed) {
       const existingId = participants.find(
@@ -4196,6 +4212,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: newPartId,
       tenantId: currentTenantId,
       branchId,
+      // Jenjang tidak dipakai: golongan menjadi bagian dari nama cabang
+      levelId: undefined,
+      levelName: undefined,
       verificationStatus: data.verificationStatus || 'Diajukan',
       questionId: hasQuestion ? data.questionId : '',
       assignedMaqra: hasQuestion ? data.assignedMaqra : 'Belum Ditetapkan',
@@ -4232,8 +4251,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (isLiveDbActive) {
       setSyncStatus('Menyimpan peserta ke database...');
-      const matchedLevel = jenjangList.find((j) => j.name === data.levelName);
-      void supabaseDataService
+      persisted = supabaseDataService
         .upsertParticipantWithStage({
           participant: {
             ...newPart,
@@ -4246,8 +4264,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             tenantId: toDeterministicUuid(currentTenantId),
             stageId: toDeterministicUuid(stageId)
           },
-          levelId: matchedLevel?.id ? toDeterministicUuid(matchedLevel.id) : null,
-          autoCreateMissingMaster: true
+          // Jenjang tidak dipakai: golongan menjadi bagian dari nama cabang
+          levelId: null,
+          // Cabang & babak wajib sudah ada di Master Data; jangan pernah membuat master data otomatis
+          autoCreateMissingMaster: false
         })
         .then((res) => {
           if (!res.success) {
@@ -4258,6 +4278,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setSyncStatus('Peserta Tersimpan di Database');
             setLastSyncTime(getWibTime());
           }
+          return res;
         });
     }
 
@@ -4282,14 +4303,16 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return {
       success: true,
-      message: `Peserta "${newPart.name}" (${newPart.participantId}) berhasil didaftarkan.`
+      message: `Peserta "${newPart.name}" (${newPart.participantId}) berhasil didaftarkan.`,
+      persisted
     };
   };
 
   const updateParticipant = (
     id: string,
     updated: Partial<Participant>
-  ): { success: boolean; message: string } => {
+  ): { success: boolean; message: string; persisted?: PersistPromise } => {
+    let persisted: PersistPromise | undefined;
     const existing = participants.find((p) => p.id === id && p.tenantId === currentTenantId);
     if (!existing) {
       return { success: false, message: 'Peserta tidak ditemukan.' };
@@ -4371,6 +4394,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const merged: Participant = {
       ...existing,
       ...updated,
+      levelId: undefined,
+      levelName: undefined,
       participantId: nextParticipantId,
       branchId: resolvedBranchId,
       branchName: nextBranchName,
@@ -4408,8 +4433,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (isLiveDbActive) {
       setSyncStatus('Memperbarui peserta di database...');
-      const matchedLevel = jenjangList.find((j) => j.name === merged.levelName);
-      void supabaseDataService
+      persisted = supabaseDataService
         .updateParticipantRecord(
           {
             ...merged,
@@ -4419,7 +4443,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             branchId: toDeterministicUuid(resolvedBranchId)
           },
           toDeterministicUuid(resolvedBranchId),
-          matchedLevel?.id ? toDeterministicUuid(matchedLevel.id) : undefined
+          undefined
         )
         .then((res) => {
           if (!res.success) {
@@ -4431,12 +4455,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setSyncStatus('Data Peserta Diperbarui di Database');
             setLastSyncTime(getWibTime());
           }
+          return res;
         });
     }
 
     return {
       success: true,
-      message: `Data peserta "${merged.name}" (${merged.participantId}) berhasil diperbarui.`
+      message: `Data peserta "${merged.name}" (${merged.participantId}) berhasil diperbarui.`,
+      persisted
     };
   };
 
@@ -4589,18 +4615,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Question & Maqra Actions (Tenant Scoped)
-  const addQuestion = (data: Omit<Question, 'id' | 'tenantId'>) => {
+  const addQuestion = (data: Omit<Question, 'id' | 'tenantId'>): PersistPromise | undefined => {
+    let persisted: PersistPromise | undefined;
     const matchedBranch = cabangList.find(
       (c) =>
         (data.branchId && c.id === data.branchId) ||
         (data.branchName && c.name === data.branchName) ||
         (data.branchAndLevel && (data.branchAndLevel.includes(c.name) || c.name.includes(data.branchAndLevel)))
-    );
-    const matchedLevel = jenjangList.find(
-      (j) =>
-        (data.levelId && j.id === data.levelId) ||
-        (data.levelName && j.name === data.levelName) ||
-        (data.branchAndLevel && data.branchAndLevel.toLowerCase().includes(j.name.toLowerCase()))
     );
     const targetStageName = data.stageName || data.stage || 'Penyisihan';
     // Soal diikat ke babak milik cabangnya sendiri; tidak pernah ke babak cabang lain.
@@ -4612,12 +4633,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       branchName: data.branchName || matchedBranch?.name
     });
     const resolvedBranchName = data.branchName || matchedBranch?.name || data.branchAndLevel || 'Tilawah Dewasa Putra';
-    const resolvedLevelName = data.levelName || matchedLevel?.name || '';
-    const computedBranchAndLevel =
-      data.branchAndLevel ||
-      (resolvedLevelName && !resolvedBranchName.includes(resolvedLevelName)
-        ? `${resolvedBranchName} - ${resolvedLevelName}`
-        : resolvedBranchName);
+    const computedBranchAndLevel = resolvedBranchName;
 
     const newQ: Question = {
       ...data,
@@ -4625,8 +4641,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       tenantId: currentTenantId,
       branchId: data.branchId || matchedBranch?.id,
       branchName: resolvedBranchName,
-      levelId: data.levelId || matchedLevel?.id,
-      levelName: resolvedLevelName || undefined,
+      levelId: undefined,
+      levelName: undefined,
       stageId: matchedStage?.id,
       stage: targetStageName,
       stageName: targetStageName,
@@ -4634,7 +4650,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setQuestions((prev) => [...prev, newQ]);
     if (isLiveDbActive) {
-      void supabaseDataService
+      persisted = supabaseDataService
         .upsertQuestion(
           {
             ...newQ,
@@ -4642,7 +4658,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
           newQ.branchId ? toDeterministicUuid(newQ.branchId) : undefined,
           newQ.stageId ? toDeterministicUuid(newQ.stageId) : undefined,
-          newQ.levelId ? toDeterministicUuid(newQ.levelId) : undefined
+          undefined
         )
         .then((res) => {
           if (!res.success) {
@@ -4652,11 +4668,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setSyncStatus('Soal Maqra Tersimpan di Database');
             setLastSyncTime(getWibTime());
           }
+          return res;
         });
     }
+    return persisted;
   };
 
-  const updateQuestion = (id: string, updated: Partial<Question>) => {
+  const updateQuestion = (id: string, updated: Partial<Question>): PersistPromise | undefined => {
+    let persisted: PersistPromise | undefined;
     const existing = questions.find((q) => q.id === id && q.tenantId === currentTenantId);
     if (!existing) return;
     const rawMerged: Question = { ...existing, ...updated };
@@ -4665,11 +4684,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (rawMerged.branchId && c.id === rawMerged.branchId) ||
         (rawMerged.branchName && c.name === rawMerged.branchName) ||
         (rawMerged.branchAndLevel && (rawMerged.branchAndLevel.includes(c.name) || c.name.includes(rawMerged.branchAndLevel)))
-    );
-    const matchedLevel = jenjangList.find(
-      (j) =>
-        (rawMerged.levelId && j.id === rawMerged.levelId) ||
-        (rawMerged.levelName && j.name === rawMerged.levelName)
     );
     const targetStageName = rawMerged.stageName || rawMerged.stage || 'Penyisihan';
     // Soal diikat ke babak milik cabangnya sendiri; tidak pernah ke babak cabang lain.
@@ -4684,8 +4698,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...rawMerged,
       branchId: rawMerged.branchId || matchedBranch?.id,
       branchName: rawMerged.branchName || matchedBranch?.name,
-      levelId: rawMerged.levelId || matchedLevel?.id,
-      levelName: rawMerged.levelName || matchedLevel?.name,
+      levelId: undefined,
+      levelName: undefined,
+      branchAndLevel: rawMerged.branchName || matchedBranch?.name || rawMerged.branchAndLevel,
       stageId: matchedStage?.id,
       stage: targetStageName,
       stageName: targetStageName
@@ -4694,7 +4709,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((q) => (q.id === id && q.tenantId === currentTenantId ? merged : q))
     );
     if (isLiveDbActive) {
-      void supabaseDataService
+      persisted = supabaseDataService
         .upsertQuestion(
           {
             ...merged,
@@ -4703,7 +4718,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
           merged.branchId ? toDeterministicUuid(merged.branchId) : undefined,
           merged.stageId ? toDeterministicUuid(merged.stageId) : undefined,
-          merged.levelId ? toDeterministicUuid(merged.levelId) : undefined
+          undefined
         )
         .then((res) => {
           if (!res.success) {
@@ -4715,8 +4730,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setSyncStatus('Soal Maqra Diperbarui di Database');
             setLastSyncTime(getWibTime());
           }
+          return res;
         });
     }
+    return persisted;
   };
 
   const importParticipantsBatch = async (
@@ -4727,6 +4744,33 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const errors: string[] = [];
     const seenCodesInBatch = new Set<string>();
     const seenLotteryByBranchInBatch = new Set<string>();
+    // Mode live: tunggu hasil database tiap baris supaya laporan impor jujur (bukan sekadar tampil di layar)
+    const pending: Array<Promise<void>> = [];
+    const track = (label: string, persisted?: PersistPromise) => {
+      if (!persisted) {
+        succeeded += 1;
+        return;
+      }
+      pending.push(
+        persisted
+          .then((res) => {
+            if (res.success) succeeded += 1;
+            else {
+              failed += 1;
+              errors.push(`${label}: ${friendlySyncError(res.message)}`);
+            }
+          })
+          .catch((err) => {
+            failed += 1;
+            errors.push(`${label}: ${err instanceof Error ? err.message : 'Gagal menyimpan ke database'}`);
+          })
+      );
+    };
+    const flush = async (force = false) => {
+      if (pending.length >= 8 || (force && pending.length > 0)) {
+        await Promise.all(pending.splice(0));
+      }
+    };
 
     for (const row of rows) {
       const normalizedCode = row.participantId.trim().toUpperCase();
@@ -4763,8 +4807,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           kafilahName: row.kafilahName,
           branchId: row.branchId,
           branchName: row.branchName,
-          levelId: row.levelId,
-          levelName: row.levelName,
           stageId: row.stageId,
           stageName: row.stageName,
           status: row.status
@@ -4776,7 +4818,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         seenCodesInBatch.add(normalizedCode);
         seenLotteryByBranchInBatch.add(normalizedLotteryKey);
-        succeeded += 1;
+        track(`${row.participantId} (${row.name})`, updRes.persisted);
       } else {
         const res = addParticipant({
           adminSequenceNumber: row.adminSequenceNumber,
@@ -4792,8 +4834,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           kafilahName: row.kafilahName,
           branchId: row.branchId,
           branchName: row.branchName,
-          levelId: row.levelId,
-          levelName: row.levelName,
           stageId: row.stageId,
           stageName: row.stageName,
           questionId: '',
@@ -4804,15 +4844,63 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (res.success) {
           seenCodesInBatch.add(normalizedCode);
           seenLotteryByBranchInBatch.add(normalizedLotteryKey);
-          succeeded += 1;
+          track(`${row.participantId} (${row.name})`, res.persisted);
         } else {
           failed += 1;
           errors.push(`${row.participantId} (${row.name}): ${res.message}`);
         }
       }
+      await flush();
     }
+    await flush(true);
 
     return { total: rows.length, succeeded, failed, errors };
+  };
+
+  // Impor Grup / Kafilah: kode yang sudah ada diperbarui, kode baru ditambahkan.
+  // Mode live menunggu hasil database tiap baris agar laporan impor jujur.
+  const importKafilahsBatch = async (
+    rows: ParsedKafilahImportRow[]
+  ): Promise<{ total: number; succeeded: number; failed: number; errors: string[]; created: number; updated: number }> => {
+    let succeeded = 0;
+    let failed = 0;
+    let created = 0;
+    let updated = 0;
+    const errors: string[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const codeKey = row.code.trim().toUpperCase();
+      if (seen.has(codeKey)) {
+        failed += 1;
+        errors.push(`${row.code}: Kode grup duplikat di dalam berkas.`);
+        continue;
+      }
+      seen.add(codeKey);
+      const existing =
+        kafilahs.find((k) => k.tenantId === currentTenantId && k.id === row.existingId) ||
+        kafilahs.find((k) => k.tenantId === currentTenantId && k.code.trim().toUpperCase() === codeKey);
+      const payload = {
+        code: codeKey,
+        name: row.name,
+        region: row.region,
+        contactPerson: row.contactPerson,
+        contactPhone: row.contactPhone,
+        status: row.status
+      };
+      const persisted = existing
+        ? updateKafilah(existing.id, payload)
+        : addKafilah({ ...payload, participantCount: 0 });
+      const res = persisted ? await persisted : { success: true, message: '' };
+      if (res.success) {
+        succeeded += 1;
+        if (existing) updated += 1;
+        else created += 1;
+      } else {
+        failed += 1;
+        errors.push(`${row.code} (${row.name}): ${friendlySyncError(res.message)}`);
+      }
+    }
+    return { total: rows.length, succeeded, failed, errors, created, updated };
   };
 
   const importQuestionsBatch = async (
@@ -4822,6 +4910,27 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let failed = 0;
     const errors: string[] = [];
     const seenQuestionCodes = new Set<string>();
+    const pending: Array<Promise<void>> = [];
+    const track = (label: string, persisted?: PersistPromise) => {
+      if (!persisted) {
+        succeeded += 1;
+        return;
+      }
+      pending.push(
+        persisted
+          .then((res) => {
+            if (res.success) succeeded += 1;
+            else {
+              failed += 1;
+              errors.push(`${label}: ${friendlySyncError(res.message)}`);
+            }
+          })
+          .catch((err) => {
+            failed += 1;
+            errors.push(`${label}: ${err instanceof Error ? err.message : 'Gagal menyimpan ke database'}`);
+          })
+      );
+    };
 
     for (const row of rows) {
       const normalizedCode = row.code.trim().toUpperCase();
@@ -4830,6 +4939,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         errors.push(`${row.code}: Kode soal duplikat di dalam file import yang sama.`);
         continue;
       }
+      let persisted: PersistPromise | undefined;
       try {
         const existingByCode = questions.find(
           (q) =>
@@ -4837,7 +4947,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             q.code.trim().toUpperCase() === normalizedCode
         );
         if (existingByCode) {
-          updateQuestion(existingByCode.id, {
+          persisted = updateQuestion(existingByCode.id, {
             code: row.code,
             title: row.title,
             surahName: row.surahName,
@@ -4849,8 +4959,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             pageEnd: row.pageEnd,
             branchId: row.branchId,
             branchName: row.branchName,
-            levelId: row.levelId,
-            levelName: row.levelName,
             stageId: row.stageId,
             stage: row.stage,
             stageName: row.stage,
@@ -4859,7 +4967,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             description: row.description
           });
         } else {
-          addQuestion({
+          persisted = addQuestion({
             code: row.code,
             title: row.title,
             surahName: row.surahName,
@@ -4871,8 +4979,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             pageEnd: row.pageEnd,
             branchId: row.branchId,
             branchName: row.branchName,
-            levelId: row.levelId,
-            levelName: row.levelName,
             stageId: row.stageId,
             stage: row.stage,
             stageName: row.stage,
@@ -4882,13 +4988,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
         seenQuestionCodes.add(normalizedCode);
-        succeeded += 1;
+        track(row.code, persisted);
+        if (pending.length >= 8) await Promise.all(pending.splice(0));
       } catch (err) {
         failed += 1;
         errors.push(`${row.code}: ${err instanceof Error ? err.message : 'Gagal menyimpan soal'}`);
       }
     }
 
+    await Promise.all(pending.splice(0));
     return { total: rows.length, succeeded, failed, errors };
   };
 
@@ -5005,7 +5113,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!validation.valid) {
       return {
         success: false,
-        message: validation.reason || 'Soal tidak memenuhi kriteria cabang, jenjang, atau babak peserta.'
+        message: validation.reason || 'Soal tidak memenuhi kriteria cabang atau babak peserta.'
       };
     }
 
@@ -5500,9 +5608,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 4. Resolve branch and level metadata for atomic RPC and audit logging
     const firstPart = participants.find((p) => p.id === results[0]?.participantId && p.tenantId === currentTenantId);
     const resolvedBranchName = metadata?.branchName || firstPart?.branchName || 'Semua Cabang';
-    const resolvedLevelName = metadata?.levelName || firstPart?.levelName || undefined;
+    const resolvedLevelName: string | undefined = undefined; // jenjang tidak dipakai
     const matchedBranchObj = cabangList.find((c) => c.name === resolvedBranchName);
-    const matchedLevelObj = resolvedLevelName ? jenjangList.find((j) => j.name === resolvedLevelName) : undefined;
 
     // Persist assigned_maqras atomically to live database if connected via commit_lottery_draw RPC (P0-04)
     if (isLiveDbActive) {
@@ -5513,7 +5620,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           stageName,
           branchId: matchedBranchObj ? toDeterministicUuid(matchedBranchObj.id) : null,
           branchName: resolvedBranchName !== 'Semua Cabang' ? resolvedBranchName : null,
-          levelId: matchedLevelObj ? toDeterministicUuid(matchedLevelObj.id) : null,
+          levelId: null,
           levelName: resolvedLevelName || null,
           actorId: authenticatedProfile?.authUserId || null,
           actorName: currentUser.name || 'Administrator MTQ',
@@ -5586,7 +5693,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stageName,
       branchId: matchedBranchObj?.id,
       branchName: resolvedBranchName,
-      levelId: matchedLevelObj?.id,
+      levelId: undefined,
       levelName: resolvedLevelName,
       actorId: currentUser.id,
       actorName: `${currentUser.name} (${currentUser.role})`,
@@ -5730,7 +5837,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (partEligibleQuestions.length < questionsPerParticipant) {
         return {
           success: false,
-          message: `Pool soal aktif yang dipilih tidak mencukupi untuk peserta ${part.name} (${part.branchName}${part.levelName ? ` - ${part.levelName}` : ''}). Dibutuhkan minimal ${questionsPerParticipant} soal unik yang sesuai cabang, jenjang, dan babak, namun hanya tersedia ${partEligibleQuestions.length} soal di dalam pool.`
+          message: `Pool soal aktif yang dipilih tidak mencukupi untuk peserta ${part.name} (${part.branchName}). Dibutuhkan minimal ${questionsPerParticipant} soal unik yang sesuai cabang, jenjang, dan babak, namun hanya tersedia ${partEligibleQuestions.length} soal di dalam pool.`
         };
       }
     }
@@ -5881,14 +5988,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const stageId = targetStageObj?.id || toDeterministicUuid('stage-penyisihan');
     const resolvedBranchName = branchName || targetParticipants[0]?.branchName || 'Semua Cabang';
     const matchedBranchObj = cabangList.find((c) => c.name === resolvedBranchName);
-    const matchedLevelObj = levelName ? jenjangList.find((j) => j.name === levelName) : undefined;
 
     if (isLiveDbActive) {
       const rpcRes = await supabaseDataService.drawLotteryServerRpc({
         tenantId: toDeterministicUuid(currentTenantId),
         stageId: toDeterministicUuid(stageId),
         branchId: matchedBranchObj ? toDeterministicUuid(matchedBranchObj.id) : null,
-        levelId: matchedLevelObj ? toDeterministicUuid(matchedLevelObj.id) : null,
+        levelId: null,
         questionsPerParticipant,
         drawMode,
         notes: notes || null,
@@ -6051,8 +6157,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stageName,
         branchId: matchedBranchObj?.id,
         branchName: resolvedBranchName,
-        levelId: matchedLevelObj?.id,
-        levelName,
+        levelId: undefined,
+        levelName: undefined,
         actorId: currentUser.id,
         actorName: `${currentUser.name} (${currentUser.role})`,
         questionsPerParticipant,
@@ -6161,8 +6267,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stageName,
         branchId: matchedBranchObj?.id,
         branchName: resolvedBranchName,
-        levelId: matchedLevelObj?.id,
-        levelName,
+        levelId: undefined,
+        levelName: undefined,
         actorId: currentUser.id,
         actorName: `${currentUser.name} (${currentUser.role})`,
         questionsPerParticipant: 0,
@@ -6286,7 +6392,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!item) return { success: false, message: 'Jenjang tidak ditemukan.' };
 
     const usedByParticipants = participants.filter((p) =>
-      p.tenantId === currentTenantId && (p.levelName === item.name || item.name.includes(p.levelName) || p.levelName.includes(item.code))
+      p.tenantId === currentTenantId && (p.levelName === item.name || p.levelId === item.id)
     ).length;
 
     const usedByQuestions = questions.filter((q) =>
@@ -6932,16 +7038,66 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Stage Management (Tenant Scoped)
-  const addStage = (stageData: Omit<CompetitionStage, 'id' | 'tenantId'>) => {
-    const matchedBranch = cabangList.find(
-      (c) => stageData.branchName && (c.name === stageData.branchName || stageData.branchName.includes(c.name))
+  // Aturan babak dipakai bersama oleh Master Data dan Manajemen Babak
+  const validateStageInput = (
+    candidate: CompetitionStage,
+    ignoreId?: string
+  ): string | null => {
+    const name = (candidate.name || '').trim();
+    if (!name) return 'Nama babak wajib diisi.';
+    if (name.length > 60) return 'Nama babak maksimal 60 karakter.';
+    const isGeneric = !candidate.branchName || candidate.branchName === 'Semua Cabang';
+    if (!isGeneric && !candidate.branchId) {
+      return `Cabang "${candidate.branchName}" tidak ditemukan di Master Data Cabang.`;
+    }
+    if (!Number.isInteger(candidate.order) || candidate.order < 1) return 'Urutan babak harus bilangan bulat mulai 1.';
+    if (!Number.isInteger(candidate.qualificationQuota) || candidate.qualificationQuota < 1) {
+      return 'Kuota lolos harus bilangan bulat minimal 1.';
+    }
+    const champ = candidate.championCount ?? 3;
+    if (!Number.isInteger(champ) || champ < 1 || champ > 10) return 'Jumlah juara final harus 1 sampai 10.';
+    const sameBranch = stages.filter(
+      (s) =>
+        s.tenantId === currentTenantId &&
+        s.id !== ignoreId &&
+        (isGeneric
+          ? !s.branchId && (!s.branchName || s.branchName === 'Semua Cabang')
+          : s.branchId === candidate.branchId || s.branchName === candidate.branchName)
     );
+    if (sameBranch.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) {
+      return `Babak "${name}" sudah ada di cabang ${isGeneric ? 'umum' : `"${candidate.branchName}"`}.`;
+    }
+    if (sameBranch.some((s) => s.order === candidate.order)) {
+      return `Urutan ${candidate.order} sudah dipakai babak lain di cabang ${isGeneric ? 'umum' : `"${candidate.branchName}"`}.`;
+    }
+    return null;
+  };
+
+  /** Sudah ada lembar penilaian (draf atau final) di babak ini? */
+  const stageHasAssessments = (stage: CompetitionStage): boolean =>
+    assessments.some(
+      (a) =>
+        a.tenantId === currentTenantId &&
+        (a.stageId ? a.stageId === stage.id || a.stageId === toDeterministicUuid(stage.id) : false)
+    );
+
+  const addStage = (stageData: Omit<CompetitionStage, 'id' | 'tenantId'>): { success: boolean; message: string } => {
+    const isGeneric = !stageData.branchName || stageData.branchName === 'Semua Cabang';
+    const matchedBranch = isGeneric
+      ? undefined
+      : cabangList.find((c) => (stageData.branchId && c.id === stageData.branchId) || c.name === stageData.branchName);
     const newStage: CompetitionStage = {
       ...stageData,
+      name: (stageData.name || '').trim(),
       id: generateUuid(),
       tenantId: currentTenantId,
-      branchId: stageData.branchId || matchedBranch?.id
+      branchId: isGeneric ? undefined : matchedBranch?.id,
+      branchName: isGeneric ? 'Semua Cabang' : matchedBranch?.name || stageData.branchName,
+      status: stageData.status === 'Aktif' ? 'Aktif' : 'Menunggu',
+      isFinalized: false
     };
+    const invalid = validateStageInput(newStage);
+    if (invalid) return { success: false, message: invalid };
     setStages((prev) => [...prev, newStage]);
     // P1-04: Keep CompetitionRuleConfig.quotaPerStage synchronized with CompetitionStage.qualificationQuota
     if (typeof newStage.qualificationQuota === 'number') {
@@ -6982,22 +7138,54 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
     }
+    return { success: true, message: `Babak "${newStage.name}" untuk ${newStage.branchName} berhasil ditambahkan.` };
   };
 
-  const updateStage = (id: string, updated: Partial<CompetitionStage>) => {
+  const updateStage = (id: string, updated: Partial<CompetitionStage>): { success: boolean; message: string } => {
     const existing = stages.find((s) => s.id === id && s.tenantId === currentTenantId);
-    if (!existing) return;
+    if (!existing) return { success: false, message: 'Babak tidak ditemukan.' };
     // Jangan izinkan perubahan status ke Selesai / isFinalized melalui updateStage biasa
     if (existing.isFinalized) {
-      setSyncStatus('Babak yang sudah disahkan bersifat terkunci dan tidak dapat diubah.');
-      return;
+      const msg = 'Babak yang sudah disahkan bersifat terkunci dan tidak dapat diubah.';
+      setSyncStatus(msg);
+      return { success: false, message: msg };
     }
+    const nextBranchName = updated.branchName ?? existing.branchName;
+    const isGeneric = !nextBranchName || nextBranchName === 'Semua Cabang';
+    const matchedBranch = isGeneric
+      ? undefined
+      : cabangList.find((c) => (updated.branchId && c.id === updated.branchId) || c.name === nextBranchName);
     const safeUpdated: Partial<CompetitionStage> = {
       ...updated,
+      name: (updated.name ?? existing.name).trim(),
+      branchName: isGeneric ? 'Semua Cabang' : matchedBranch?.name || nextBranchName,
+      branchId: isGeneric ? undefined : matchedBranch?.id ?? existing.branchId,
       isFinalized: existing.isFinalized,
       status: updated.status === 'Selesai' ? existing.status : updated.status || existing.status
     };
     const merged: CompetitionStage = { ...existing, ...safeUpdated };
+
+    // Setelah penilaian dimulai, nama/cabang/urutan dikunci: mengubahnya memindahkan lembar penilaian.
+    // Kuota dan jumlah juara masih boleh dikoreksi sampai babak disahkan.
+    const identityChange =
+      merged.branchId !== existing.branchId || merged.order !== existing.order || merged.name !== existing.name;
+    const resultChange =
+      merged.qualificationQuota !== existing.qualificationQuota ||
+      (merged.championCount ?? 3) !== (existing.championCount ?? 3);
+    if (identityChange && stageHasAssessments(existing)) {
+      return {
+        success: false,
+        message: `Babak "${existing.name}" sudah memiliki lembar penilaian. Nama, cabang, dan urutan babak tidak dapat diubah lagi.`
+      };
+    }
+    if (resultChange && existing.isFinalized) {
+      return {
+        success: false,
+        message: `Babak "${existing.name}" sudah disahkan. Kuota lolos dan jumlah juara tidak dapat diubah lagi.`
+      };
+    }
+    const invalid = validateStageInput(merged, id);
+    if (invalid) return { success: false, message: invalid };
 
     setStages((prev) =>
       prev.map((s) =>
@@ -7045,6 +7233,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
     }
+    return { success: true, message: `Konfigurasi babak "${merged.name}" diperbarui.` };
   };
 
   const deleteStage = (id: string): { success: boolean; message: string } => {
@@ -7788,7 +7977,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!resolvedRubricFieldId && asg.judgeField) {
       // Dahulukan rubrik aktif milik cabang ini: nama bidang seperti "Tajwid" ada di lebih dari satu rubrik.
       const branchRubric = hasSpecificBranch
-        ? getActiveRubricForBranch(asg.branchName!, asg.branchId || matchedBranch?.id, asg.levelId, asg.levelName)
+        ? getActiveRubricForBranch(asg.branchName!, asg.branchId || matchedBranch?.id)
         : null;
       const orderedRubrics = branchRubric
         ? [branchRubric, ...rubricVersions.filter((rv) => rv.id !== branchRubric.id)]
@@ -7808,7 +7997,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const resolvedStageId = matchedStage?.id || asg.stageId || 'stage-penyisihan';
     const resolvedBranchId = asg.branchId || matchedBranch?.id;
-    const resolvedLevelId = asg.levelId;
+    const resolvedLevelId: string | undefined = undefined; // jenjang tidak dipakai
 
     const newAsg: JudgeAssignment = {
       ...asg,
@@ -8075,6 +8264,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateQuestion,
         deleteQuestion,
         importQuestionsBatch,
+        importKafilahsBatch,
         assignMaqraToParticipant,
         addQuestionToParticipant,
         removeQuestionFromParticipant,

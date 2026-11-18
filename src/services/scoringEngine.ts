@@ -374,7 +374,7 @@ export function calculateAssessmentScore(
 }
 
 /**
- * Validasi relasional 3 dimensi (Cabang + Jenjang + Babak) untuk penetapan Maqra peserta (P0-03).
+ * Validasi relasional (Cabang + Babak) untuk penetapan Maqra peserta (P0-03).
  * Digunakan secara konsisten pada:
  * 1. Pengundian otomatis (BankSoalView & conductLotteryDraw)
  * 2. Penetapan manual (addQuestionToParticipant)
@@ -462,25 +462,7 @@ export function validateMaqraAssignmentForParticipant(
     );
   }
 
-  // 3. Validasi Jenjang / Golongan (Level)
-  // Soal berlabel "Umum" / "Semua Jenjang" atau tanpa jenjang khusus berlaku untuk semua jenjang pada cabang yang sama.
-  const qLevelName = (question.levelName || '').trim().toLowerCase();
-  const pLevelName = (participant.levelName || '').trim().toLowerCase();
-  const isQuestionWildcardLevel =
-    !qLevelName || qLevelName === 'semua jenjang' || qLevelName === 'umum';
-  if (!isQuestionWildcardLevel) {
-    if (question.levelId && participant.levelId) {
-      if (question.levelId !== participant.levelId) {
-        return fail(
-          `Ketidaksesuaian jenjang: Paket soal "${question.code}" (${question.levelName}) tidak sesuai dengan jenjang peserta ${participant.name} (${participant.levelName}).`
-        );
-      }
-    } else if (pLevelName && qLevelName !== pLevelName) {
-      return fail(
-        `Ketidaksesuaian jenjang: Paket soal "${question.code}" (${question.levelName}) tidak sesuai dengan jenjang peserta ${participant.name} (${participant.levelName}).`
-      );
-    }
-  }
+  // Jenjang tidak diperiksa: golongan menjadi bagian dari nama cabang (sudah diperiksa di atas).
 
   // 4. Validasi Duplikasi Soal pada Peserta & Babak yang Sama
   if (existingQuestionIds.includes(question.id)) {

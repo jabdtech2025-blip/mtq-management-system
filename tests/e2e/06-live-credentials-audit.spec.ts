@@ -98,7 +98,7 @@ test.describe('Live Supabase Role Audits (Superadmin, Admin, Judge)', () => {
       await masterBtn.click();
       await page.waitForTimeout(800);
 
-      const masterTabs = ['Cabang Lomba', 'Golongan / Jenjang', 'Babak Musabaqah', 'Kategori Kesalahan', 'Aturan & Rubrik'];
+      const masterTabs = ['Cabang Lomba', 'Babak Musabaqah', 'Kategori Kesalahan', 'Aturan & Rubrik'];
       for (const tabName of masterTabs) {
         const tabBtn = page.locator('main button', { hasText: tabName }).first();
         if (await tabBtn.isVisible()) {

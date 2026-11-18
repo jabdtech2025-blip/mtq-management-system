@@ -70,7 +70,7 @@ Butuh bantuan? Hubungi panitia penyelenggara atau ${CONTACT_EMAIL}.`
     showInFooter: false,
     isDefault: true,
     bodyMd: `## Urutan kerja yang disarankan
-1. **Master Data & Rubrik** — siapkan cabang, jenjang, rubrik, dan kategori kesalahan sesuai juknis.
+1. **Master Data & Rubrik** — siapkan cabang (golongan dan jenis kelamin menjadi bagian dari nama cabang, mis. Tilawah Anak Putra), babak, rubrik, dan kategori kesalahan sesuai juknis.
 2. **Pengguna & Hakim** — undang admin dan dewan hakim melalui email.
 3. **Grup & Peserta** — daftarkan peserta per kafilah/utusan (manual atau impor Excel), lalu verifikasi berkas.
 4. **Bank Soal & Maqra** — siapkan maqra dan lakukan undian; hasil undian tercatat permanen.
@@ -103,7 +103,7 @@ Butuh bantuan? Hubungi ${CONTACT_EMAIL}.`
 **Manajemen MTQ** (mtqsystem.web.id) adalah platform penilaian digital dan manajemen musabaqah yang digunakan oleh **penyelenggara** MTQ/STQ (misalnya LPTQ atau panitia). Penyelenggara menentukan data peserta apa yang dikumpulkan dan untuk apa; pengelola platform memproses data tersebut atas nama penyelenggara.
 
 ## 2. Data yang diolah
-- **Peserta:** nama, nama ayah/wali, jenis kelamin, asal daerah/lembaga, kafilah/utusan, cabang dan jenjang lomba, nomor undian, maqra, nilai, dan status kelulusan.
+- **Peserta:** nama, nama ayah/wali, jenis kelamin, asal daerah/lembaga, kafilah/utusan, cabang lomba, nomor undian, maqra, nilai, dan status kelulusan.
 - **Panitia, admin, dan dewan hakim:** nama, email, peran, penugasan, serta catatan aktivitas di aplikasi (log audit).
 - **Data teknis:** alamat IP, jenis perangkat/browser, dan catatan akses yang dicatat otomatis oleh penyedia layanan hosting dan database.
 

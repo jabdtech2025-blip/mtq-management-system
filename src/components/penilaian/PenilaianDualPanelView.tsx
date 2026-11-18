@@ -74,9 +74,7 @@ export const PenilaianDualPanelView: React.FC = () => {
   const activeRubric = currentParticipant
     ? getActiveRubricForBranch(
         currentParticipant.branchName,
-        currentParticipant.branchId,
-        currentParticipant.levelId,
-        currentParticipant.levelName
+        currentParticipant.branchId
       )
     : null;
 

@@ -114,8 +114,10 @@ export interface Participant {
   kafilahName: string;
   branchId?: string;
   branchName: string; // e.g. "Tilawah Dewasa Putra"
+  /** @deprecated Jenjang tidak dipakai lagi: golongan menjadi bagian dari nama cabang. Selalu kosong. */
   levelId?: string;
-  levelName: string;  // e.g. "Ulya"
+  /** @deprecated Jenjang tidak dipakai lagi. Selalu kosong. */
+  levelName?: string;
   stageId?: string;
   stageName: string;  // Current stage for compatibility
   questionId: string; // Primary question for backward compatibility

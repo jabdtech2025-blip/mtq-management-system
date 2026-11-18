@@ -740,7 +740,6 @@ export class RankingService {
         kafilahName: '-',
         branchId: sp.branchId,
         branchName: sp.branchName,
-        levelName: 'Ulya',
         gender: 'Putra',
         lotteryNumber: sp.lotteryNumber,
         questionId: sp.questionId || '',

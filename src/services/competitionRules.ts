@@ -383,7 +383,7 @@ export function getBranchRuleConfig(
 }
 
 /**
- * Resolusi Rubrik Aktif untuk suatu cabang dan jenjang secara aman tanpa fallback diam-diam.
+ * Resolusi Rubrik Aktif untuk suatu cabang secara aman tanpa fallback diam-diam.
  * Jika konfigurasi atau rubrik aktif tidak ditemukan, mengembalikan error deskriptif.
  */
 export function resolveActiveRubricForBranch(params: {
@@ -395,19 +395,7 @@ export function resolveActiveRubricForBranch(params: {
   competitionRules?: CompetitionRuleConfig[];
   rubricVersions: RubricVersion[];
 }): { rubric: RubricVersion | null; error?: string } {
-  const { branchName, branchId, levelId, levelName, tenantId, competitionRules, rubricVersions } = params;
-
-  // 1. Cek kecocokan langsung rubrik aktif spesifik cabang dan jenjang (jika ada)
-  if (branchId && levelId) {
-    const exactMatch = rubricVersions.find(
-      (r) =>
-        (!tenantId || r.tenantId === tenantId || r.tenantId === 'system') &&
-        r.status === 'Aktif' &&
-        r.branchId === branchId &&
-        r.levelId === levelId
-    );
-    if (exactMatch) return { rubric: exactMatch };
-  }
+  const { branchName, branchId, tenantId, competitionRules, rubricVersions } = params;
 
   // 2. Cek kecocokan via aturan kompetisi cabang
   const ruleConfig = getBranchRuleConfig(branchName, tenantId, competitionRules, branchId);
@@ -439,7 +427,7 @@ export function resolveActiveRubricForBranch(params: {
 
   return {
     rubric: null,
-    error: `Cabang "${branchName}"${levelName ? ` jenjang "${levelName}"` : ''} belum memiliki versi rubrik aktif di database. Harap aktifkan rubrik terkait di menu Master Data.`
+    error: `Cabang "${branchName}" belum memiliki versi rubrik aktif di database. Harap aktifkan rubrik terkait di menu Master Data.`
   };
 }
 

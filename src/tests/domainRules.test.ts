@@ -1264,7 +1264,6 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     {
       kafilahs: masterKafilahs,
       cabangList: masterCabang,
-      jenjangList: masterJenjang,
       stages: masterStages,
       existingParticipants: []
     }
@@ -1301,7 +1300,6 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     ],
     {
       cabangList: masterCabang,
-      jenjangList: masterJenjang,
       stages: masterStages,
       existingQuestions: []
     }
@@ -1314,10 +1312,10 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
       participantImportCheck.validRows[0].fatherName === 'H. Sulaiman' &&
       participantImportCheck.validRows[0].originInstitution === 'PP Al-Falah' &&
       participantImportCheck.validRows[0].branchId === 'c-tlw' &&
-      participantImportCheck.validRows[0].levelId === 'j-dws' &&
+      participantImportCheck.validRows[0].stageId === 's-pny' &&
       questionImportCheck.validRows.length === 1 &&
       questionImportCheck.errors.length === 1 &&
-      questionImportCheck.validRows[0].levelId === 'j-dws',
+      questionImportCheck.validRows[0].stageId === 's-pny',
     `partValid: ${participantImportCheck.validRows.length}, partErr: ${participantImportCheck.errors.length}, qValid: ${questionImportCheck.validRows.length}`
   );
 
@@ -1424,16 +1422,25 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     levelName: 'Ulya',
     branchAndLevel: 'Tilawah Dewasa Putra - Ulya'
   };
+  const questionWrongBranch = {
+    ...questionMatching3D,
+    id: 'q-other-branch',
+    code: 'MQ-TLA-01',
+    branchId: 'br-tilawah-anak',
+    branchName: 'Tilawah Anak Putra',
+    branchAndLevel: 'Tilawah Anak Putra'
+  };
   const checkWrongLevel = validateMaqraAssignmentForParticipant(samplePartUlya, questionWrongLevel, 'Penyisihan', []);
+  const checkWrongBranch = validateMaqraAssignmentForParticipant(samplePartUlya, questionWrongBranch, 'Penyisihan', []);
   const checkMatching3D = validateMaqraAssignmentForParticipant(samplePartUlya, questionMatching3D, 'Penyisihan', []);
   const checkDuplicate3D = validateMaqraAssignmentForParticipant(samplePartUlya, questionMatching3D, 'Penyisihan', ['q-ulya']);
   assert(
-    '35f. P0-03 Validasi 3D Maqra: Menolak soal berbeda jenjang (Wustha vs Ulya) atau duplikat, dan menerima soal yang cocok Cabang + Jenjang + Babak',
-    checkWrongLevel.valid === false &&
-      Boolean(checkWrongLevel.reason?.includes('jenjang')) &&
+    '35f. Validasi Maqra tanpa jenjang: jenjang lama diabaikan, soal cabang lain dan soal duplikat tetap ditolak',
+    checkWrongLevel.valid === true &&
+      checkWrongBranch.valid === false &&
       checkMatching3D.valid === true &&
       checkDuplicate3D.valid === false,
-    `wrongLevelValid: ${checkWrongLevel.valid} (${checkWrongLevel.reason}), matchingValid: ${checkMatching3D.valid}, dupValid: ${checkDuplicate3D.valid}`
+    `levelIgnored: ${checkWrongLevel.valid} (${checkWrongLevel.reason}), wrongBranch: ${checkWrongBranch.valid} (${checkWrongBranch.reason}), matchingValid: ${checkMatching3D.valid}, dupValid: ${checkDuplicate3D.valid}`
   );
 
   const questionGeneralNoId = {
@@ -1543,7 +1550,6 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     ],
     {
       cabangList: masterCabang,
-      jenjangList: masterJenjang,
       stages: masterStages,
       existingQuestions: []
     }

@@ -18,7 +18,8 @@ import {
   FileText,
   Copy,
   Archive,
-  Sparkles
+  Sparkles,
+  Edit3
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import {
@@ -30,7 +31,7 @@ import {
   CompetitionRuleConfig
 } from '../../types/mtq';
 
-type MasterTab = 'kategori' | 'rubrik' | 'aturan_cabang' | 'babak' | 'jenjang' | 'cabang' | 'hakim';
+type MasterTab = 'kategori' | 'rubrik' | 'aturan_cabang' | 'babak' | 'cabang' | 'hakim';
 
 export const MasterDataView: React.FC = () => {
   const {
@@ -46,11 +47,7 @@ export const MasterDataView: React.FC = () => {
     addJudgeAssignment,
     removeJudgeAssignment,
     users,
-    jenjangList,
     cabangList,
-    addJenjang,
-    updateJenjang,
-    deleteJenjang,
     addCabang,
     updateCabang,
     deleteCabang,
@@ -68,7 +65,21 @@ export const MasterDataView: React.FC = () => {
     deleteCompetitionRule
   } = useMtq();
 
-  const [activeTab, setActiveTab] = useState<MasterTab>('kategori');
+  // Halaman lain (mis. Manajemen Babak) bisa membuka tab tertentu lewat sessionStorage
+  const [activeTab, setActiveTab] = useState<MasterTab>(() => {
+    try {
+      const requested = sessionStorage.getItem('mtq_master_tab');
+      if (requested) {
+        sessionStorage.removeItem('mtq_master_tab');
+        if (['kategori', 'rubrik', 'aturan_cabang', 'babak', 'cabang', 'hakim'].includes(requested)) {
+          return requested as MasterTab;
+        }
+      }
+    } catch {
+      /* penyimpanan tidak tersedia */
+    }
+    return 'kategori';
+  });
 
   // Available Rubric Fields cache for relational mapping
   const availableRubricFields = useMemo(() => {
@@ -98,8 +109,6 @@ export const MasterDataView: React.FC = () => {
   const [newRubricCode, setNewRubricCode] = useState('');
   const [newRubricBranchId, setNewRubricBranchId] = useState('');
   const [newRubricBranch, setNewRubricBranch] = useState('');
-  const [newRubricLevelId, setNewRubricLevelId] = useState('');
-  const [newRubricLevelName, setNewRubricLevelName] = useState('');
   const [newRubricVersion, setNewRubricVersion] = useState('1.0');
   const [newRubricStartingScore, setNewRubricStartingScore] = useState<number>(100);
   const [newRubricOfficialSource, setNewRubricOfficialSource] = useState('');
@@ -135,6 +144,9 @@ export const MasterDataView: React.FC = () => {
   const [stageQuota, setStageQuota] = useState<number>(3);
   const [stageChampionCount, setStageChampionCount] = useState<number>(3);
   const [stageBranch, setStageBranch] = useState(cabangList[0]?.name || 'Semua Cabang');
+  const [editingStageId, setEditingStageId] = useState<string | null>(null);
+  const [stageStatus, setStageStatus] = useState<'Menunggu' | 'Aktif'>('Menunggu');
+  const [stageFormError, setStageFormError] = useState('');
 
   // Generic add state
   const [isAddGenericOpen, setIsAddGenericOpen] = useState(false);
@@ -145,7 +157,7 @@ export const MasterDataView: React.FC = () => {
   const [rubricToDelete, setRubricToDelete] = useState<RubricVersion | null>(null);
   const [fieldToDelete, setFieldToDelete] = useState<{ rubric: RubricVersion; field: RubricField } | null>(null);
   const [deleteWarningItem, setDeleteWarningItem] = useState<{
-    type: 'jenjang' | 'cabang';
+    type: 'cabang';
     id: string;
     name: string;
     activeCount: number;
@@ -157,14 +169,41 @@ export const MasterDataView: React.FC = () => {
   const [selectedJudgeId, setSelectedJudgeId] = useState(users.find((u) => u.role === 'judge')?.id || '');
   const [assignStageName, setAssignStageName] = useState('Penyisihan');
   const [assignBranchName, setAssignBranchName] = useState(cabangList[0]?.name || 'Semua Cabang');
-  const [assignLevelId, setAssignLevelId] = useState('');
-  const [assignLevelName, setAssignLevelName] = useState('');
   // Hakim multi-bidang: satu penugasan per bidang yang dicentang, atau satu penugasan "Semua Bidang"
   const [assignFieldIds, setAssignFieldIds] = useState<string[]>([]);
   const [assignAllFields, setAssignAllFields] = useState(false);
 
   // Feedback notifications
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Babak dikelompokkan per cabang (urut nama cabang, lalu urutan babak)
+  const stagesByBranch = useMemo(() => {
+    const groups = new Map<string, CompetitionStage[]>();
+    stages.forEach((st) => {
+      const key = st.branchName && st.branchName !== 'Semua Cabang' ? st.branchName : 'Semua Cabang (babak umum)';
+      groups.set(key, [...(groups.get(key) || []), st]);
+    });
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => a.localeCompare(b, 'id'))
+      .map(([branchName, items]) => ({
+        branchName,
+        items: [...items].sort((x, y) => (x.order || 0) - (y.order || 0))
+      }));
+  }, [stages]);
+
+  const cabangWithoutStages = useMemo(
+    () =>
+      cabangList
+        .filter((c) => c.status === 'Aktif')
+        .filter(
+          (c) =>
+            !stages.some(
+              (st) => st.branchId === c.id || st.branchName === c.name || !st.branchName || st.branchName === 'Semua Cabang'
+            )
+        )
+        .map((c) => c.name),
+    [cabangList, stages]
+  );
 
   const tabs: { id: MasterTab; label: string; icon: React.ReactNode; count?: number }[] = [
     {
@@ -237,7 +276,6 @@ export const MasterDataView: React.FC = () => {
     if (!newRubricName || !newRubricCode) return;
 
     const selectedBranch = cabangList.find((c) => c.id === newRubricBranchId || c.name === newRubricBranch);
-    const selectedLevel = jenjangList.find((j) => j.id === newRubricLevelId || j.name === newRubricLevelName);
 
     addRubricVersion({
       code: newRubricCode.toUpperCase(),
@@ -245,8 +283,6 @@ export const MasterDataView: React.FC = () => {
       branchId: selectedBranch?.id,
       branchCode: selectedBranch?.code || (newRubricBranch ? newRubricBranch.substring(0, 3).toUpperCase() : 'GEN'),
       branchName: selectedBranch?.name || newRubricBranch || 'Cabang Umum',
-      levelId: selectedLevel?.id,
-      levelName: selectedLevel?.name,
       version: newRubricVersion,
       description: newRubricDescription || 'Konfigurasi rubrik penilaian MTQ.',
       officialSource: newRubricOfficialSource,
@@ -378,41 +414,74 @@ export const MasterDataView: React.FC = () => {
   };
 
   // Save Stage
-  const handleSaveStage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!stageName) return;
-    addStage({
-      name: stageName,
-      order: Number(stageOrder),
-      branchName: stageBranch,
-      status: 'Menunggu',
-      qualificationQuota: Number(stageQuota),
-      championCount: Number(stageChampionCount) || 3,
-      qualificationMethod: 'top_n',
-      isFinalized: false
-    });
-    setStageName('');
-    setIsAddStageOpen(false);
-    setFeedbackMessage({ type: 'success', text: `Babak "${stageName}" berhasil ditambahkan.` });
+  // Urutan berikutnya dihitung per cabang (Penyisihan cabang baru = 1, bukan lanjutan cabang lain)
+  const nextStageOrderForBranch = (branchName: string) => {
+    const orders = stages
+      .filter((st) =>
+        branchName === 'Semua Cabang'
+          ? !st.branchName || st.branchName === 'Semua Cabang'
+          : st.branchName === branchName
+      )
+      .map((st) => st.order || 0);
+    return orders.length > 0 ? Math.max(...orders) + 1 : 1;
   };
 
-  // Save Generic Item (Jenjang/Cabang)
+  const openAddStageModal = (branchName?: string) => {
+    const branch = branchName || cabangList.find((c) => c.status === 'Aktif')?.name || cabangList[0]?.name || 'Semua Cabang';
+    setEditingStageId(null);
+    setStageName('');
+    setStageBranch(branch);
+    setStageOrder(nextStageOrderForBranch(branch));
+    setStageQuota(3);
+    setStageChampionCount(3);
+    setStageStatus('Menunggu');
+    setStageFormError('');
+    setIsAddStageOpen(true);
+  };
+
+  const openEditStageModal = (stg: CompetitionStage) => {
+    setEditingStageId(stg.id);
+    setStageName(stg.name);
+    setStageBranch(stg.branchName || 'Semua Cabang');
+    setStageOrder(stg.order || 1);
+    setStageQuota(stg.qualificationQuota || 1);
+    setStageChampionCount(stg.championCount || 3);
+    setStageStatus(stg.status === 'Aktif' ? 'Aktif' : 'Menunggu');
+    setStageFormError('');
+    setIsAddStageOpen(true);
+  };
+
+  const handleSaveStage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload = {
+      name: stageName.trim(),
+      order: Number(stageOrder),
+      branchName: stageBranch,
+      status: stageStatus,
+      qualificationQuota: Number(stageQuota),
+      championCount: Number(stageChampionCount) || 3
+    };
+    const res = editingStageId
+      ? updateStage(editingStageId, payload)
+      : addStage({ ...payload, qualificationMethod: 'top_n', isFinalized: false });
+    if (!res.success) {
+      setStageFormError(res.message);
+      return;
+    }
+    setIsAddStageOpen(false);
+    setEditingStageId(null);
+    setFeedbackMessage({ type: 'success', text: res.message });
+  };
+
+  // Save Generic Item (Cabang)
   const handleSaveGeneric = (e: React.FormEvent) => {
     e.preventDefault();
     if (!genericName || !genericCode) return;
-    if (activeTab === 'jenjang') {
-      addJenjang({
-        name: genericName,
-        code: genericCode.toUpperCase(),
-        status: 'Aktif'
-      });
-    } else {
-      addCabang({
-        name: genericName,
-        code: genericCode.toUpperCase(),
-        status: 'Aktif'
-      });
-    }
+    addCabang({
+      name: genericName,
+      code: genericCode.toUpperCase(),
+      status: 'Aktif'
+    });
     setGenericName('');
     setGenericCode('');
     setIsAddGenericOpen(false);
@@ -420,40 +489,23 @@ export const MasterDataView: React.FC = () => {
   };
 
   // Delete Guard handler
-  const handleDeleteMasterItem = (type: 'jenjang' | 'cabang', item: { id: string; name: string }) => {
-    if (type === 'jenjang') {
-      const res = deleteJenjang(item.id);
-      if (!res.success && res.activeCount && res.activeCount > 0) {
-        setDeleteWarningItem({
-          type,
-          id: item.id,
-          name: item.name,
-          activeCount: res.activeCount,
-          message: res.message
-        });
-      }
-    } else {
-      const res = deleteCabang(item.id);
-      if (!res.success && res.activeCount && res.activeCount > 0) {
-        setDeleteWarningItem({
-          type,
-          id: item.id,
-          name: item.name,
-          activeCount: res.activeCount,
-          message: res.message
-        });
-      }
+  const handleDeleteMasterItem = (type: 'cabang', item: { id: string; name: string }) => {
+    const res = deleteCabang(item.id);
+    if (!res.success && res.activeCount && res.activeCount > 0) {
+      setDeleteWarningItem({
+        type,
+        id: item.id,
+        name: item.name,
+        activeCount: res.activeCount,
+        message: res.message
+      });
     }
   };
 
   // Deactivate instead of delete
   const handleDeactivateWarningItem = () => {
     if (!deleteWarningItem) return;
-    if (deleteWarningItem.type === 'jenjang') {
-      updateJenjang(deleteWarningItem.id, { status: 'Nonaktif' });
-    } else {
-      updateCabang(deleteWarningItem.id, { status: 'Nonaktif' });
-    }
+    updateCabang(deleteWarningItem.id, { status: 'Nonaktif' });
     setDeleteWarningItem(null);
   };
 
@@ -509,7 +561,7 @@ export const MasterDataView: React.FC = () => {
     [judgeAssignments, selectedJudgeId, assignStageName, assignBranchName]
   );
 
-  // Save Judge Assignment (P0: Pure DB with Branch, Stage, Jenjang, and Field Relations)
+  // Save Judge Assignment (Branch, Stage, and Field Relations)
   const handleSaveJudgeAssignment = (e: React.FormEvent) => {
     e.preventDefault();
     const availableJudges = users.filter((u) => u.role === 'judge');
@@ -526,7 +578,6 @@ export const MasterDataView: React.FC = () => {
     const effectiveStage = assignStageName || stageOptionsForAssignment[0] || 'Penyisihan';
     const effectiveBranch = assignBranchName || cabangList[0]?.name || 'Semua Cabang';
     const branchObj = cabangList.find((c) => c.name === effectiveBranch);
-    const levelObj = jenjangList.find((j) => j.id === assignLevelId || j.name === assignLevelName);
 
     const selectedFields = availableFieldsForAssignment.filter((f) => assignFieldIds.includes(f.id));
     if (!assignAllFields && selectedFields.length === 0) {
@@ -542,9 +593,7 @@ export const MasterDataView: React.FC = () => {
       judgeName: judgeObj.name,
       stageName: effectiveStage,
       branchName: effectiveBranch,
-      branchId: branchObj?.id,
-      levelId: levelObj?.id,
-      levelName: levelObj?.name
+      branchId: branchObj?.id
     };
     // Satu baris penugasan per bidang. "Semua bidang" = satu baris tanpa bidang (hakim menilai seluruh bidang).
     const requests = assignAllFields
@@ -787,8 +836,6 @@ export const MasterDataView: React.FC = () => {
                 setNewRubricCode('');
                 setNewRubricBranch(cabangList[0]?.name || '');
                 setNewRubricBranchId(cabangList[0]?.id || '');
-                setNewRubricLevelId(jenjangList[0]?.id || '');
-                setNewRubricLevelName(jenjangList[0]?.name || '');
                 setNewRubricVersion('1.0');
                 setNewRubricStartingScore(100);
                 setNewRubricOfficialSource('');
@@ -1151,198 +1198,126 @@ export const MasterDataView: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 4: Babak Musabaqah */}
+      {/* Tab 4: Babak Musabaqah — tempat utama mengatur babak, dikelompokkan per cabang */}
       {activeTab === 'babak' && (
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Konfigurasi Babak & Kuota Kelulusan
-            </h3>
+          <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Babak Musabaqah per Cabang
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Setiap cabang punya babaknya sendiri. Nama babak boleh sama antar cabang (mis. Penyisihan dan Final).
+                Babak selesai hanya lewat pengesahan di Hasil & Kelulusan.
+              </p>
+            </div>
             <button
-              onClick={() => {
-                setStageName('');
-                setStageOrder(stages.length + 1);
-                setStageQuota(3);
-                setStageBranch(cabangList[0]?.name || 'Semua Cabang');
-                setIsAddStageOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
+              type="button"
+              data-testid="add-stage-btn"
+              onClick={() => openAddStageModal()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Babak</span>
             </button>
           </div>
 
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-xs">
-                <th className="px-5 py-3 w-16 text-center">Urutan</th>
-                <th className="px-5 py-3">Nama Babak</th>
-                <th className="px-4 py-3">Cabang Terkait</th>
-                <th className="px-4 py-3 text-center">Kuota Lolos</th>
-                <th className="px-4 py-3 text-center">Status</th>
-                <th className="px-5 py-3 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {stages.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
-                    <BookOpen className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                    <p className="font-bold text-slate-700 text-sm">Belum Ada Babak Musabaqah</p>
-                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                      Database belum memiliki tahapan babak musabaqah (seperti Penyisihan, Semifinal, Final). Klik "Tambah Babak" untuk memulai.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                stages.map((stg, idx) => (
-                  <tr key={`${stg.id}-${idx}`} className="hover:bg-slate-50/70">
-                    <td className="px-5 py-3.5 text-center font-mono font-bold text-slate-500">
-                      {stg.order}
-                    </td>
-                    <td className="px-5 py-3.5 font-bold text-slate-900">{stg.name}</td>
-                    <td className="px-4 py-3.5 text-slate-600">{stg.branchName}</td>
-                    <td className="px-4 py-3.5 text-center font-bold text-emerald-800 font-mono">
-                      Top {stg.qualificationQuota}
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      <span
-                        className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                          stg.isFinalized
-                            ? 'bg-slate-100 text-slate-700'
-                            : stg.status === 'Aktif'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {stg.isFinalized ? 'Final' : stg.status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <div className="inline-flex items-center gap-2">
-                        <button
-                          onClick={() =>
-                            updateStage(stg.id, {
-                              status: stg.status === 'Aktif' ? 'Selesai' : 'Aktif'
-                            })
-                          }
-                          disabled={stg.isFinalized}
-                          className="text-xs text-slate-600 hover:text-emerald-800 disabled:opacity-40 font-semibold cursor-pointer px-2.5 py-1 rounded-md border border-slate-200 hover:bg-slate-50"
-                        >
-                          Ubah Status
-                        </button>
-                        <button
-                          type="button"
-                          disabled={stg.isFinalized || stg.status === 'Selesai'}
-                          onClick={() => {
-                            const res = deleteStage(stg.id);
-                            setFeedbackMessage({
-                              type: res.success ? 'success' : 'error',
-                              text: res.message
-                            });
-                          }}
-                          title={
-                            stg.isFinalized || stg.status === 'Selesai'
-                              ? 'Babak yang sudah selesai/disahkan tidak dapat dihapus'
-                              : 'Hapus babak musabaqah ini'
-                          }
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 disabled:cursor-not-allowed text-rose-700 font-semibold text-xs cursor-pointer transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Hapus</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Tab 5: Jenjang Usia */}
-      {activeTab === 'jenjang' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
-              Jenjang Usia Musabaqah (Kategori Peserta)
-            </h3>
-            <button
-              onClick={() => setIsAddGenericOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-800 text-white hover:bg-emerald-900 cursor-pointer shadow-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Tambah Jenjang</span>
-            </button>
-          </div>
-
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase text-xs">
-                <th className="px-5 py-3 w-28">Kode</th>
-                <th className="px-5 py-3">Nama Jenjang Usia</th>
-                <th className="px-4 py-3 text-center w-32">Status</th>
-                <th className="px-5 py-3 text-right w-28">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {jenjangList.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-slate-400">
-                    <p className="font-semibold text-slate-700 text-xs">Belum Ada Jenjang Usia</p>
-                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                      Database belum memiliki daftar jenjang usia (seperti Anak-anak, Remaja, Dewasa). Klik &quot;Tambah Jenjang&quot; di atas untuk menambahkan.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                jenjangList.map((item, idx) => (
-                  <tr
-                    key={`${item.id}-${idx}`}
-                    className="hover:bg-slate-50/70 transition-colors"
-                  >
-                    <td className="px-5 py-3">
-                      <span className="font-mono text-xs font-medium px-2 py-0.5 bg-slate-100 rounded text-slate-700">
-                        {item.code}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3 font-medium text-slate-800">
-                      {item.name}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() =>
-                          updateJenjang(item.id, {
-                            status: item.status === 'Aktif' ? 'Nonaktif' : 'Aktif'
-                          })
-                        }
-                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${
-                          item.status === 'Aktif'
-                            ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                            : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
-                        }`}
-                        title="Klik untuk ubah status"
-                      >
-                        {item.status}
-                      </button>
-                    </td>
-                    <td className="px-5 py-3 text-right">
-                      <button
-                        onClick={() => handleDeleteMasterItem('jenjang', item)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium text-xs cursor-pointer transition-colors"
-                        title="Hapus Jenjang"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Hapus</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          {stagesByBranch.length === 0 ? (
+            <div className="px-5 py-10 text-center">
+              <p className="font-semibold text-slate-700 text-xs">Belum ada babak</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Klik &quot;Tambah Babak&quot; untuk membuat babak Penyisihan dan Final bagi setiap cabang.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {stagesByBranch.map((group) => (
+                <div key={group.branchName}>
+                  <div className="px-5 py-2.5 bg-slate-50 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">{group.branchName}</span>
+                    <button
+                      type="button"
+                      onClick={() => openAddStageModal(group.branchName)}
+                      className="text-xs font-semibold text-emerald-800 hover:text-emerald-950 cursor-pointer"
+                    >
+                      + Babak untuk cabang ini
+                    </button>
+                  </div>
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="text-slate-500 border-b border-slate-100 font-bold uppercase text-[11px]">
+                        <th className="px-5 py-2 w-16 text-center">Urutan</th>
+                        <th className="px-4 py-2">Nama Babak</th>
+                        <th className="px-4 py-2 text-center">Kuota Lolos</th>
+                        <th className="px-4 py-2 text-center">Juara Final</th>
+                        <th className="px-4 py-2 text-center">Status</th>
+                        <th className="px-5 py-2 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {group.items.map((stg) => {
+                        const locked = stg.isFinalized || stg.status === 'Selesai';
+                        return (
+                          <tr key={stg.id} className="hover:bg-slate-50/70">
+                            <td className="px-5 py-3 text-center font-mono font-bold text-slate-700">{stg.order}</td>
+                            <td className="px-4 py-3 font-bold text-slate-900">{stg.name}</td>
+                            <td className="px-4 py-3 text-center font-mono">{stg.qualificationQuota}</td>
+                            <td className="px-4 py-3 text-center font-mono">{stg.championCount ?? 3}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                  locked
+                                    ? 'bg-slate-200 text-slate-700'
+                                    : stg.status === 'Aktif'
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {locked ? 'Disahkan' : stg.status}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 text-right">
+                              <div className="inline-flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={locked}
+                                  onClick={() => openEditStageModal(stg)}
+                                  title={locked ? 'Babak yang sudah disahkan tidak dapat diubah' : 'Ubah babak'}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 font-semibold text-xs cursor-pointer"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                  <span>Ubah</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={locked}
+                                  onClick={() => {
+                                    const res = deleteStage(stg.id);
+                                    setFeedbackMessage({ type: res.success ? 'success' : 'error', text: res.message });
+                                  }}
+                                  title={locked ? 'Babak yang sudah disahkan tidak dapat dihapus' : 'Hapus babak ini'}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 disabled:cursor-not-allowed text-rose-700 font-semibold text-xs cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Hapus</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
+          {cabangWithoutStages.length > 0 && (
+            <div className="px-5 py-3 border-t border-amber-200 bg-amber-50 text-xs text-amber-900">
+              Cabang belum punya babak: <strong>{cabangWithoutStages.join(', ')}</strong>. Peserta, soal, dan hakim
+              cabang ini belum bisa didaftarkan sampai babaknya dibuat.
+            </div>
+          )}
         </div>
       )}
 
@@ -1446,8 +1421,6 @@ export const MasterDataView: React.FC = () => {
                 setAssignStageName(
                   stages.find((s) => s.branchName === firstBranch)?.name || stages[0]?.name || 'Penyisihan'
                 );
-                setAssignLevelId(jenjangList[0]?.id || '');
-                setAssignLevelName(jenjangList[0]?.name || '');
                 setAssignFieldIds([]);
                 setAssignAllFields(false);
                 setIsAssignJudgeOpen(true);
@@ -2056,22 +2029,52 @@ export const MasterDataView: React.FC = () => {
         </div>
       )}
 
-      {/* Add Stage Modal */}
+      {/* Add / Edit Stage Modal */}
       {isAddStageOpen && (
         <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
-            <h3 className="font-extrabold text-base text-slate-900 mb-4">Tambah Babak Baru</h3>
-            <form onSubmit={handleSaveStage} className="space-y-4 text-xs">
+            <h3 className="font-extrabold text-base text-slate-900 mb-4">
+              {editingStageId ? 'Ubah Babak' : 'Tambah Babak Baru'}
+            </h3>
+            <form onSubmit={handleSaveStage} className="space-y-4 text-xs" data-testid="stage-form">
+              <div>
+                <label className="font-bold text-slate-600 block mb-1">Cabang Lomba</label>
+                <select
+                  value={stageBranch}
+                  onChange={(e) => {
+                    setStageBranch(e.target.value);
+                    if (!editingStageId) setStageOrder(nextStageOrderForBranch(e.target.value));
+                  }}
+                  data-testid="stage-branch-select"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                >
+                  {cabangList.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                      {c.status === 'Nonaktif' ? ' (Nonaktif)' : ''}
+                    </option>
+                  ))}
+                  <option value="Semua Cabang">Semua Cabang (babak umum)</option>
+                </select>
+              </div>
               <div>
                 <label className="font-bold text-slate-600 block mb-1">Nama Babak</label>
                 <input
                   type="text"
+                  list="stage-name-suggestions"
                   value={stageName}
                   onChange={(e) => setStageName(e.target.value)}
                   required
-                  placeholder="e.g. Penyisihan / Semifinal / Final"
+                  maxLength={60}
+                  placeholder="Penyisihan / Semifinal / Final"
+                  data-testid="stage-name-input"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                 />
+                <datalist id="stage-name-suggestions">
+                  <option value="Penyisihan" />
+                  <option value="Semifinal" />
+                  <option value="Final" />
+                </datalist>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -2085,7 +2088,7 @@ export const MasterDataView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="font-bold text-slate-600 block mb-1">Kuota Lolos (Top-N)</label>
+                  <label className="font-bold text-slate-600 block mb-1">Kuota Lolos</label>
                   <input
                     type="number"
                     min={1}
@@ -2106,6 +2109,27 @@ export const MasterDataView: React.FC = () => {
                   />
                 </div>
               </div>
+              <div>
+                <label className="font-bold text-slate-600 block mb-1">Status</label>
+                <select
+                  value={stageStatus}
+                  onChange={(e) => setStageStatus(e.target.value === 'Aktif' ? 'Aktif' : 'Menunggu')}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="Menunggu">Menunggu (belum dimulai)</option>
+                  <option value="Aktif">Aktif (sedang berjalan)</option>
+                </select>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Urutan dihitung per cabang: Penyisihan = 1, Final = 2. Kuota lolos dipakai saat pengesahan babak;
+                jumlah juara dipakai di babak terakhir. Setelah ada lembar penilaian, nama, cabang, dan urutan
+                terkunci. Kuota dan jumlah juara terkunci setelah babak disahkan.
+              </p>
+              {stageFormError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 font-semibold" role="alert">
+                  {stageFormError}
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-3 border-t">
                 <button
                   type="button"
@@ -2114,10 +2138,7 @@ export const MasterDataView: React.FC = () => {
                 >
                   Batal
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-emerald-800 text-white rounded-lg font-bold"
-                >
+                <button type="submit" data-testid="save-stage-btn" className="px-4 py-2 bg-emerald-800 text-white rounded-lg font-bold">
                   Simpan Babak
                 </button>
               </div>
@@ -2126,12 +2147,12 @@ export const MasterDataView: React.FC = () => {
         </div>
       )}
 
-      {/* Add Generic (Jenjang/Cabang) Modal */}
+      {/* Add Generic (Cabang) Modal */}
       {isAddGenericOpen && (
         <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-sm w-full shadow-lg border border-slate-200 p-6">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">
-              Tambah {activeTab === 'jenjang' ? 'Jenjang Usia' : 'Cabang'}
+              Tambah Cabang
             </h3>
             <form onSubmit={handleSaveGeneric} className="space-y-4 text-xs">
               <div>
@@ -2330,7 +2351,7 @@ export const MasterDataView: React.FC = () => {
                   Data Tidak Dapat Dihapus Permanen
                 </h3>
                 <p className="text-xs text-slate-500 font-mono">
-                  {deleteWarningItem.type === 'jenjang' ? 'Jenjang Usia' : 'Cabang'}: {deleteWarningItem.name}
+                  Cabang: {deleteWarningItem.name}
                 </p>
               </div>
             </div>

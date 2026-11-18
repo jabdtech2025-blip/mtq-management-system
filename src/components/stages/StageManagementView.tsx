@@ -22,7 +22,8 @@ export const StageManagementView: React.FC = () => {
     judgeAssignments,
     assessments,
     getParticipantStageQuestions,
-    currentTenant
+    currentTenant,
+    setCurrentView
   } = useMtq();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -63,31 +64,28 @@ export const StageManagementView: React.FC = () => {
     e.preventDefault();
     if (!formName) return;
 
-    if (editingStage) {
-      updateStage(editingStage.id, {
-        name: formName,
-        order: Number(formOrder),
-        branchName: formBranch,
-        qualificationQuota: Number(formQuota),
-        championCount: Number(formChampionCount) || 3,
-        status: formStatus
-      });
-      setFeedback({ type: 'success', message: `Konfigurasi Babak "${formName}" berhasil diperbarui.` });
-    } else {
-      addStage({
-        name: formName,
-        order: Number(formOrder),
-        branchName: formBranch,
-        status: formStatus,
-        qualificationQuota: Number(formQuota),
-        championCount: Number(formChampionCount) || 3,
-        qualificationMethod: 'top_n',
-        isFinalized: false
-      });
-      setFeedback({ type: 'success', message: `Babak "${formName}" berhasil ditambahkan.` });
-    }
-
-    setIsModalOpen(false);
+    // Aturan & validasi babak sama dengan Master Data & Rubrik (di MtqContext)
+    const res = editingStage
+      ? updateStage(editingStage.id, {
+          name: formName,
+          order: Number(formOrder),
+          branchName: formBranch,
+          qualificationQuota: Number(formQuota),
+          championCount: Number(formChampionCount) || 3,
+          status: formStatus
+        })
+      : addStage({
+          name: formName,
+          order: Number(formOrder),
+          branchName: formBranch,
+          status: formStatus,
+          qualificationQuota: Number(formQuota),
+          championCount: Number(formChampionCount) || 3,
+          qualificationMethod: 'top_n',
+          isFinalized: false
+        });
+    setFeedback({ type: res.success ? 'success' : 'error', message: res.message });
+    if (res.success) setIsModalOpen(false);
   };
 
   return (
@@ -96,13 +94,24 @@ export const StageManagementView: React.FC = () => {
         title="Manajemen Babak Musabaqah"
         description={`${currentTenant.name} · Kelola struktur tahapan babak (Penyisihan, Semifinal, Final) dan kuota kelulusan`}
         actions={
-          <Button
-            variant="primary"
-            onClick={handleOpenAdd}
-            leftIcon={<Plus className="w-4 h-4" />}
-          >
-            Tambah Babak
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                try {
+                  sessionStorage.setItem('mtq_master_tab', 'babak');
+                } catch {
+                  /* abaikan */
+                }
+                setCurrentView('master_data');
+              }}
+            >
+              Atur di Master Data
+            </Button>
+            <Button variant="primary" onClick={handleOpenAdd} leftIcon={<Plus className="w-4 h-4" />}>
+              Tambah Babak
+            </Button>
+          </div>
         }
       />
 
@@ -280,17 +289,12 @@ export const StageManagementView: React.FC = () => {
             onChange={(e) => setFormBranch(e.target.value)}
             required
           >
-            {Array.from(
-              new Set([
-                ...cabangList.map((c) => c.name),
-                ...stages.map((s) => s.branchName),
-                formBranch
-              ].filter(Boolean))
-            ).map((br) => (
-              <option key={br} value={br}>
-                {br}
+            {cabangList.map((c) => (
+              <option key={c.id} value={c.name}>
+                {c.name}
               </option>
             ))}
+            <option value="Semua Cabang">Semua Cabang (babak umum)</option>
           </Select>
 
           <Select
@@ -302,7 +306,6 @@ export const StageManagementView: React.FC = () => {
           >
             <option value="Menunggu">Menunggu</option>
             <option value="Aktif">Aktif (Sedang Berjalan)</option>
-            <option value="Selesai">Selesai</option>
           </Select>
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">

@@ -65,7 +65,9 @@ export function stageBelongsToBranch(
  * Tidak pernah jatuh ke babak milik cabang lain.
  */
 export function resolveStageForBranch<T extends StageLike>(stages: T[], lookup: StageLookup): T | undefined {
-  const tenantStages = stages.filter((s) => !s.tenantId || s.tenantId === lookup.tenantId);
+  const tenantStages = lookup.tenantId
+    ? stages.filter((s) => !s.tenantId || s.tenantId === lookup.tenantId)
+    : stages;
   const branch = { branchId: lookup.branchId, branchName: lookup.branchName };
   const hasBranch = Boolean(clean(lookup.branchId) || clean(lookup.branchName));
 
@@ -114,5 +116,5 @@ export function resolveStageWithLegacyFallback<T extends StageLike>(
 
 export function missingStageMessage(stageName: string, branchName?: string): string {
   const branchLabel = clean(branchName) ? `Cabang "${clean(branchName)}"` : 'Cabang ini';
-  return `${branchLabel} belum memiliki babak "${stageName}". Buat babak tersebut untuk cabang ini di menu Babak & Kelulusan terlebih dahulu.`;
+  return `${branchLabel} belum memiliki babak "${stageName}". Buat babaknya di Master Data & Rubrik > Babak Musabaqah terlebih dahulu.`;
 }

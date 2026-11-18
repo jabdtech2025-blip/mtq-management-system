@@ -1,6 +1,7 @@
 import { runDomainTests } from './domainRules.test';
 import { runSupabaseTests } from './supabaseRules.test';
 import { runMultiBranchTests } from './multiBranch.test';
+import { runImportParserTests } from './importParser.test';
 
 async function main() {
   console.log('===========================================================');
@@ -12,11 +13,12 @@ async function main() {
   const domainRes = runDomainTests();
   const supabaseRes = await runSupabaseTests();
   const multiBranchRes = runMultiBranchTests();
+  const importRes = await runImportParserTests();
   const duration = Date.now() - startTime;
 
-  const allResults = [...domainRes.results, ...supabaseRes.results, ...multiBranchRes.results];
-  const totalPassed = domainRes.passed + supabaseRes.passed + multiBranchRes.passed;
-  const totalFailed = domainRes.failed + supabaseRes.failed + multiBranchRes.failed;
+  const allResults = [...domainRes.results, ...supabaseRes.results, ...multiBranchRes.results, ...importRes.results];
+  const totalPassed = domainRes.passed + supabaseRes.passed + multiBranchRes.passed + importRes.passed;
+  const totalFailed = domainRes.failed + supabaseRes.failed + multiBranchRes.failed + importRes.failed;
 
   allResults.forEach((res) => {
     if (res.success) {

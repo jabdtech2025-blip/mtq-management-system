@@ -535,6 +535,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261120_multi_branch_integrity.sql'),
     'utf-8'
   );
+  const removeLevels20261121Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261121_remove_levels_usage.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -655,6 +659,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(siteSettings20261118Sql);
       await pg.exec(realtimeCms20261119Sql);
       await pg.exec(multiBranch20261120Sql);
+      await pg.exec(removeLevels20261121Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -2089,14 +2094,14 @@ export async function runSupabaseTests(): Promise<{
     const pendingAfterFlush = outboxSyncService.getSummary(tenantJabarId);
 
     assert(
-      '57. P0 Persistensi 15 Atribut Peserta, Level ID Bank Soal, Audit Log Undian Maqra (`lottery_draw_logs`), & Idempotensi Outbox Sync Queue',
+      '57. P0 Persistensi 15 Atribut Peserta, Bank Soal tanpa Jenjang, Audit Log Undian Maqra (`lottery_draw_logs`), & Idempotensi Outbox Sync Queue',
       extPartRes.success === true &&
         hydratedExtPart?.adminSequenceNumber === 'ADM-2026-099' &&
         hydratedExtPart?.fatherName === 'KH. Mansyur' &&
         hydratedExtPart?.originCity === 'Kota Tasikmalaya' &&
         hydratedExtPart?.originInstitution === 'PP Cipasung' &&
         extQuestionRes.success === true &&
-        hydratedExtQ?.levelId === levelDewasaId &&
+        hydratedExtQ?.levelId === undefined &&
         drawLogRes.success === true &&
         hydratedDrawLog?.questionPoolIds.length === 2 &&
         blockedCriticalCheck === true &&
@@ -2303,7 +2308,7 @@ export async function runSupabaseTests(): Promise<{
     );
 
     assert(
-      '59. P0 Master Data Pure DB: Tenant baru bersih tanpa item bawaan (0 item), penyimpanan relasi branch_id + level_id pada rubrik & penugasan hakim, serta penghapusan permanen bidang rubrik via RPC tanpa muncul kembali saat re-fetch',
+      '59. P0 Master Data Pure DB: Tenant baru bersih tanpa item bawaan (0 item), penyimpanan relasi branch_id (jenjang tidak dipakai) pada rubrik & penugasan hakim, serta penghapusan permanen bidang rubrik via RPC tanpa muncul kembali saat re-fetch',
       emptyTenantHydration.success === true &&
         emptyPayload?.rubricVersions.length === 0 &&
         emptyPayload?.errorCategories.length === 0 &&
@@ -2315,13 +2320,13 @@ export async function runSupabaseTests(): Promise<{
         saveCustomRubricRes.success === true &&
         cascadeDeleteFieldRes.success === true &&
         hydratedCustomRubric?.branchId === branchTilawahPutraId &&
-        hydratedCustomRubric?.levelId === levelDewasaId &&
+        hydratedCustomRubric?.levelId === undefined &&
         hydratedCustomRubric?.fields.length === 1 &&
         hydratedCustomRubric?.fields[0]?.id === fieldKeepId &&
         !hydratedCustomRubric?.fields.some((f) => f.id === fieldDeleteId) &&
         !hydratedLinkedErrorCat?.fieldId &&
         saveLinkedAssignmentRes.success === true &&
-        hydratedLinkedAssignment?.levelId === levelDewasaId &&
+        hydratedLinkedAssignment?.levelId === undefined &&
         hydratedLinkedAssignment?.judgeField === 'Tajwid Utama',
       `emptyRubrics: ${emptyPayload?.rubricVersions.length}, saveRubric: ${saveCustomRubricRes.success}, delField: ${cascadeDeleteFieldRes.success} (${cascadeDeleteFieldRes.message}), remainingFields: ${hydratedCustomRubric?.fields.length}, detachedErrCatField: ${hydratedLinkedErrorCat?.fieldId}, asgLevel: ${hydratedLinkedAssignment?.levelId}`
     );
@@ -3966,6 +3971,19 @@ export async function runSupabaseTests(): Promise<{
         s8QuestionEdit.error.includes('QUESTION_LOCKED') &&
         s8QuestionRename.ok === true,
       `quota: ${s8QuotaEdit.ok} ${s8QuotaEdit.error}, audit: ${s8Audit.rows.length}, qEdit: ${s8QuestionEdit.error}, qRename: ${s8QuestionRename.ok} ${s8QuestionRename.error}`
+    );
+
+    // ---------- 97b. Struktur babak terkunci setelah ada lembar penilaian ----------
+    const s8RenameStage = await runAs(igAdminId, `UPDATE stages SET name = 'IG Penyisihan S6 Baru' WHERE id = '${s6Stage}'`);
+    const s8ReorderStage = await runAs(igAdminId, `UPDATE stages SET stage_order = stage_order + 10 WHERE id = '${s6Stage}'`);
+    const s8StatusStage = await runAs(igAdminId, `UPDATE stages SET status = status WHERE id = '${s6Stage}'`);
+    assert(
+      '97b. Kunci Struktur Babak: setelah ada lembar penilaian, nama dan urutan babak ditolak server (STAGE_STRUCTURE_LOCKED), perubahan lain tetap boleh',
+      s8RenameStage.ok === false &&
+        s8RenameStage.error.includes('STAGE_STRUCTURE_LOCKED') &&
+        s8ReorderStage.ok === false &&
+        s8StatusStage.ok === true,
+      `rename: ${s8RenameStage.ok} ${s8RenameStage.error}, reorder: ${s8ReorderStage.ok}, status: ${s8StatusStage.ok} ${s8StatusStage.error}`
     );
 
     // ---------- 98. J6: tidak ada lagi tebakan bidang berdasarkan nama ----------

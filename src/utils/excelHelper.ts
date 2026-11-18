@@ -7,12 +7,12 @@ async function loadExcelJS(): Promise<typeof ExcelJS> {
 }
 import {
   CabangItem,
-  JenjangItem,
   StageItem,
   Kafilah,
   Participant,
   Question,
 } from '../types/mtq';
+import { resolveStageForBranch } from '../services/stageResolver';
 import { validateMaqraRange } from '../services/quranIndex';
 
 export const MAX_EXCEL_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -90,8 +90,6 @@ export interface ParsedParticipantImportRow {
   kafilahName: string;
   branchId: string;
   branchName: string;
-  levelId: string;
-  levelName: string;
   stageId?: string;
   stageName: string;
   status: 'Menunggu' | 'Berlangsung' | 'Lolos' | 'Gugur' | 'Final';
@@ -109,8 +107,6 @@ export interface ParsedQuestionImportRow {
   pageEnd: number;
   branchId: string;
   branchName: string;
-  levelId: string;
-  levelName: string;
   stageId?: string;
   stage: string;
   stageName: string;
@@ -243,45 +239,279 @@ export function validateAndSanitizeRawSheetMatrix(matrix: unknown[][]): Record<s
   return rows;
 }
 
+/** Nomor baris Excel asli dari sebuah baris hasil baca (header bisa berada di bawah baris judul). */
+export function getImportRowNumber(row: Record<string, unknown>, fallbackIndex: number): number {
+  const n = (row as { __excelRow?: unknown }).__excelRow;
+  return typeof n === 'number' && Number.isFinite(n) ? n : fallbackIndex + 2;
+}
+
+/** Judul kolom yang dikenali per jenis impor (dipakai untuk menemukan sheet & baris header). */
+export const PARTICIPANT_IMPORT_HEADERS = [
+  'no_urut', 'nomor_urut', 'nomor_urut_administratif', 'no_urut_administratif', 'no_urut_administrasi',
+  'nomor_urut_administrasi', 'no', 'admin_sequence_number',
+  'id_peserta', 'kode_peserta', 'participant_id', 'participant_code', 'nomor_peserta',
+  'nomor_undian', 'no_undian', 'undian', 'lottery_number',
+  'nama_lengkap', 'nama_peserta', 'nama', 'name',
+  'nama_ayah', 'bin_binti', 'ayah', 'father_name',
+  'jenis_kelamin', 'gender', 'jk', 'putra_putri',
+  'asal_kota', 'kota_asal', 'kota_kabupaten', 'asal_kota_kabupaten', 'origin_city',
+  'asal_wilayah', 'daerah_asal', 'asal_daerah', 'asal_wilayah_provinsi', 'provinsi', 'asal_provinsi', 'origin_region',
+  'lembaga_asal', 'asal_lembaga', 'asal_pesantren_sekolah', 'pesantren_sekolah', 'instansi', 'origin_institution',
+  'kafilah', 'grup', 'grup_kafilah', 'kafilah_grup', 'nama_kafilah', 'kode_kafilah', 'kafilah_name', 'nama_grup', 'kode_grup',
+  'cabang', 'cabang_lomba', 'nama_cabang', 'kode_cabang', 'branch',
+  'babak', 'babak_aktif', 'babak_musabaqah', 'stage',
+  'status'
+];
+
+export const QUESTION_IMPORT_HEADERS = [
+  'kode_maqra', 'kode_soal', 'kode', 'code',
+  'judul_paket', 'judul_maqra', 'judul', 'title',
+  'nama_surah', 'surah', 'surah_name',
+  'nomor_surah', 'no_surah', 'surah_number',
+  'ayat_mulai', 'start_ayah', 'ayat_awal',
+  'ayat_selesai', 'end_ayah', 'ayat_akhir',
+  'halaman_mulai', 'halaman_awal', 'page_start', 'halaman',
+  'halaman_selesai', 'halaman_akhir', 'page_end',
+  'cabang', 'cabang_lomba', 'nama_cabang', 'kode_cabang', 'branch',
+  'babak', 'babak_aktif', 'babak_musabaqah', 'stage',
+  'status', 'deskripsi', 'catatan', 'keterangan', 'description'
+];
+
+export const KAFILAH_IMPORT_HEADERS = [
+  'kode_grup', 'kode_kafilah', 'kode', 'code',
+  'nama_grup', 'nama_kafilah', 'grup', 'kafilah', 'nama', 'name',
+  'wilayah', 'asal_wilayah', 'daerah', 'region', 'kota_kabupaten',
+  'penanggung_jawab', 'kontak', 'nama_kontak', 'contact_person', 'ketua', 'ketua_kafilah',
+  'telepon', 'no_telepon', 'nomor_telepon', 'no_hp', 'hp', 'whatsapp', 'contact_phone',
+  'status'
+];
+
+/** Pembagi CSV sederhana (RFC 4180): kutip ganda, koma atau titik koma, baris baru di dalam kutipan. */
+function parseCsvText(text: string): string[][] {
+  const clean = text.replace(/^﻿/, '');
+  const firstLine = clean.split(/\r?\n/, 1)[0] || '';
+  const delimiter =
+    (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (clean[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === delimiter) {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && clean[i + 1] === '\n') i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  if (cell !== '' || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** Nilai sel yang aman: rumus diganti hasil terhitungnya (bila ada), teks kaya digabung, tanggal ISO. */
+function readCellLoosely(val: unknown): { value: string | number | boolean; isFormula: boolean } {
+  if (val === null || val === undefined) return { value: '', isFormula: false };
+  if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+    return { value: val, isFormula: false };
+  }
+  if (val instanceof Date) return { value: val.toISOString().slice(0, 10), isFormula: false };
+  if (typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    if ('formula' in obj || 'sharedFormula' in obj) {
+      const result = obj.result;
+      if (typeof result === 'string' || typeof result === 'number' || typeof result === 'boolean') {
+        return { value: result, isFormula: true };
+      }
+      if (result instanceof Date) return { value: result.toISOString().slice(0, 10), isFormula: true };
+      return { value: '', isFormula: true };
+    }
+    if (Array.isArray(obj.richText)) {
+      return {
+        value: obj.richText.map((part: { text?: string }) => String(part?.text || '')).join(''),
+        isFormula: false
+      };
+    }
+    if ('text' in obj && typeof obj.text === 'string') return { value: obj.text, isFormula: false };
+    if ('error' in obj) return { value: '', isFormula: false };
+  }
+  return { value: String(val), isFormula: false };
+}
+
+const isXlsZipSignature = (u: Uint8Array) => u.length >= 4 && u[0] === 0x50 && u[1] === 0x4b;
+const isLegacyXlsSignature = (u: Uint8Array) =>
+  u.length >= 4 && u[0] === 0xd0 && u[1] === 0xcf && u[2] === 0x11 && u[3] === 0xe0;
+
 /**
- * Membaca file Excel (.xlsx) dari ArrayBuffer atau Uint8Array menggunakan ExcelJS
- * dengan perlindungan ukuran file <= 5 MB, <= 5.000 baris, penolakan formula, & sanitasi prototype.
+ * Membaca file impor (.xlsx atau .csv) menjadi baris objek per judul kolom.
+ *
+ * Tahan terhadap bentuk berkas yang umum dipakai panitia:
+ * - data yang diformat sebagai Tabel Excel ("Format as Table");
+ * - sheet petunjuk di depan: sheet dipilih berdasarkan judul kolom yang dikenali;
+ * - baris judul/keterangan di atas baris header;
+ * - format/warna sampai ribuan baris kosong (hanya baris berisi yang dihitung);
+ * - kolom berisi rumus yang tidak dipakai (diabaikan); rumus di kolom yang dipakai memakai hasil hitungnya.
+ * Batasan keamanan tetap: <= 5 MB, <= 5.000 baris data, teks yang diawali "=" ditolak,
+ * kunci berbahaya (__proto__ dsb.) dibuang.
+ *
+ * `knownHeaders` = alias judul kolom yang dikenali untuk jenis impor ini. Kolom lain diabaikan.
  */
 export async function parseWorkbookToRows(
-  buffer: ArrayBuffer | Uint8Array
+  buffer: ArrayBuffer | Uint8Array,
+  knownHeaders?: string[]
 ): Promise<Record<string, unknown>[]> {
   assertWorkbookBufferSize(buffer);
-
   const uint8 = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  const exactArrayBuffer = uint8.buffer.slice(
-    uint8.byteOffset,
-    uint8.byteOffset + uint8.byteLength
-  ) as ArrayBuffer;
 
-  const ExcelLib = await loadExcelJS();
-  const workbook = new ExcelLib.Workbook();
-  await workbook.xlsx.load(exactArrayBuffer);
-
-  const worksheet = workbook.worksheets[0];
-  if (!worksheet) return [];
-
-  if (worksheet.rowCount - 1 > MAX_EXCEL_ROWS) {
+  if (isLegacyXlsSignature(uint8)) {
     throw new Error(
-      `Jumlah baris dalam file Excel (${worksheet.rowCount - 1} baris) melebihi batas maksimum ${MAX_EXCEL_ROWS} baris.`
+      'Format .xls (Excel 97-2003) tidak didukung. Buka berkas di Excel, lalu pilih Simpan Sebagai > "Buku Kerja Excel (.xlsx)", kemudian unggah ulang.'
     );
   }
 
-  const matrix: unknown[][] = [];
-  worksheet.eachRow({ includeEmpty: false }, (row) => {
-    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
-    matrix.push(values);
+  const sheets: Array<{ name: string; matrix: unknown[][]; rowNumbers: number[] }> = [];
+
+  if (!isXlsZipSignature(uint8)) {
+    // Bukan .xlsx: coba sebagai CSV (teks)
+    const text = new TextDecoder('utf-8').decode(uint8);
+    if (text.includes('\u0000')) {
+      throw new Error('Berkas tidak dikenali. Gunakan templat .xlsx dari tombol Download Template, atau berkas .csv.');
+    }
+    const csvRows = parseCsvText(text);
+    const matrix: unknown[][] = [];
+    const rowNumbers: number[] = [];
+    csvRows.forEach((r, i) => {
+      if (r.some((c) => String(c).trim() !== '')) {
+        matrix.push(r);
+        rowNumbers.push(i + 1);
+      }
+    });
+    sheets.push({ name: 'CSV', matrix, rowNumbers });
+  } else {
+    const exactArrayBuffer = uint8.buffer.slice(uint8.byteOffset, uint8.byteOffset + uint8.byteLength) as ArrayBuffer;
+    const ExcelLib = await loadExcelJS();
+    const workbook = new ExcelLib.Workbook();
+    try {
+      // tableParts diabaikan: pustaka ExcelJS gagal membaca berkas yang diformat sebagai Tabel Excel,
+      // padahal isi selnya tetap utuh tanpa definisi tabel.
+      await workbook.xlsx.load(exactArrayBuffer, { ignoreNodes: ['tableParts'] } as never);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Berkas Excel tidak dapat dibaca (${detail}). Pastikan berkas berformat .xlsx dan tidak terkunci kata sandi; bila perlu salin datanya ke templat dari tombol Download Template.`
+      );
+    }
+    workbook.worksheets.forEach((ws) => {
+      const matrix: unknown[][] = [];
+      const rowNumbers: number[] = [];
+      ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+        if (values.some((v) => String(readCellLoosely(v).value).trim() !== '')) {
+          matrix.push(values);
+          rowNumbers.push(rowNumber);
+        }
+      });
+      sheets.push({ name: ws.name, matrix, rowNumbers });
+    });
+  }
+
+  // Temukan sheet + baris header: baris (di 15 baris berisi pertama) dengan judul kolom paling banyak dikenali
+  const known = new Set((knownHeaders || []).map(normalizeHeaderKey));
+  let best: { sheet: (typeof sheets)[number]; headerIdx: number; score: number } | null = null;
+  sheets.forEach((sheet, sheetIdx) => {
+    const limit = Math.min(sheet.matrix.length, 15);
+    for (let i = 0; i < limit; i++) {
+      const cells = Array.isArray(sheet.matrix[i]) ? sheet.matrix[i] : [];
+      const score =
+        known.size > 0
+          ? cells.filter((c) => known.has(normalizeHeaderKey(String(readCellLoosely(c).value)))).length
+          : cells.filter((c) => String(readCellLoosely(c).value).trim() !== '').length > 0 && i === 0 && sheetIdx === 0
+            ? 1
+            : 0;
+      if (score > 0 && (!best || score > best.score)) {
+        best = { sheet, headerIdx: i, score };
+      }
+    }
   });
 
-  return validateAndSanitizeRawSheetMatrix(matrix);
+  const chosen = best as { sheet: (typeof sheets)[number]; headerIdx: number; score: number } | null;
+  if (!chosen || (known.size > 0 && chosen.score < 2)) {
+    if (sheets.every((s) => s.matrix.length === 0)) return [];
+    throw new Error(
+      'Baris judul kolom tidak ditemukan. Pastikan salah satu baris berisi judul kolom seperti pada templat (mis. Nama_Lengkap, Cabang, Babak), lalu unggah ulang.'
+    );
+  }
+
+  const { sheet, headerIdx } = chosen;
+  const dataCount = sheet.matrix.length - headerIdx - 1;
+  if (dataCount > MAX_EXCEL_ROWS) {
+    throw new Error(
+      `Jumlah baris data (${dataCount}) melebihi batas maksimum ${MAX_EXCEL_ROWS} baris per unggahan. Bagi berkas menjadi beberapa bagian.`
+    );
+  }
+
+  const headerCells = Array.isArray(sheet.matrix[headerIdx]) ? sheet.matrix[headerIdx] : [];
+  const headers: Array<string | null> = headerCells.map((h) => {
+    const clean = String(readCellLoosely(h).value).trim();
+    if (!clean || FORBIDDEN_OBJECT_KEYS.has(clean) || FORBIDDEN_OBJECT_KEYS.has(clean.toLowerCase())) return null;
+    if (known.size > 0 && !known.has(normalizeHeaderKey(clean))) return null; // kolom lain diabaikan
+    return clean;
+  });
+
+  const rows: Record<string, unknown>[] = [];
+  for (let r = headerIdx + 1; r < sheet.matrix.length; r++) {
+    const cells = Array.isArray(sheet.matrix[r]) ? sheet.matrix[r] : [];
+    const excelRow = sheet.rowNumbers[r];
+    const rowObj: Record<string, unknown> = {};
+    let hasValue = false;
+    headers.forEach((key, c) => {
+      if (!key) return;
+      const { value, isFormula } = readCellLoosely(cells[c]);
+      if (isFormula && value === '') {
+        throw new Error(
+          `Sel rumus tanpa hasil terhitung pada baris ${excelRow}, kolom "${key}". Ganti rumus dengan nilainya (Salin > Tempel Spesial > Nilai).`
+        );
+      }
+      if (typeof value === 'string' && value.trim().startsWith('=')) {
+        throw new Error(
+          `Teks diawali tanda "=" tidak diizinkan demi keamanan (baris ${excelRow}, kolom "${key}").`
+        );
+      }
+      if (String(value).trim() !== '') hasValue = true;
+      Object.defineProperty(rowObj, key, { value, enumerable: true, writable: true, configurable: true });
+    });
+    if (hasValue) {
+      Object.defineProperty(rowObj, '__excelRow', { value: excelRow, enumerable: false });
+      rows.push(rowObj);
+    }
+  }
+  return rows;
 }
 
 /**
- * Validasi baris import Peserta terhadap Master Data aktif (Kafilah, Cabang, Jenjang, Babak)
+ * Validasi baris import Peserta terhadap Master Data aktif (Kafilah, Cabang, Babak milik cabang itu)
  * tanpa pernah membuat master data liar secara diam-diam.
  */
 export function validateParticipantImportRows(
@@ -289,9 +519,10 @@ export function validateParticipantImportRows(
   context: {
     kafilahs: Kafilah[];
     cabangList: CabangItem[];
-    jenjangList: JenjangItem[];
     stages: StageItem[];
     existingParticipants: Participant[];
+    /** id tenant aktif, untuk mencari babak milik cabang */
+    tenantId?: string;
   }
 ): ImportBatchValidationSummary<ParsedParticipantImportRow> {
   const seenParticipantCodes = new Set<string>();
@@ -302,7 +533,7 @@ export function validateParticipantImportRows(
   );
 
   const results: ImportRowValidationResult<ParsedParticipantImportRow>[] = rawRows.map((raw, idx) => {
-    const rowNumber = idx + 2; // Baris 1 adalah header
+    const rowNumber = getImportRowNumber(raw, idx);
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -368,6 +599,8 @@ export function validateParticipantImportRows(
       'nama_kafilah',
       'kode_kafilah',
       'kafilah_name',
+      'nama_grup',
+      'kode_grup',
     ]);
     const branchRef = findCellValue(raw, [
       'cabang',
@@ -375,15 +608,6 @@ export function validateParticipantImportRows(
       'nama_cabang',
       'kode_cabang',
       'branch',
-    ]);
-    const levelRef = findCellValue(raw, [
-      'jenjang',
-      'jenjang_lomba',
-      'golongan',
-      'marhalah',
-      'nama_jenjang',
-      'kode_jenjang',
-      'level',
     ]);
     const stageRef =
       findCellValue(raw, ['babak', 'babak_aktif', 'babak_musabaqah', 'stage']) || 'Penyisihan';
@@ -437,37 +661,22 @@ export function validateParticipantImportRows(
       );
     }
 
-    const fallbackLevel: JenjangItem =
-      context.jenjangList.find((j) => j.status === 'Aktif') ||
-      context.jenjangList[0] || {
-        id: 'jnj-default',
-        code: 'UMUM',
-        name: 'Umum',
-        status: 'Aktif',
-      };
+    // Babak dicari per cabang: nama babak yang sama ada di setiap cabang dan tidak boleh tertukar.
+    const stageNameExact =
+      context.stages.find((s) => s.name.trim().toLowerCase() === stageRef.trim().toLowerCase())?.name || stageRef;
+    const matchedStage = matchedBranch
+      ? resolveStageForBranch(context.stages, {
+          tenantId: context.tenantId || '',
+          stageName: stageNameExact,
+          branchId: matchedBranch.id,
+          branchName: matchedBranch.name
+        })
+      : undefined;
 
-    const matchedLevel = levelRef
-      ? context.jenjangList.find(
-          (j) =>
-            j.status === 'Aktif' &&
-            (j.name.toLowerCase() === levelRef.toLowerCase() ||
-              (j.code || '').toLowerCase() === levelRef.toLowerCase() ||
-              j.id === levelRef)
-        ) || fallbackLevel
-      : fallbackLevel;
-
-    const matchedStage =
-      context.stages.find(
-        (s) =>
-          s.name.toLowerCase() === stageRef.toLowerCase() &&
-          (!matchedBranch ||
-            !s.branchId ||
-            s.branchId === matchedBranch.id ||
-            s.branchName === matchedBranch.name)
-      ) || context.stages.find((s) => s.name.toLowerCase() === stageRef.toLowerCase());
-
-    if (!matchedStage) {
-      errors.push(`Babak "${stageRef}" tidak ditemukan pada konfigurasi Babak Musabaqah.`);
+    if (matchedBranch && !matchedStage) {
+      errors.push(
+        `Cabang "${matchedBranch.name}" belum memiliki babak "${stageRef}". Buat babaknya di Master Data & Rubrik > Babak Musabaqah.`
+      );
     }
 
     if (participantId) {
@@ -503,7 +712,7 @@ export function validateParticipantImportRows(
       }
     });
 
-    const isValid = errors.length === 0 && Boolean(matchedKafilah && matchedBranch && matchedLevel);
+    const isValid = errors.length === 0 && Boolean(matchedKafilah && matchedBranch && matchedStage);
 
     return {
       rowNumber,
@@ -512,7 +721,7 @@ export function validateParticipantImportRows(
       errors,
       warnings,
       data:
-        isValid && matchedKafilah && matchedBranch && matchedLevel
+        isValid && matchedKafilah && matchedBranch && matchedStage
           ? {
               adminSequenceNumber,
               participantId,
@@ -527,10 +736,8 @@ export function validateParticipantImportRows(
               kafilahName: matchedKafilah.name,
               branchId: matchedBranch.id,
               branchName: matchedBranch.name,
-              levelId: matchedLevel.id,
-              levelName: matchedLevel.name,
-              stageId: matchedStage?.id,
-              stageName: matchedStage?.name || stageRef || 'Penyisihan',
+              stageId: matchedStage.id,
+              stageName: matchedStage.name,
               status: matchedStatus,
             }
           : undefined,
@@ -563,22 +770,22 @@ export function validateParticipantImportRows(
 }
 
 /**
- * Validasi baris import Bank Soal (Maqra) terhadap Master Data aktif (Cabang, Jenjang, Babak).
+ * Validasi baris import Bank Soal (Maqra) terhadap Master Data aktif (Cabang, Babak milik cabang itu).
  */
 export function validateQuestionImportRows(
   rawRows: Record<string, unknown>[],
   context: {
     cabangList: CabangItem[];
-    jenjangList: JenjangItem[];
     stages: StageItem[];
     existingQuestions: Question[];
+    tenantId?: string;
   }
 ): ImportBatchValidationSummary<ParsedQuestionImportRow> {
   const seenCodes = new Set<string>();
   const existingCodes = new Set(context.existingQuestions.map((q) => q.code.trim().toUpperCase()));
 
   const results: ImportRowValidationResult<ParsedQuestionImportRow>[] = rawRows.map((raw, idx) => {
-    const rowNumber = idx + 2;
+    const rowNumber = getImportRowNumber(raw, idx);
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -606,15 +813,6 @@ export function validateQuestionImportRows(
       'nama_cabang',
       'kode_cabang',
       'branch',
-    ]);
-    const levelRef = findCellValue(raw, [
-      'jenjang',
-      'jenjang_lomba',
-      'golongan',
-      'marhalah',
-      'nama_jenjang',
-      'kode_jenjang',
-      'level',
     ]);
     const stageRef =
       findCellValue(raw, ['babak', 'babak_aktif', 'babak_musabaqah', 'stage']) || 'Penyisihan';
@@ -658,37 +856,22 @@ export function validateQuestionImportRows(
       );
     }
 
-    const fallbackLevel: JenjangItem =
-      context.jenjangList.find((j) => j.status === 'Aktif') ||
-      context.jenjangList[0] || {
-        id: 'jnj-default',
-        code: 'UMUM',
-        name: 'Umum',
-        status: 'Aktif',
-      };
+    // Babak dicari per cabang: nama babak yang sama ada di setiap cabang dan tidak boleh tertukar.
+    const stageNameExact =
+      context.stages.find((s) => s.name.trim().toLowerCase() === stageRef.trim().toLowerCase())?.name || stageRef;
+    const matchedStage = matchedBranch
+      ? resolveStageForBranch(context.stages, {
+          tenantId: context.tenantId || '',
+          stageName: stageNameExact,
+          branchId: matchedBranch.id,
+          branchName: matchedBranch.name
+        })
+      : undefined;
 
-    const matchedLevel = levelRef
-      ? context.jenjangList.find(
-          (j) =>
-            j.status === 'Aktif' &&
-            (j.name.toLowerCase() === levelRef.toLowerCase() ||
-              (j.code || '').toLowerCase() === levelRef.toLowerCase() ||
-              j.id === levelRef)
-        ) || fallbackLevel
-      : fallbackLevel;
-
-    const matchedStage =
-      context.stages.find(
-        (s) =>
-          s.name.toLowerCase() === stageRef.toLowerCase() &&
-          (!matchedBranch ||
-            !s.branchId ||
-            s.branchId === matchedBranch.id ||
-            s.branchName === matchedBranch.name)
-      ) || context.stages.find((s) => s.name.toLowerCase() === stageRef.toLowerCase());
-
-    if (!matchedStage) {
-      errors.push(`Babak "${stageRef}" tidak ditemukan pada Master Data Babak.`);
+    if (matchedBranch && !matchedStage) {
+      errors.push(
+        `Cabang "${matchedBranch.name}" belum memiliki babak "${stageRef}". Buat babaknya di Master Data & Rubrik > Babak Musabaqah.`
+      );
     }
 
     if (code) {
@@ -711,7 +894,7 @@ export function validateQuestionImportRows(
       }
     });
 
-    const isValid = errors.length === 0 && Boolean(matchedBranch && matchedLevel);
+    const isValid = errors.length === 0 && Boolean(matchedBranch && matchedStage);
 
     return {
       rowNumber,
@@ -720,7 +903,7 @@ export function validateQuestionImportRows(
       errors,
       warnings,
       data:
-        isValid && matchedBranch && matchedLevel
+        isValid && matchedBranch && matchedStage
           ? {
               code,
               title: title || `QS. ${surahName}: ${startAyah}-${endAyah}`,
@@ -733,12 +916,10 @@ export function validateQuestionImportRows(
               pageEnd,
               branchId: matchedBranch.id,
               branchName: matchedBranch.name,
-              levelId: matchedLevel.id,
-              levelName: matchedLevel.name,
-              stageId: matchedStage?.id,
-              stage: matchedStage?.name || stageRef || 'Penyisihan',
-              stageName: matchedStage?.name || stageRef || 'Penyisihan',
-              branchAndLevel: `${matchedBranch.name} - ${matchedLevel.name}`,
+              stageId: matchedStage.id,
+              stage: matchedStage.name,
+              stageName: matchedStage.name,
+              branchAndLevel: matchedBranch.name,
               status,
               description: description || undefined,
             }
@@ -768,6 +949,119 @@ export function validateQuestionImportRows(
     rows: results,
     validRows,
     errors: errorSummaries,
+  };
+}
+
+export interface ParsedKafilahImportRow {
+  code: string;
+  name: string;
+  region: string;
+  contactPerson: string;
+  contactPhone: string;
+  status: 'Aktif' | 'Nonaktif';
+  /** id grup yang sudah ada (kode sama) -> diperbarui, bukan digandakan */
+  existingId?: string;
+}
+
+/**
+ * Validasi baris impor Grup / Kafilah.
+ * Kode wajib dan unik (di berkas dan di penyelenggara); kode yang sudah ada diperbarui.
+ */
+export function validateKafilahImportRows(
+  rawRows: Record<string, unknown>[],
+  context: { existingKafilahs: Kafilah[] }
+): ImportBatchValidationSummary<ParsedKafilahImportRow> {
+  const seenCodes = new Set<string>();
+  const seenNames = new Set<string>();
+  const existingByCode = new Map(context.existingKafilahs.map((k) => [k.code.trim().toUpperCase(), k]));
+
+  const results: ImportRowValidationResult<ParsedKafilahImportRow>[] = rawRows.map((raw, idx) => {
+    const rowNumber = getImportRowNumber(raw, idx);
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    const code = findCellValue(raw, ['kode_grup', 'kode_kafilah', 'kode', 'code']).toUpperCase();
+    const name = findCellValue(raw, ['nama_grup', 'nama_kafilah', 'grup', 'kafilah', 'nama', 'name']);
+    const region = findCellValue(raw, ['wilayah', 'asal_wilayah', 'daerah', 'region', 'kota_kabupaten']);
+    const contactPerson = findCellValue(raw, [
+      'penanggung_jawab', 'kontak', 'nama_kontak', 'contact_person', 'ketua', 'ketua_kafilah'
+    ]);
+    const contactPhone = findCellValue(raw, [
+      'telepon', 'no_telepon', 'nomor_telepon', 'no_hp', 'hp', 'whatsapp', 'contact_phone'
+    ]);
+    const statusRaw = findCellValue(raw, ['status']) || 'Aktif';
+
+    if (!code) errors.push('Kode grup wajib diisi.');
+    if (!name) errors.push('Nama grup wajib diisi.');
+    if (code && code.length > 30) errors.push('Kode grup maksimal 30 karakter.');
+    if (name && name.length > 150) errors.push('Nama grup maksimal 150 karakter.');
+    if (contactPhone && !/^[0-9+()\-\s.]{5,25}$/.test(contactPhone)) {
+      errors.push(`Nomor telepon "${contactPhone}" tidak valid (hanya angka, spasi, +, -, titik, kurung).`);
+    }
+
+    if (code) {
+      if (seenCodes.has(code)) errors.push(`Duplikasi kode grup "${code}" di dalam berkas.`);
+      seenCodes.add(code);
+    }
+    if (name) {
+      const nameKey = name.trim().toLowerCase();
+      if (seenNames.has(nameKey)) errors.push(`Duplikasi nama grup "${name}" di dalam berkas.`);
+      seenNames.add(nameKey);
+      const sameNameOtherCode = context.existingKafilahs.find(
+        (k) => k.name.trim().toLowerCase() === nameKey && k.code.trim().toUpperCase() !== code
+      );
+      if (sameNameOtherCode) {
+        errors.push(
+          `Nama grup "${name}" sudah dipakai grup lain berkode "${sameNameOtherCode.code}". Pakai kode yang sama untuk memperbarui grup itu.`
+        );
+      }
+    }
+    const existing = code ? existingByCode.get(code) : undefined;
+    if (existing) warnings.push(`Grup berkode "${code}" sudah ada dan akan diperbarui.`);
+
+    const status: 'Aktif' | 'Nonaktif' = statusRaw.toLowerCase() === 'nonaktif' ? 'Nonaktif' : 'Aktif';
+
+    const rawRowStringified: Record<string, string> = {};
+    Object.entries(raw).forEach(([k, v]) => {
+      if (!FORBIDDEN_OBJECT_KEYS.has(k)) rawRowStringified[k] = v === null || v === undefined ? '' : String(v);
+    });
+
+    const isValid = errors.length === 0;
+    return {
+      rowNumber,
+      rawRow: rawRowStringified,
+      isValid,
+      errors,
+      warnings,
+      data: isValid
+        ? {
+            code,
+            name,
+            region: region || existing?.region || '-',
+            contactPerson: contactPerson || existing?.contactPerson || '',
+            contactPhone: contactPhone || existing?.contactPhone || '',
+            status,
+            existingId: existing?.id
+          }
+        : undefined
+    };
+  });
+
+  const validRows = results.filter((r) => r.isValid && r.data).map((r) => r.data!);
+  return {
+    totalRows: results.length,
+    validCount: validRows.length,
+    invalidCount: results.length - validRows.length,
+    rows: results,
+    validRows,
+    errors: results
+      .filter((r) => !r.isValid)
+      .map((r) => ({
+        rowNumber: r.rowNumber,
+        identifier: r.rawRow['Kode_Grup'] || r.rawRow['Nama_Grup'] || `Baris ${r.rowNumber}`,
+        reasons: r.errors,
+        rawRow: r.rawRow
+      }))
   };
 }
 
@@ -814,7 +1108,6 @@ async function triggerWorkbookDownload(
 export async function downloadParticipantExcelTemplate(context: {
   kafilahs: Kafilah[];
   cabangList: CabangItem[];
-  jenjangList: JenjangItem[];
   stages: StageItem[];
 }): Promise<void> {
   const sampleKafilah =
@@ -853,9 +1146,9 @@ export async function downloadParticipantExcelTemplate(context: {
       .filter((k) => k.status === 'Aktif')
       .map((k) => ({ Kategori: 'Grup / Kafilah Aktif', Kode: k.code, Nama: k.name })),
     ...context.stages.map((s) => ({
-      Kategori: 'Babak Aktif',
-      Kode: s.id,
-      Nama: s.name,
+      Kategori: `Babak (${s.branchName || 'Semua Cabang'})`,
+      Kode: s.name,
+      Nama: `${s.name} - ${s.branchName || 'Semua Cabang'}`,
     })),
   ];
   if (masterRefRows.length > 0) {
@@ -870,7 +1163,6 @@ export async function downloadParticipantExcelTemplate(context: {
  */
 export async function downloadQuestionExcelTemplate(context: {
   cabangList: CabangItem[];
-  jenjangList: JenjangItem[];
   stages: StageItem[];
 }): Promise<void> {
   const sampleBranch =
@@ -903,9 +1195,9 @@ export async function downloadQuestionExcelTemplate(context: {
       .filter((c) => c.status === 'Aktif')
       .map((c) => ({ Kategori: 'Cabang Aktif', Kode: c.code, Nama: c.name })),
     ...context.stages.map((s) => ({
-      Kategori: 'Babak Aktif',
-      Kode: s.id,
-      Nama: s.name,
+      Kategori: `Babak (${s.branchName || 'Semua Cabang'})`,
+      Kode: s.name,
+      Nama: `${s.name} - ${s.branchName || 'Semua Cabang'}`,
     })),
   ];
   if (masterRefRows.length > 0) {
@@ -913,6 +1205,42 @@ export async function downloadQuestionExcelTemplate(context: {
   }
 
   void triggerWorkbookDownload(wb, 'Template_Import_Bank_Soal_MTQ.xlsx');
+}
+
+/**
+ * Mengunduh Template Excel (.xlsx) untuk Impor Grup / Kafilah.
+ */
+export async function downloadKafilahExcelTemplate(context: { groupLabel?: string }): Promise<void> {
+  const templateData = [
+    {
+      Kode_Grup: 'KF-BDG',
+      Nama_Grup: 'Kota Bandung',
+      Wilayah: 'Jawa Barat',
+      Penanggung_Jawab: 'Ust. Ahmad Fauzi',
+      Telepon: '0812-3456-7890',
+      Status: 'Aktif'
+    },
+    {
+      Kode_Grup: 'KF-BGR',
+      Nama_Grup: 'Kabupaten Bogor',
+      Wilayah: 'Jawa Barat',
+      Penanggung_Jawab: 'H. Dedi Mulyadi',
+      Telepon: '0811-1122-4455',
+      Status: 'Aktif'
+    }
+  ];
+  const ExcelLib = await loadExcelJS();
+  const wb = new ExcelLib.Workbook();
+  appendObjectsToWorksheet(wb, 'Template_Grup', templateData);
+  appendObjectsToWorksheet(wb, 'Petunjuk', [
+    { Kolom: 'Kode_Grup', Keterangan: 'Wajib, unik. Kode yang sudah ada akan diperbarui, bukan digandakan.' },
+    { Kolom: 'Nama_Grup', Keterangan: `Wajib. Nama ${context.groupLabel || 'grup / kafilah'}.` },
+    { Kolom: 'Wilayah', Keterangan: 'Opsional. Kota/kabupaten atau provinsi asal.' },
+    { Kolom: 'Penanggung_Jawab', Keterangan: 'Opsional. Nama ketua atau kontak grup.' },
+    { Kolom: 'Telepon', Keterangan: 'Opsional. Angka, spasi, +, -, titik, kurung.' },
+    { Kolom: 'Status', Keterangan: 'Aktif atau Nonaktif (bawaan Aktif).' }
+  ]);
+  void triggerWorkbookDownload(wb, 'Template_Import_Grup_MTQ.xlsx');
 }
 
 /**
