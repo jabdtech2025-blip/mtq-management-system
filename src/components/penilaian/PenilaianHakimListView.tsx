@@ -26,6 +26,7 @@ const ALLOWED_PENILAIAN_STATUS_FILTERS = [
 const DEFAULT_PENILAIAN_FILTERS = {
   statusFilter: 'Semua Status',
   branchFilter: 'Semua Cabang',
+  stageFilter: 'Semua Babak',
   adminSelectedJudgeId: ''
 };
 
@@ -57,6 +58,18 @@ export const PenilaianHakimListView: React.FC = () => {
     return Array.from(new Set(names));
   }, [cabangList, currentTenant.id]);
 
+  const tenantStageNames = useMemo(() => {
+    const ordered = (stages || [])
+      .filter((s) => (!s.tenantId || s.tenantId === currentTenant.id) && s.name)
+      .slice()
+      .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    const names: string[] = [];
+    ordered.forEach((s) => {
+      if (!names.includes(s.name)) names.push(s.name);
+    });
+    return names;
+  }, [stages, currentTenant.id]);
+
   const tenantJudges = useMemo(() => {
     return users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id);
   }, [users, currentTenant.id]);
@@ -70,6 +83,9 @@ export const PenilaianHakimListView: React.FC = () => {
   });
   const [branchFilter, setBranchFilter] = useState<string>(
     () => readViewFilters(filterKey, DEFAULT_PENILAIAN_FILTERS).branchFilter || 'Semua Cabang'
+  );
+  const [stageFilter, setStageFilter] = useState<string>(
+    () => readViewFilters(filterKey, DEFAULT_PENILAIAN_FILTERS).stageFilter || 'Semua Babak'
   );
   const [adminSelectedJudgeId, setAdminSelectedJudgeId] = useState<string>(() => {
     if (currentUser.role === 'judge') return currentUser.id;
@@ -91,6 +107,7 @@ export const PenilaianHakimListView: React.FC = () => {
           : 'Semua Status'
       );
       setBranchFilter(saved.branchFilter || 'Semua Cabang');
+      setStageFilter(saved.stageFilter || 'Semua Babak');
       if (currentUser.role === 'judge') {
         setAdminSelectedJudgeId(currentUser.id);
       } else {
@@ -107,9 +124,10 @@ export const PenilaianHakimListView: React.FC = () => {
     writeViewFilters(filterKey, {
       statusFilter,
       branchFilter,
+      stageFilter,
       adminSelectedJudgeId: currentUser.role === 'judge' ? '' : adminSelectedJudgeId
     });
-  }, [filterKey, statusFilter, branchFilter, adminSelectedJudgeId, currentUser.role, currentUser.id, tenantJudges]);
+  }, [filterKey, statusFilter, branchFilter, stageFilter, adminSelectedJudgeId, currentUser.role, currentUser.id, tenantJudges]);
 
   // Reset otomatis jika cabang tersimpan sudah tidak aktif/dihapus (hanya setelah daftar cabang termuat)
   useEffect(() => {
@@ -121,6 +139,17 @@ export const PenilaianHakimListView: React.FC = () => {
       setBranchFilter('Semua Cabang');
     }
   }, [branchFilter, tenantBranchNames]);
+
+  // Reset otomatis jika babak tersimpan sudah tidak tersedia (hanya setelah daftar babak termuat)
+  useEffect(() => {
+    if (
+      stageFilter !== 'Semua Babak' &&
+      tenantStageNames.length > 0 &&
+      !tenantStageNames.includes(stageFilter)
+    ) {
+      setStageFilter('Semua Babak');
+    }
+  }, [stageFilter, tenantStageNames]);
 
   // Reset otomatis jika hakim monitoring tersimpan sudah tidak ada pada tenant ini
   useEffect(() => {
@@ -304,7 +333,10 @@ export const PenilaianHakimListView: React.FC = () => {
     const matchesBranch =
       branchFilter === 'Semua Cabang' || p.branchName === branchFilter;
 
-    return matchesSearch && matchesStatus && matchesBranch;
+    const matchesStage =
+      stageFilter === 'Semua Babak' || p.stageName === stageFilter;
+
+    return matchesSearch && matchesStatus && matchesBranch && matchesStage;
   });
 
   const totalAssigned = assignedParticipants.length;
@@ -419,6 +451,20 @@ export const PenilaianHakimListView: React.FC = () => {
         >
           <option value="Semua Cabang">Semua Cabang</option>
           {tenantBranchNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </Select>
+
+        <Select
+          value={stageFilter}
+          onChange={(e) => setStageFilter(e.target.value)}
+          aria-label="Babak"
+          containerClassName="flex-1 min-w-[150px]"
+        >
+          <option value="Semua Babak">Semua Babak</option>
+          {tenantStageNames.map((name) => (
             <option key={name} value={name}>
               {name}
             </option>

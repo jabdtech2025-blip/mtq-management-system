@@ -23,7 +23,8 @@ export const SuperadminDashboardView: React.FC = () => {
     enterTenantWorkspace
   } = useMtq();
 
-  const totalTenants = tenants.length;
+  const activeTenants = tenants.filter((t) => t.status === 'Aktif');
+  const totalTenants = activeTenants.length;
   const totalUsers = users.length;
   const totalJudges = users.filter((u) => u.role === 'judge').length;
   const totalAdmins = users.filter((u) => u.role === 'admin').length;
@@ -31,7 +32,8 @@ export const SuperadminDashboardView: React.FC = () => {
   const [superviseTenant, setSuperviseTenant] = useState<Tenant | null>(null);
 
   const handleOpenTenantWorkspace = (tId: string) => {
-    setSuperviseTenant(tenants.find((t) => t.id === tId) || null);
+    const found = activeTenants.find((t) => t.id === tId) || null;
+    setSuperviseTenant(found);
   };
 
   return (
@@ -81,7 +83,11 @@ export const SuperadminDashboardView: React.FC = () => {
           <p className="text-3xl font-bold text-slate-900 mt-3 font-mono tabular-nums">
             {totalTenants}
           </p>
-          <p className="text-xs text-slate-400 mt-1">LPTQ Provinsi terdaftar</p>
+          <p className="text-xs text-slate-400 mt-1">
+            {tenants.length > activeTenants.length
+              ? `Aktif (dari ${tenants.length} terdaftar)`
+              : 'LPTQ Provinsi terdaftar'}
+          </p>
         </div>
 
         <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-xs">
@@ -183,8 +189,13 @@ export const SuperadminDashboardView: React.FC = () => {
             Lihat Tabel Lengkap
           </button>
         </div>
+        {activeTenants.length === 0 ? (
+          <div className="bg-white rounded-lg border border-slate-200/90 p-6 text-center text-xs text-slate-500">
+            Belum ada penyelenggara MTQ berstatus aktif saat ini.
+          </div>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {tenants.map((t, idx) => (
+          {activeTenants.map((t, idx) => (
             <div
               key={`${t.id}-${idx}`}
               className="bg-white rounded-lg border border-slate-200/90 p-5 shadow-xs flex flex-col justify-between hover:border-purple-300 transition-all"
@@ -221,6 +232,7 @@ export const SuperadminDashboardView: React.FC = () => {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* Recent Audit Logs */}

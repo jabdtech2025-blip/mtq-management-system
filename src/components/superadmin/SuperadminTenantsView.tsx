@@ -16,6 +16,11 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Tenant } from '../../types/mtq';
+import {
+  canSuperviseTenant,
+  filterTenantsForManagement,
+  TenantStatusFilter
+} from '../../utils/superadminGuard';
 import { SupervisionModal } from './SupervisionModal';
 
 export const SuperadminTenantsView: React.FC = () => {
@@ -31,6 +36,7 @@ export const SuperadminTenantsView: React.FC = () => {
   const [superviseModalTenant, setSuperviseModalTenant] = useState<Tenant | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<TenantStatusFilter>('Aktif');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [deleteModalTenant, setDeleteModalTenant] = useState<Tenant | null>(null);
@@ -51,12 +57,13 @@ export const SuperadminTenantsView: React.FC = () => {
   const [formEdition, setFormEdition] = useState('');
   const [formPeriod, setFormPeriod] = useState('2025 - 2026');
 
-  const filteredTenants = tenants.filter(
-    (t) =>
-      t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.region.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const activeTenantsCount = tenants.filter((t) => t.status === 'Aktif').length;
+  const inactiveTenantsCount = tenants.length - activeTenantsCount;
+
+  const filteredTenants = filterTenantsForManagement(tenants, {
+    statusFilter,
+    searchQuery
+  });
 
   const handleOpenAdd = () => {
     setEditingTenant(null);
@@ -128,6 +135,14 @@ export const SuperadminTenantsView: React.FC = () => {
   };
 
   const handleOpenSupervise = (t: Tenant) => {
+    const guard = canSuperviseTenant(t);
+    if (!guard.allowed) {
+      setOperationBanner({
+        type: 'error',
+        message: guard.message || 'Penyelenggara nonaktif tidak dapat dibuka.'
+      });
+      return;
+    }
     setSuperviseModalTenant(t);
   };
 
@@ -177,7 +192,7 @@ export const SuperadminTenantsView: React.FC = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex items-center">
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         <div className="relative flex-1 w-full">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
@@ -188,6 +203,16 @@ export const SuperadminTenantsView: React.FC = () => {
             className="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-700 text-slate-800 placeholder-slate-400 bg-white"
           />
         </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as TenantStatusFilter)}
+          aria-label="Filter Status Penyelenggara"
+          className="px-3 py-2 text-xs font-semibold border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-700 text-slate-700 bg-white cursor-pointer sm:min-w-[200px]"
+        >
+          <option value="Aktif">Aktif ({activeTenantsCount})</option>
+          <option value="Nonaktif">Nonaktif / Arsip ({inactiveTenantsCount})</option>
+          <option value="Semua">Semua Status ({tenants.length})</option>
+        </select>
       </div>
 
       {/* Tenants Table */}
@@ -204,7 +229,18 @@ export const SuperadminTenantsView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredTenants.map((t, idx) => (
+              {filteredTenants.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-10 text-center text-slate-500">
+                    {searchQuery.trim()
+                      ? 'Tidak ada penyelenggara MTQ yang cocok dengan pencarian dan filter status ini.'
+                      : statusFilter === 'Nonaktif'
+                      ? 'Belum ada penyelenggara MTQ berstatus Nonaktif / Arsip.'
+                      : 'Belum ada penyelenggara MTQ yang aktif.'}
+                  </td>
+                </tr>
+              ) : (
+              filteredTenants.map((t, idx) => (
                 <tr key={`${t.id}-${idx}`} className="hover:bg-slate-50/70">
                   <td className="px-5 py-3.5 font-mono font-bold text-purple-900">
                     {t.code}
@@ -238,9 +274,18 @@ export const SuperadminTenantsView: React.FC = () => {
                   <td className="px-5 py-3.5 text-right space-x-1.5 whitespace-nowrap">
                     <button
                       type="button"
+                      disabled={t.status !== 'Aktif'}
                       onClick={() => handleOpenSupervise(t)}
-                      className="px-2.5 py-1 text-xs font-semibold bg-purple-50 text-purple-800 hover:bg-purple-100 rounded-lg inline-flex items-center gap-1 cursor-pointer"
-                      title="Buka Workspace MTQ dalam Mode Supervisi"
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-lg inline-flex items-center gap-1 ${
+                        t.status === 'Aktif'
+                          ? 'bg-purple-50 text-purple-800 hover:bg-purple-100 cursor-pointer'
+                          : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                      }`}
+                      title={
+                        t.status === 'Aktif'
+                          ? 'Buka Workspace MTQ dalam Mode Supervisi'
+                          : 'Aktifkan penyelenggara terlebih dahulu untuk membuka workspace'
+                      }
                     >
                       <ExternalLink className="w-3 h-3" />
                       <span>Buka Workspace</span>
@@ -280,7 +325,7 @@ export const SuperadminTenantsView: React.FC = () => {
                     )}
                   </td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>

@@ -8,6 +8,7 @@ import {
 import { RankingService } from '../services/rankingService';
 import { OFFICIAL_SENI_BACA_RUBRIC, OFFICIAL_TAHFIZH_RUBRIC } from '../services/competitionRules';
 import {
+  resolveSnapshotForStage,
   resolveStageForBranch,
   resolveStageWithLegacyFallback,
   stageBelongsToBranch
@@ -23,6 +24,11 @@ import {
   writeViewFilters,
   FilterStorageLike
 } from '../utils/viewFilterStorage';
+import {
+  canSuperviseTenant,
+  filterTenantsForManagement,
+  resolveSuperadminTargetTenant
+} from '../utils/superadminGuard';
 import { getParticipantStageCompletion } from '../services/completion';
 import { ErrorCategory, JudgeAssessment, JudgeAssignment, Participant, StageParticipation } from '../types/mtq';
 
@@ -490,6 +496,113 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
         !('searchQuery' in extraRes),
       `field asing & tipe salah harus disaring: ${JSON.stringify(extraRes)}`
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Isolasi snapshot juara/podium antar cabang dengan nama babak sama ("Final")
+  // ---------------------------------------------------------------------------
+  check('MC-14. Snapshot podium Final Cabang 2 tidak pernah meminjam snapshot Final Cabang 1', () => {
+    const snapshots = [
+      {
+        id: 'snap-cab1',
+        tenantId: TENANT,
+        stageId: 'st-final-cab1',
+        stageName: 'Final',
+        branchId: 'br-cab1',
+        branchName: 'Marhalah Ibtidaiyyah',
+        rankings: [{ participantName: 'Juara Cabang 1' }]
+      },
+      {
+        id: 'snap-cab2',
+        tenantId: TENANT,
+        stageId: 'st-final-cab2',
+        stageName: 'Final',
+        branchId: 'br-cab2',
+        branchName: 'Marhalah Mutawassithah',
+        rankings: [{ participantName: 'Juara Cabang 2' }]
+      }
+    ];
+
+    const stageCab2 = {
+      id: 'st-final-cab2',
+      tenantId: TENANT,
+      name: 'Final',
+      branchId: 'br-cab2',
+      branchName: 'Marhalah Mutawassithah'
+    };
+
+    const resolved = resolveSnapshotForStage(snapshots, {
+      tenantId: TENANT,
+      stage: stageCab2,
+      branchName: 'Marhalah Mutawassithah'
+    });
+    expect(resolved?.id === 'snap-cab2', `harus snap-cab2, dapat ${resolved?.id}`);
+  });
+
+  check('MC-15. Jika snapshot Final Cabang 2 belum termuat, tetap undefined (tidak bocor ke Cabang 1)', () => {
+    const onlyBranch1Snapshot = [
+      {
+        id: 'snap-cab1',
+        tenantId: TENANT,
+        stageId: 'st-final-cab1',
+        stageName: 'Final',
+        branchId: 'br-cab1',
+        branchName: 'Marhalah Ibtidaiyyah'
+      }
+    ];
+    const stageCab2 = {
+      id: 'st-final-cab2',
+      tenantId: TENANT,
+      name: 'Final',
+      branchId: 'br-cab2',
+      branchName: 'Marhalah Mutawassithah'
+    };
+
+    const resolved = resolveSnapshotForStage(onlyBranch1Snapshot, {
+      tenantId: TENANT,
+      stage: stageCab2,
+      branchName: 'Marhalah Mutawassithah'
+    });
+    expect(resolved === undefined, `harus undefined agar podium fallback ke ranking cabang 2, dapat ${resolved?.id}`);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Guard Superadmin: mendarat di platform saat login & blokir tenant Nonaktif
+  // ---------------------------------------------------------------------------
+  check('SA-01. Superadmin tanpa sesi supervisi sah selalu diarahkan ke platform, bukan tenant sisa sesi sebelumnya', () => {
+    const staleTenantId = '11111111-1111-4111-8111-111111111111';
+    const afterAdminLogout = resolveSuperadminTargetTenant({
+      currentTenantId: staleTenantId,
+      activeSupervisedTenantId: null
+    });
+    expect(afterAdminLogout === 'platform', `harus 'platform', dapat ${afterAdminLogout}`);
+
+    const legitimateSupervision = resolveSuperadminTargetTenant({
+      currentTenantId: staleTenantId,
+      activeSupervisedTenantId: staleTenantId
+    });
+    expect(
+      legitimateSupervision === staleTenantId,
+      `supervisi sah harus dipertahankan, dapat ${legitimateSupervision}`
+    );
+  });
+
+  check('SA-02. Tenant Nonaktif (Arsip) ditolak supervisi & tersembunyi pada filter default Aktif', () => {
+    const sampleTenants = [
+      { id: 't-1', name: 'LPTQ Jabar', code: 'JBR', eventName: 'MTQ 2026', region: 'Jawa Barat', status: 'Aktif' as const },
+      { id: 't-2', name: 'LPTQ Arsip', code: 'ARS', eventName: 'MTQ 2024', region: 'Jawa Tengah', status: 'Nonaktif' as const }
+    ];
+
+    expect(canSuperviseTenant(sampleTenants[0]).allowed === true, 'tenant Aktif harus boleh disupervisi');
+    expect(canSuperviseTenant(sampleTenants[1]).allowed === false, 'tenant Nonaktif harus ditolak supervisi');
+
+    const activeOnly = filterTenantsForManagement(sampleTenants, { statusFilter: 'Aktif' });
+    const archivedOnly = filterTenantsForManagement(sampleTenants, { statusFilter: 'Nonaktif' });
+    const allTenants = filterTenantsForManagement(sampleTenants, { statusFilter: 'Semua' });
+
+    expect(activeOnly.length === 1 && activeOnly[0].id === 't-1', `filter Aktif salah: ${JSON.stringify(activeOnly)}`);
+    expect(archivedOnly.length === 1 && archivedOnly[0].id === 't-2', `filter Nonaktif salah: ${JSON.stringify(archivedOnly)}`);
+    expect(allTenants.length === 2, `filter Semua harus 2, dapat ${allTenants.length}`);
   });
 
   const passed = results.filter((r) => r.success).length;

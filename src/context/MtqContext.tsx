@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { canSuperviseTenant, resolveSuperadminTargetTenant } from '../utils/superadminGuard';
 import {
   Tenant,
   User,
@@ -482,6 +483,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [currentTenantId, setCurrentTenantId] = useState<string>(() => {
     try {
+      const isDemoMode = localStorage.getItem('mtq_offline_demo_simulation_v4') === 'true';
+      if (!isDemoMode) return 'platform';
       const saved = localStorage.getItem(STORAGE_PREFIX + 'tenant_id');
       if (saved) return saved;
       return 'platform';
@@ -1418,8 +1421,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'Alasan supervisi wajib diisi (minimal 5 karakter).' };
     }
     const tenant = tenants.find((t) => t.id === tenantId);
-    if (!tenant) {
-      return { success: false, message: 'Penyelenggara tidak ditemukan.' };
+    const guard = canSuperviseTenant(tenant);
+    if (!guard.allowed || !tenant) {
+      return { success: false, message: guard.message || 'Penyelenggara tidak dapat dibuka.' };
     }
 
     if (isLiveDbActive) {
@@ -1559,6 +1563,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (!profile) {
         hasHydratedWorkspaceRef.current = false;
+        activeSupervisionRef.current = null;
+        if (currentTenantId !== 'platform') {
+          setCurrentTenantId('platform');
+        }
         // Sesi belum login di mode live: bersihkan state operasional agar data demo tidak bocor
         setDataSourceMode('supabase_live');
         setWorkspaceError(null);
@@ -1583,23 +1591,32 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ? 'superadmin'
           : primaryMembership?.role || profile.globalRole;
       const effectiveTenantId =
-        primaryMembership?.tenantId ||
-        (effectiveRole === 'superadmin' ? 'platform' : currentTenantId);
+        effectiveRole === 'superadmin'
+          ? 'platform'
+          : primaryMembership?.tenantId || currentTenantId;
 
-      if (
+      if (effectiveRole === 'superadmin') {
+        // Superadmin WAJIB selalu masuk ke 'platform' saat login, tidak pernah mewarisi tenant admin
+        // sebelumnya ataupun primaryMembership, kecuali sedang dalam sesi supervisi resmi via enterTenantWorkspace.
+        const resolvedSuperadminTenant = resolveSuperadminTargetTenant({
+          currentTenantId,
+          activeSupervisedTenantId: activeSupervisionRef.current?.tenantId
+        });
+        targetTenantId = resolvedSuperadminTenant;
+        if (resolvedSuperadminTenant === 'platform') {
+          activeSupervisionRef.current = null;
+        }
+        if (currentTenantId !== resolvedSuperadminTenant) {
+          setCurrentTenantId(resolvedSuperadminTenant);
+        }
+      } else if (
         primaryMembership?.tenantId &&
-        (!isValidUuid(currentTenantId) || !profile.memberships.some((m) => m.tenantId === currentTenantId)) &&
-        !(effectiveRole === 'superadmin' && currentTenantId === 'platform')
+        (!isValidUuid(currentTenantId) || !profile.memberships.some((m) => m.tenantId === currentTenantId))
       ) {
         targetTenantId = primaryMembership.tenantId;
         setCurrentTenantId(primaryMembership.tenantId);
       } else if (primaryMembership?.tenantId && isValidUuid(currentTenantId)) {
         targetTenantId = currentTenantId;
-      } else if (effectiveRole === 'superadmin' && !isValidUuid(currentTenantId)) {
-        targetTenantId = 'platform';
-        if (currentTenantId !== 'platform') {
-          setCurrentTenantId('platform');
-        }
       }
 
       const mappedUser: User = {
@@ -1812,10 +1829,13 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const signOutSupabase = async (): Promise<void> => {
     // Invalidate any in-flight hydration requests immediately
     authRequestGenRef.current += 1;
+    activeSupervisionRef.current = null;
     await supabaseDataService.signOut();
     hasHydratedWorkspaceRef.current = false;
     authenticatedProfileRef.current = null;
     setAuthenticatedProfile(null);
+    setCurrentTenantId('platform');
+    setCurrentView('dashboard');
     setIsPasswordRecoveryMode(false);
     setWorkspaceError(null);
     setUsers([]);
@@ -7221,6 +7241,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const merged: Tenant = { ...existing, status: nextStatus };
 
     setTenants((prev) => prev.map((t) => (t.id === id ? merged : t)));
+    if (nextStatus === 'Nonaktif' && currentTenantId === id) {
+      activeSupervisionRef.current = null;
+      setCurrentTenantId('platform');
+      setCurrentView('superadmin_tenants');
+    }
 
     if (isLiveDbActive) {
       setSyncStatus(`Memperbarui status MTQ (${nextStatus}) di database...`);

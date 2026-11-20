@@ -119,6 +119,49 @@ export function resolveStageWithLegacyFallback<T extends StageLike>(
   return stages.find((s) => (!s.tenantId || s.tenantId === lookup.tenantId) && clean(s.name) === stageName);
 }
 
+export interface SnapshotLike {
+  tenantId?: string;
+  stageId?: string;
+  stageName?: string;
+  branchId?: string;
+  branchName?: string;
+}
+
+/**
+ * Mencari snapshot hasil babak yang benar-benar milik babak & cabang yang sedang dilihat.
+ * Urutan:
+ * 1) Cocok persis `stageId` (mendukung ID lokal Mode Demo maupun UUID database).
+ * 2) Fallback hanya untuk snapshot lama tanpa `stageId`: nama babak sama DAN cabang cocok.
+ * Tidak pernah meminjam snapshot milik cabang lain walau nama babaknya sama (mis. sama-sama "Final").
+ */
+export function resolveSnapshotForStage<T extends SnapshotLike>(
+  snapshots: T[],
+  target: { tenantId: string; stage: StageLike; branchName?: string }
+): T | undefined {
+  const tenantSnapshots = snapshots.filter((s) => !s.tenantId || s.tenantId === target.tenantId);
+
+  const byStageId = tenantSnapshots.find((s) => clean(s.stageId) && sameId(s.stageId, target.stage.id));
+  if (byStageId) return byStageId;
+
+  const targetStageName = clean(target.stage.name);
+  const targetBranch = {
+    branchId: target.stage.branchId,
+    branchName: target.branchName || target.stage.branchName
+  };
+  const hasTargetBranch = Boolean(clean(targetBranch.branchId) || clean(targetBranch.branchName));
+
+  return tenantSnapshots.find((s) => {
+    // Jika snapshot sudah memiliki stageId (dan tidak cocok di langkah 1), jangan pernah fallback via nama babak
+    if (clean(s.stageId)) return false;
+    if (clean(s.stageName) !== targetStageName) return false;
+    if (!hasTargetBranch) return true;
+    return stageBelongsToBranch(
+      { id: '', name: s.stageName || '', branchId: s.branchId, branchName: s.branchName },
+      targetBranch
+    );
+  });
+}
+
 export function missingStageMessage(stageName: string, branchName?: string): string {
   const branchLabel = clean(branchName) ? `Cabang "${clean(branchName)}"` : 'Cabang ini';
   return `${branchLabel} belum memiliki babak "${stageName}". Buat babaknya di Master Data & Rubrik > Babak Musabaqah terlebih dahulu.`;

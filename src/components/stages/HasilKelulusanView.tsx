@@ -18,6 +18,7 @@ import {
 import { useMtq } from '../../context/MtqContext';
 import { Participant } from '../../types/mtq';
 import { RankingService } from '../../services/rankingService';
+import { resolveSnapshotForStage } from '../../services/stageResolver';
 import { supabaseDataService } from '../../services/supabaseDataService';
 import { buildViewFilterKey, readViewFilters, writeViewFilters } from '../../utils/viewFilterStorage';
 import { ConfirmDialog, Modal, Badge, Button, Select, Textarea, Input, Card } from '../ui';
@@ -223,6 +224,11 @@ export const HasilKelulusanView: React.FC = () => {
       );
       if (activeBranchSpecific) return activeBranchSpecific;
 
+      const branchSpecific = candidates.find(
+        (s) => s.branchName === effectiveBranchName
+      );
+      if (branchSpecific) return branchSpecific;
+
       const activeShared = candidates.find(
         (s) =>
           (!s.branchName || s.branchName === 'Semua Cabang') &&
@@ -230,13 +236,13 @@ export const HasilKelulusanView: React.FC = () => {
       );
       if (activeShared) return activeShared;
 
-      const anyActive = candidates.find((s) => activeStageIds.has(s.id));
-      if (anyActive) return anyActive;
-
-      const branchSpecific = candidates.find(
-        (s) => s.branchName === effectiveBranchName
+      const anyShared = candidates.find(
+        (s) => !s.branchName || s.branchName === 'Semua Cabang'
       );
-      if (branchSpecific) return branchSpecific;
+      if (anyShared) return anyShared;
+
+      // Jangan jatuh ke babak milik cabang lain ketika cabang spesifik sudah dipilih
+      return undefined;
     }
 
     return (
@@ -291,10 +297,12 @@ export const HasilKelulusanView: React.FC = () => {
 
   const currentStageSnapshot = useMemo(() => {
     if (!currentStage) return undefined;
-    return stageSnapshots.find(
-      (s) => s.tenantId === currentTenant.id && (s.stageId === currentStage.id || s.stageName === currentStage.name)
-    );
-  }, [stageSnapshots, currentTenant.id, currentStage]);
+    return resolveSnapshotForStage(stageSnapshots, {
+      tenantId: currentTenant.id,
+      stage: currentStage,
+      branchName: effectiveBranchName
+    });
+  }, [stageSnapshots, currentTenant.id, currentStage, effectiveBranchName]);
 
   // Manual overrides state: { [participantId]: boolean } and reasons { [participantId]: string }
   const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
