@@ -131,6 +131,127 @@ export const RekapNilaiView: React.FC = () => {
   });
   const [inspectedParticipant, setInspectedParticipant] = useState<Participant | null>(null);
   const [modalSelectedQuestionId, setModalSelectedQuestionId] = useState<string>('');
+  const tableCardRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const prevTableScrollTopRef = useRef(0);
+  const [tableViewportMaxHeight, setTableViewportMaxHeight] = useState<number | null>(null);
+
+  // Ukur tinggi area <main> agar saat bagian judul & filter tergulir ke atas, tabel mengisi penuh viewport
+  useEffect(() => {
+    const tableEl = tableScrollRef.current;
+    const mainEl = tableEl?.closest('main') as HTMLElement | null;
+    if (!mainEl) return;
+
+    const updateHeight = () => {
+      const h = mainEl.clientHeight;
+      if (h > 0) {
+        setTableViewportMaxHeight(Math.max(240, h - 26));
+      }
+    };
+
+    updateHeight();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateHeight);
+      observer.observe(mainEl);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', updateHeight);
+    return () => window.removeEventListener('resize', updateHeight);
+  }, []);
+
+  // Scroll chaining: saat pengguna menggulir tabel ke bawah, gulir halaman (<main>) terlebih dahulu
+  // hingga bagian judul, tombol Ekspor CSV, dan filter tergulir ke atas, baru gulir isi tabel
+  useEffect(() => {
+    const tableEl = tableScrollRef.current;
+    if (!tableEl) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.deltaY === 0) return;
+
+      const mainEl = tableEl.closest('main') as HTMLElement | null;
+      const cardEl = tableCardRef.current;
+      if (!mainEl || !cardEl) return;
+
+      let deltaY = e.deltaY;
+      if (e.deltaMode === 1) deltaY *= 32;
+      else if (e.deltaMode === 2) deltaY *= mainEl.clientHeight;
+
+      const maxMainScroll = mainEl.scrollHeight - mainEl.clientHeight;
+      if (maxMainScroll <= 1) return;
+
+      const mainRect = mainEl.getBoundingClientRect();
+      const cardRect = cardEl.getBoundingClientRect();
+      const dockGap = 12;
+      const dockScrollTop = Math.max(
+        0,
+        Math.min(maxMainScroll, mainEl.scrollTop + (cardRect.top - mainRect.top) - dockGap)
+      );
+
+      if (deltaY > 0) {
+        const remainingMainDown = dockScrollTop - mainEl.scrollTop;
+        if (remainingMainDown > 0.5) {
+          e.preventDefault();
+          const consumedByMain = Math.min(deltaY, remainingMainDown);
+          mainEl.scrollTop += consumedByMain;
+          const leftover = deltaY - consumedByMain;
+          if (leftover > 0.5 && tableEl.scrollHeight > tableEl.clientHeight + 1) {
+            tableEl.scrollTop += leftover;
+          }
+        }
+      } else {
+        const canScrollTableUp = tableEl.scrollTop > 0.5;
+        if (canScrollTableUp) {
+          const nextTableTop = tableEl.scrollTop + deltaY;
+          if (nextTableTop < 0 && mainEl.scrollTop > 0.5) {
+            e.preventDefault();
+            tableEl.scrollTop = 0;
+            mainEl.scrollTop = Math.max(0, mainEl.scrollTop + nextTableTop);
+          }
+        } else if (mainEl.scrollTop > 0.5) {
+          e.preventDefault();
+          mainEl.scrollTop = Math.max(0, mainEl.scrollTop + deltaY);
+        }
+      }
+    };
+
+    tableEl.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      tableEl.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
+
+  const handleTableScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const tableEl = e.currentTarget;
+    const prevTop = prevTableScrollTopRef.current;
+    const currTop = tableEl.scrollTop;
+    prevTableScrollTopRef.current = currTop;
+
+    // Fallback saat pengguna menyeret scrollbar tabel atau menggeser layar sentuh ke bawah
+    if (currTop > prevTop && currTop > 2) {
+      const mainEl = tableEl.closest('main') as HTMLElement | null;
+      const cardEl = tableCardRef.current;
+      if (!mainEl || !cardEl) return;
+
+      const maxMainScroll = mainEl.scrollHeight - mainEl.clientHeight;
+      if (maxMainScroll <= 1) return;
+
+      const mainRect = mainEl.getBoundingClientRect();
+      const cardRect = cardEl.getBoundingClientRect();
+      const dockGap = 12;
+      const remainingMainDown = cardRect.top - mainRect.top - dockGap;
+
+      if (remainingMainDown > 8 && mainEl.scrollTop < maxMainScroll - 1) {
+        const targetMainTop = Math.max(
+          0,
+          Math.min(maxMainScroll, mainEl.scrollTop + remainingMainDown)
+        );
+        mainEl.scrollTo({ top: targetMainTop, behavior: 'smooth' });
+      }
+    }
+  };
 
   useEffect(() => {
     if (loadedFilterKeyRef.current !== filterKey) {
@@ -437,7 +558,7 @@ export const RekapNilaiView: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="px-4 pt-4 pb-3 sm:px-8 sm:pt-6 sm:pb-3 max-w-7xl mx-auto space-y-5">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -522,24 +643,35 @@ export const RekapNilaiView: React.FC = () => {
         </select>
       </div>
 
-      {/* Dynamic Grouped-Header Table with Sticky Identification & Horizontal Scrolling */}
-      <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto max-w-full">
-          <table className="w-full text-left border-collapse min-w-[950px]">
-            <thead>
+      {/* Dynamic Grouped-Header Table with Sticky Header, Sticky Identification & 2-Axis Scrolling */}
+      <div
+        ref={tableCardRef}
+        className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden"
+      >
+        <div
+          ref={tableScrollRef}
+          onScroll={handleTableScroll}
+          style={tableViewportMaxHeight ? { maxHeight: `${tableViewportMaxHeight}px` } : undefined}
+          className="overflow-auto max-w-full max-h-[calc(100dvh-92px)]"
+        >
+          <table className="w-full text-left border-separate border-spacing-0 min-w-[950px]">
+            <thead className="sticky top-0 z-30 bg-slate-100 shadow-[0_-2px_0_0_#f1f5f9,0_1px_0_0_#cbd5e1]">
               {/* Top Grouped Header */}
-              <tr className="bg-slate-100/80 text-slate-600 border-b border-slate-200 text-xs font-bold uppercase tracking-wider">
-                <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 px-4 py-2.5 sticky-col-divider">
+              <tr className="bg-slate-100 text-slate-600 text-xs font-bold uppercase tracking-wider">
+                <th
+                  colSpan={2}
+                  className="sticky left-0 z-40 bg-slate-100 px-4 py-2.5 border-b border-slate-200 sticky-col-divider shadow-[0_1px_0_0_#e2e8f0]"
+                >
                   Identitas Peserta
                 </th>
-                <th className="px-1.5 py-2.5 border-r border-slate-200 text-center bg-slate-50 text-slate-700 w-20 max-w-[80px]">
+                <th className="px-1.5 py-2.5 border-b border-r border-slate-200 text-center bg-slate-50 text-slate-700 w-20 max-w-[80px] shadow-[0_1px_0_0_#e2e8f0]">
                   Maqra / Soal
                 </th>
                 {activeJudges.map((j, jIdx) => (
                   <th
                     key={`${j.id}-${jIdx}`}
                     colSpan={2}
-                    className="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-50"
+                    className="px-3 py-2.5 border-b border-r border-slate-200 text-center bg-slate-50 shadow-[0_1px_0_0_#e2e8f0]"
                   >
                     <span className="block text-slate-800">{j.name.split(',')[0]}</span>
                     <span className="text-xs text-slate-400 font-normal lowercase tracking-normal">
@@ -547,44 +679,53 @@ export const RekapNilaiView: React.FC = () => {
                     </span>
                   </th>
                 ))}
-                <th colSpan={2} className="px-4 py-2.5 text-center bg-slate-100 text-slate-700 border-l border-slate-200">
+                <th
+                  colSpan={2}
+                  className="px-4 py-2.5 text-center bg-slate-100 text-slate-700 border-b border-r border-slate-200 shadow-[0_1px_0_0_#e2e8f0]"
+                >
                   Hasil Rekap
                 </th>
-                <th className="px-3 py-2.5 text-center bg-slate-50 text-slate-700 w-16">
+                <th className="px-3 py-2.5 text-center bg-slate-50 text-slate-700 border-b border-slate-200 w-16 shadow-[0_1px_0_0_#e2e8f0]">
                   Aksi
                 </th>
               </tr>
 
               {/* Secondary Subheaders with Centered Text */}
-              <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 text-xs font-semibold uppercase">
-                <th className="sticky left-0 z-20 bg-slate-50 px-4 py-2 w-16">Undian</th>
-                <th className="sticky left-16 z-20 bg-slate-50 px-4 py-2 min-w-[170px] sticky-col-divider">Nama & Grup</th>
-                <th className="px-1.5 py-2 border-r border-slate-200 text-center w-20 max-w-[80px]">Maqra / Soal</th>
+              <tr className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase">
+                <th className="sticky left-0 z-40 bg-slate-50 px-3 py-2 w-[84px] min-w-[84px] max-w-[84px] border-b border-r border-slate-200 shadow-[1px_0_0_0_#f8fafc]">
+                  Undian
+                </th>
+                <th className="sticky left-[84px] z-40 bg-slate-50 px-4 py-2 min-w-[170px] border-b border-slate-200 sticky-col-divider">
+                  Nama & Grup
+                </th>
+                <th className="px-1.5 py-2 border-b border-r border-slate-200 bg-slate-50 text-center w-20 max-w-[80px]">
+                  Maqra / Soal
+                </th>
 
                 {activeJudges.map((j, jIdx) => (
                   <React.Fragment key={`${j.id}-${jIdx}`}>
-                    <th className="px-2.5 py-2 text-center w-24 min-w-[96px] border-r border-slate-200 whitespace-nowrap">
+                    <th className="px-2.5 py-2 text-center w-24 min-w-[96px] border-b border-r border-slate-200 bg-slate-50 whitespace-nowrap">
                       Pengurangan
                     </th>
-                    <th className="px-2.5 py-2 text-center w-24 min-w-[96px] border-r border-slate-200 whitespace-nowrap">
+                    <th className="px-2.5 py-2 text-center w-24 min-w-[96px] border-b border-r border-slate-200 bg-slate-50 whitespace-nowrap">
                       Nilai Hakim
                     </th>
                   </React.Fragment>
                 ))}
 
-                <th className="px-3 py-2 text-center w-24 border-l border-slate-200 text-slate-600">
+                <th className="px-3 py-2 text-center w-24 border-b border-slate-200 bg-slate-50 text-slate-600">
                   Rata-Rata
                 </th>
-                <th className="px-4 py-2 text-center w-28 text-slate-600">
+                <th className="px-4 py-2 text-center w-28 border-b border-r border-slate-200 bg-slate-50 text-slate-600">
                   Status
                 </th>
-                <th className="px-3 py-2 text-center w-16 text-slate-600">
+                <th className="px-3 py-2 text-center w-16 border-b border-slate-200 bg-slate-50 text-slate-600">
                   Rincian
                 </th>
               </tr>
             </thead>
 
-            <tbody className="divide-y divide-slate-100 text-sm">
+            <tbody className="text-sm">
               {filteredParticipants.length === 0 ? (
                 <tr>
                   <td
@@ -640,11 +781,14 @@ export const RekapNilaiView: React.FC = () => {
                   // Case 1: Participant has NO assigned questions for this stage
                   if (stageQuestions.length === 0) {
                     return (
-                      <tr key={`${p.id}-${pIdx}`} className="hover:bg-slate-50/80 transition-colors group">
-                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 font-mono font-bold text-slate-900">
+                      <tr
+                        key={`${p.id}-${pIdx}`}
+                        className="hover:bg-slate-50/80 transition-colors group [&>td]:border-b [&>td]:border-slate-100"
+                      >
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-3 py-3 w-[84px] min-w-[84px] max-w-[84px] font-mono font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#ffffff] group-hover:shadow-[1px_0_0_0_#f8fafc]">
                           #{p.lotteryNumber}
                         </td>
-                        <td className="sticky left-16 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] sticky-col-divider">
+                        <td className="sticky left-[84px] z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] sticky-col-divider">
                           <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {p.participantId} · {p.kafilahName}
@@ -668,10 +812,10 @@ export const RekapNilaiView: React.FC = () => {
                             </td>
                           </React.Fragment>
                         ))}
-                        <td className="px-3 py-3 text-center font-mono text-slate-300 border-l border-slate-100">
+                        <td className="px-3 py-3 text-center font-mono text-slate-300">
                           --
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-4 py-3 text-center border-r border-slate-100">
                           <span className="text-xs font-medium text-amber-700">
                             {overallProgress}
                           </span>
@@ -697,11 +841,14 @@ export const RekapNilaiView: React.FC = () => {
                     const avgScore = validScores.length > 0 ? singleScore.value : null;
 
                     return (
-                      <tr key={`${p.id}-${pIdx}`} className="hover:bg-slate-50/80 transition-colors group">
-                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 font-mono font-bold text-slate-900">
+                      <tr
+                        key={`${p.id}-${pIdx}`}
+                        className="hover:bg-slate-50/80 transition-colors group [&>td]:border-b [&>td]:border-slate-100"
+                      >
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-3 py-3 w-[84px] min-w-[84px] max-w-[84px] font-mono font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#ffffff] group-hover:shadow-[1px_0_0_0_#f8fafc]">
                           #{p.lotteryNumber}
                         </td>
-                        <td className="sticky left-16 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] sticky-col-divider">
+                        <td className="sticky left-[84px] z-10 bg-white group-hover:bg-slate-50 px-4 py-3 min-w-[170px] sticky-col-divider">
                           <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {p.participantId} · {p.kafilahName}
@@ -732,7 +879,7 @@ export const RekapNilaiView: React.FC = () => {
                             </React.Fragment>
                           );
                         })}
-                        <td className="px-3 py-3 text-center font-mono font-extrabold text-slate-900 border-l border-slate-100">
+                        <td className="px-3 py-3 text-center font-mono font-extrabold text-slate-900">
                           {avgScore !== null ? (
                             <div>
                               <span className="text-sm">{avgScore.toFixed(2)}</span>
@@ -746,7 +893,7 @@ export const RekapNilaiView: React.FC = () => {
                             <span className="text-slate-300">--</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-4 py-3 text-center border-r border-slate-100">
                           <span className="text-xs font-medium text-slate-700">
                             {overallProgress}
                           </span>
@@ -789,15 +936,15 @@ export const RekapNilaiView: React.FC = () => {
                         return (
                           <tr
                             key={`${p.id}-${q.id || q.questionId}-${qIdx}`}
-                            className={`hover:bg-slate-50/80 transition-colors ${
-                              qIdx === 0 ? 'border-t-2 border-slate-200' : ''
+                            className={`hover:bg-slate-50/80 transition-colors group [&>td]:border-b [&>td]:border-b-slate-100 ${
+                              qIdx === 0 ? '[&>td]:border-t-2 [&>td]:border-t-slate-200' : ''
                             }`}
                           >
                             {/* Sticky Participant columns for first question row, or empty continuation */}
-                            <td className="sticky left-0 z-10 bg-white px-4 py-2.5 font-mono font-bold text-slate-900 border-b border-slate-100">
+                            <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-3 py-2.5 w-[84px] min-w-[84px] max-w-[84px] font-mono font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#ffffff] group-hover:shadow-[1px_0_0_0_#f8fafc]">
                               #{p.lotteryNumber}
                             </td>
-                            <td className="sticky left-16 z-10 bg-white px-4 py-2.5 min-w-[170px] sticky-col-divider border-b border-slate-100">
+                            <td className="sticky left-[84px] z-10 bg-white group-hover:bg-slate-50 px-4 py-2.5 min-w-[170px] sticky-col-divider">
                               <p className="font-bold text-slate-900 leading-tight">
                                 {p.name}
                               </p>
@@ -836,7 +983,7 @@ export const RekapNilaiView: React.FC = () => {
                             })}
 
                             {/* Rata-Rata Maqra */}
-                            <td className="px-3 py-2.5 text-center font-mono font-bold text-slate-800 border-l border-slate-100">
+                            <td className="px-3 py-2.5 text-center font-mono font-bold text-slate-800">
                               {maqraAvg !== null ? (
                                 <div>
                                   <span className="text-xs">{maqraAvg.toFixed(2)}</span>
@@ -852,7 +999,7 @@ export const RekapNilaiView: React.FC = () => {
                             </td>
 
                             {/* Status Maqra */}
-                            <td className="px-4 py-2.5 text-center">
+                            <td className="px-4 py-2.5 text-center border-r border-slate-100">
                               <span
                                 className={`text-xs font-semibold ${
                                   isMaqraFinalized
@@ -884,10 +1031,10 @@ export const RekapNilaiView: React.FC = () => {
                       })}
 
                       {/* Participant Aggregate Summary Row */}
-                      <tr className="bg-emerald-50/40 border-b-2 border-slate-300 text-xs font-semibold">
+                      <tr className="bg-emerald-50/40 [&>td]:border-b-2 [&>td]:border-b-slate-300 text-xs font-semibold">
                         <td
                           colSpan={2}
-                          className="sticky left-0 z-10 bg-emerald-50/90 px-4 py-2 text-slate-700 font-bold text-xs uppercase tracking-wide border-r border-slate-200"
+                          className="sticky left-0 z-10 bg-emerald-50 px-4 py-2 text-slate-700 font-bold text-xs uppercase tracking-wide sticky-col-divider"
                         >
                           Akumulasi Peserta #{p.lotteryNumber}
                         </td>
@@ -915,7 +1062,7 @@ export const RekapNilaiView: React.FC = () => {
                             </React.Fragment>
                           );
                         })}
-                        <td className="px-3 py-2 text-center font-mono font-extrabold text-emerald-950 border-l border-slate-200 text-sm">
+                        <td className="px-3 py-2 text-center font-mono font-extrabold text-emerald-950 text-sm">
                           {overallAvg !== null ? (
                             <div>
                               <span>{overallAvg.toFixed(2)}</span>
@@ -929,7 +1076,7 @@ export const RekapNilaiView: React.FC = () => {
                             <span className="text-slate-300">--</span>
                           )}
                         </td>
-                        <td className="px-4 py-2 text-center">
+                        <td className="px-4 py-2 text-center border-r border-slate-200">
                           <span className="text-xs font-bold text-emerald-900">
                             {overallProgress}
                           </span>

@@ -619,7 +619,8 @@ export const PenilaianDualPanelView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setZoomLevel((z) => Math.max(70, z - 15))}
-                  className="w-8 h-8 inline-flex items-center justify-center rounded-sm hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer"
+                  disabled={zoomLevel <= 70}
+                  className="w-8 h-8 inline-flex items-center justify-center rounded-sm hover:bg-slate-100 text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
                   title="Perkecil Tampilan"
                   aria-label="Perkecil Tampilan"
                 >
@@ -627,8 +628,18 @@ export const PenilaianDualPanelView: React.FC = () => {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setZoomLevel(100)}
+                  className="px-1.5 h-8 text-xs font-bold text-slate-700 font-mono tabular-nums rounded-sm hover:bg-slate-100 transition-colors cursor-pointer min-w-[46px] text-center"
+                  title="Klik untuk reset ukuran ke 100%"
+                  aria-label={`Ukuran zoom ${zoomLevel} persen, klik untuk reset ke 100 persen`}
+                >
+                  {zoomLevel}%
+                </button>
+                <button
+                  type="button"
                   onClick={() => setZoomLevel((z) => Math.min(180, z + 15))}
-                  className="w-8 h-8 inline-flex items-center justify-center rounded-sm hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer"
+                  disabled={zoomLevel >= 180}
+                  className="w-8 h-8 inline-flex items-center justify-center rounded-sm hover:bg-slate-100 text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
                   title="Perbesar Tampilan"
                   aria-label="Perbesar Tampilan"
                 >
@@ -770,15 +781,14 @@ export const PenilaianDualPanelView: React.FC = () => {
           {/* Mushaf Page Container */}
           <div
             ref={containerRef}
-            className="flex-1 overflow-y-auto overflow-x-auto p-0 m-0 bg-white relative flex justify-start items-start"
+            className="flex-1 overflow-y-auto overflow-x-auto p-0 m-0 bg-slate-100/60 relative flex justify-start items-start"
           >
             <div
               style={{
-                width: zoomLevel === 100 ? '100%' : `${zoomLevel}%`,
-                minWidth: '100%',
+                width: `${zoomLevel}%`,
                 backgroundColor: '#ffffff'
               }}
-              className="relative select-none transition-all"
+              className="relative shrink-0 mx-auto select-none transition-[width] duration-150"
             >
               {participantAssignedQuestions.length === 0 && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-white z-30 p-6 text-center min-h-[420px]">
