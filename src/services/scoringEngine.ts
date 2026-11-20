@@ -600,6 +600,9 @@ export function aggregateParticipantScores(
   isFullyFinalized: boolean;
   finalizedCount: number;
   totalRequiredUnits: number;
+  /** Mode per bidang: pasangan (maqra x bidang) yang sudah dinilai / yang wajib. 0 bila tanpa rubrik bidang. */
+  coveredFieldUnits: number;
+  requiredFieldUnits: number;
   averageFinalScore: number | null;
   provisionalScore: number | null;
   fieldAverages: Record<string, number>;
@@ -616,6 +619,8 @@ export function aggregateParticipantScores(
       isFullyFinalized: false,
       finalizedCount: 0,
       totalRequiredUnits: 0,
+      coveredFieldUnits: 0,
+      requiredFieldUnits: 0,
       averageFinalScore: null,
       provisionalScore: null,
       fieldAverages: {},
@@ -630,9 +635,24 @@ export function aggregateParticipantScores(
   const finalizedSheets: Array<{ judgeId: string; fieldScores?: Record<string, number> }> = [];
   const availableSheets: Array<{ judgeId: string; fieldScores?: Record<string, number> }> = [];
 
+  // Hakim yang sudah memfinalisasi tiap maqra (dipakai kelengkapan per bidang)
+  const finalizedJudgesPerMaqra: string[][] = [];
+  // Bidang yang dipegang minimal satu hakim wajib (bidang tanpa hakim diblokir terpisah: FIELD_WITHOUT_JUDGE)
+  const heldFields = fieldScope
+    ? fieldScope.rubricFields.filter((field) =>
+        requiredJudgeIds.some((judgeId) => judgeScopeIncludesField(fieldScope.judgeFieldScope[judgeId], field.name))
+      )
+    : [];
+  const useFieldCoverage = heldFields.length > 0;
+  const maqraFieldCoverage = (judgeIds: string[]): number =>
+    heldFields.filter((field) =>
+      judgeIds.some((judgeId) => judgeScopeIncludesField(fieldScope!.judgeFieldScope[judgeId], field.name))
+    ).length;
+
   const perMaqraSummary = stageQuestions.map((q) => {
     const maqraFinalizedScores: number[] = [];
     const maqraAvailableScores: number[] = [];
+    const maqraFinalizedJudges: string[] = [];
 
     requiredJudgeIds.forEach((judgeId) => {
       // 1. Pencocokan utama secara ketat (participantId + judgeId + questionId/assignedMaqraId + stageParticipationId/stageId)
@@ -680,6 +700,7 @@ export function aggregateParticipantScores(
         if (match.status === 'finalized') {
           validFinalizedScores.push(match.finalScore);
           maqraFinalizedScores.push(match.finalScore);
+          maqraFinalizedJudges.push(judgeId);
           finalizedSheets.push({ judgeId, fieldScores: match.fieldScores });
 
           // Akumulasi skor bidang
@@ -694,9 +715,12 @@ export function aggregateParticipantScores(
       }
     });
 
-    const isMaqraFinalized =
-      requiredJudgeIds.length > 0 &&
-      maqraFinalizedScores.length === requiredJudgeIds.length;
+    finalizedJudgesPerMaqra.push(maqraFinalizedJudges);
+    // Kelengkapan per bidang: setiap bidang cukup dinilai satu hakim pemegangnya (mis. dua tim juri).
+    // Tanpa rubrik bidang, tetap wajib semua hakim.
+    const isMaqraFinalized = useFieldCoverage
+      ? maqraFieldCoverage(maqraFinalizedJudges) === heldFields.length
+      : requiredJudgeIds.length > 0 && maqraFinalizedScores.length === requiredJudgeIds.length;
 
     const avgMaqraScore =
       maqraFinalizedScores.length > 0
@@ -713,7 +737,14 @@ export function aggregateParticipantScores(
     };
   });
 
-  const isFullyFinalized = validFinalizedScores.length === totalRequiredUnits;
+  // Sama dengan server (stage_participation_field_coverage): satuan = maqra x bidang
+  const coverageRequiredUnits = useFieldCoverage ? stageQuestions.length * heldFields.length : 0;
+  const coverageCoveredUnits = useFieldCoverage
+    ? finalizedJudgesPerMaqra.reduce((acc, judgeIds) => acc + maqraFieldCoverage(judgeIds), 0)
+    : 0;
+  const isFullyFinalized = useFieldCoverage
+    ? coverageRequiredUnits > 0 && coverageCoveredUnits === coverageRequiredUnits
+    : validFinalizedScores.length === totalRequiredUnits;
 
   const averageFinalScore =
     isFullyFinalized && validFinalizedScores.length > 0
@@ -750,6 +781,8 @@ export function aggregateParticipantScores(
       isFullyFinalized,
       finalizedCount: validFinalizedScores.length,
       totalRequiredUnits,
+      coveredFieldUnits: coverageCoveredUnits,
+      requiredFieldUnits: coverageRequiredUnits,
       averageFinalScore: scopedFinal,
       provisionalScore: scopedProvisional,
       fieldAverages,
@@ -761,6 +794,8 @@ export function aggregateParticipantScores(
     isFullyFinalized,
     finalizedCount: validFinalizedScores.length,
     totalRequiredUnits,
+    coveredFieldUnits: coverageCoveredUnits,
+    requiredFieldUnits: coverageRequiredUnits,
     averageFinalScore,
     provisionalScore,
     fieldAverages,

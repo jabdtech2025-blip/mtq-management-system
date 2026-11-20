@@ -21,6 +21,24 @@ export type StageBlockingCode =
   | 'MULTI_BRANCH_SELECTION'
   | 'FIELD_WITHOUT_JUDGE';
 
+/**
+ * Kelengkapan per bidang: peserta lengkap bila setiap (maqra x bidang) sudah punya lembar final
+ * dari minimal satu hakim pemegang bidang itu (sama dengan server stage_participation_field_coverage).
+ * Tanpa spesifikasi ini (atau rubrik tanpa bidang), aturan lama berlaku: semua hakim wajib menilai.
+ */
+export interface FieldCoverageSpec {
+  /** Nama bidang rubrik aktif babak ini */
+  fieldNames: string[];
+  /** Cakupan bidang per hakim (judgeId -> nama bidang; null = semua bidang) */
+  judgeFieldScope: Record<string, string[] | null>;
+}
+
+function judgeHoldsField(scope: string[] | null | undefined, fieldName: string): boolean {
+  if (!scope) return true;
+  const target = fieldName.trim().toLowerCase();
+  return scope.some((name) => name.trim().toLowerCase() === target);
+}
+
 export interface StructuredBlockingReason {
   code: StageBlockingCode;
   message: string;
@@ -196,6 +214,7 @@ export function getParticipantStageCompletion(params: {
   assignedMaqras: AssignedMaqraItem[];
   requiredJudgeIds: string[];
   assessments: JudgeAssessment[];
+  fieldCoverage?: FieldCoverageSpec;
 }): ParticipantStageCompletion {
   const {
     tenantId,
@@ -206,7 +225,15 @@ export function getParticipantStageCompletion(params: {
     assignedMaqras,
     requiredJudgeIds,
     assessments,
+    fieldCoverage,
   } = params;
+  // Bidang yang dipegang minimal satu hakim wajib (bidang tanpa hakim diblokir terpisah)
+  const heldFieldNames = fieldCoverage
+    ? fieldCoverage.fieldNames.filter((fieldName) =>
+        requiredJudgeIds.some((judgeId) => judgeHoldsField(fieldCoverage.judgeFieldScope[judgeId], fieldName))
+      )
+    : [];
+  const useFieldCoverage = heldFieldNames.length > 0;
 
   const effectiveStageId = participation?.stageId || stageId || participant.stageId;
   const effectiveBranchId = participation?.branchId || participant.branchId;
@@ -217,13 +244,17 @@ export function getParticipantStageCompletion(params: {
 
   const assignedMaqraCount = assignedMaqras.length;
   const requiredJudgeCount = requiredJudgeIds.length;
-  const totalRequiredUnits = assignedMaqraCount * requiredJudgeCount;
+  const totalRequiredUnits = useFieldCoverage
+    ? assignedMaqraCount * heldFieldNames.length
+    : assignedMaqraCount * requiredJudgeCount;
 
   let finalizedAssessmentCount = 0;
   let inProgressAssessmentCount = 0;
+  let coveredFieldUnits = 0;
 
   if (assignedMaqraCount > 0 && requiredJudgeCount > 0) {
     for (const maqra of assignedMaqras) {
+      const finalizedJudgesForMaqra: string[] = [];
       for (const judgeId of requiredJudgeIds) {
         const matchedAsm = assessments.find((a) => {
           if (a.tenantId !== tenantId) return false;
@@ -250,10 +281,22 @@ export function getParticipantStageCompletion(params: {
 
         if (matchedAsm?.status === 'finalized') {
           finalizedAssessmentCount++;
+          finalizedJudgesForMaqra.push(judgeId);
         } else if (matchedAsm?.status === 'in_progress') {
           inProgressAssessmentCount++;
         }
       }
+      if (useFieldCoverage) {
+        coveredFieldUnits += heldFieldNames.filter((fieldName) =>
+          finalizedJudgesForMaqra.some((judgeId) =>
+            judgeHoldsField(fieldCoverage!.judgeFieldScope[judgeId], fieldName)
+          )
+        ).length;
+      }
+    }
+    if (useFieldCoverage) {
+      // Satuan kelengkapan = pasangan (maqra x bidang) yang sudah dinilai
+      finalizedAssessmentCount = coveredFieldUnits;
     }
   } else if (assignedMaqraCount > 0 && requiredJudgeCount === 0) {
     // Check if there are any in-progress assessments even before official judge assignment
@@ -292,7 +335,9 @@ export function getParticipantStageCompletion(params: {
   } else if (finalizedAssessmentCount > 0) {
     progressStatus = 'Menunggu Hakim Lain';
     incompleteReasonCode = 'INCOMPLETE_ASSESSMENTS';
-    incompleteReasonMessage = `Baru ${finalizedAssessmentCount} dari ${totalRequiredUnits} lembar penilaian difinalisasi.`;
+    incompleteReasonMessage = useFieldCoverage
+      ? `Baru ${finalizedAssessmentCount} dari ${totalRequiredUnits} bidang (per maqra) yang dinilai.`
+      : `Baru ${finalizedAssessmentCount} dari ${totalRequiredUnits} lembar penilaian difinalisasi.`;
   } else if (inProgressAssessmentCount > 0) {
     progressStatus = 'Berlangsung';
     incompleteReasonCode = 'INCOMPLETE_ASSESSMENTS';
@@ -338,8 +383,17 @@ export function getStageCompletion(params: {
   assessments: JudgeAssessment[];
   judgeAssignments: JudgeAssignment[];
   stageQuestionsGetter?: (participantId: string, stageName: string) => AssignedMaqraItem[];
+  /** Kelengkapan per bidang (lihat FieldCoverageSpec). Tanpa ini: semua hakim wajib menilai. */
+  resolveFieldCoverage?: (args: {
+    stageId?: string;
+    stageName: string;
+    branchId?: string;
+    branchName?: string;
+    requiredJudgeIds: string[];
+  }) => FieldCoverageSpec | undefined;
 }): StageCompletionSummary {
   const {
+    resolveFieldCoverage,
     tenantId,
     stageId,
     stageName,
@@ -565,6 +619,8 @@ export function getStageCompletion(params: {
         stageQuestionsGetter,
       });
 
+      const effectiveRequiredJudges =
+        partRequiredJudges.length > 0 ? partRequiredJudges : stageLevelRequiredJudgeIds;
       return getParticipantStageCompletion({
         tenantId,
         participant: partObj,
@@ -572,9 +628,15 @@ export function getStageCompletion(params: {
         stageId: sp.stageId || stageId,
         stageName,
         assignedMaqras,
-        requiredJudgeIds:
-          partRequiredJudges.length > 0 ? partRequiredJudges : stageLevelRequiredJudgeIds,
+        requiredJudgeIds: effectiveRequiredJudges,
         assessments: tenantAssessments,
+        fieldCoverage: resolveFieldCoverage?.({
+          stageId: sp.stageId || stageId,
+          stageName,
+          branchId: partBranchId,
+          branchName: partBranchName,
+          requiredJudgeIds: effectiveRequiredJudges,
+        }),
       });
     }
   );
@@ -621,7 +683,9 @@ export function getStageCompletion(params: {
   } else if (incompleteParticipantsCount > 0) {
     blockingReason = {
       code: 'INCOMPLETE_ASSESSMENTS',
-      message: `Terdapat ${incompleteParticipantsCount} peserta yang penilaiannya belum lengkap dari seluruh dewan hakim (${finalizedUnitsCount}/${totalRequiredUnits} lembar final).`,
+      message: resolveFieldCoverage
+        ? `Terdapat ${incompleteParticipantsCount} peserta yang belum dinilai pada semua bidang rubrik (${finalizedUnitsCount}/${totalRequiredUnits} bidang per maqra).`
+        : `Terdapat ${incompleteParticipantsCount} peserta yang penilaiannya belum lengkap dari seluruh dewan hakim (${finalizedUnitsCount}/${totalRequiredUnits} lembar final).`,
     };
   }
 

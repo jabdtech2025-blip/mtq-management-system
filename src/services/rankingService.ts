@@ -66,6 +66,9 @@ export interface EvaluatedParticipantStage {
   isFullyFinalized: boolean;
   finalizedJudgeCount: number;
   totalAssignedJudges: number;
+  /** Mode per bidang: pasangan (maqra x bidang) yang sudah dinilai / yang wajib (0 bila tanpa rubrik bidang) */
+  coveredFieldUnits?: number;
+  requiredFieldUnits?: number;
   rank: number;
   isQualified: boolean;
   championRank?: number;
@@ -759,7 +762,10 @@ export class RankingService {
         fieldScores: agg.fieldAverages,
         isFullyFinalized: requiredJudgeIds.length > 0 && stageQuestions.length > 0 && agg.isFullyFinalized,
         finalizedJudgeCount: requiredJudgeIds.length > 0 ? agg.finalizedCount : 0,
-        totalAssignedJudges: requiredJudgeIds.length * stageQuestions.length
+        totalAssignedJudges: requiredJudgeIds.length * stageQuestions.length,
+        // Mode per bidang: pasangan (maqra x bidang) yang sudah dinilai hakim pemegang bidangnya
+        coveredFieldUnits: requiredJudgeIds.length > 0 ? agg.coveredFieldUnits : 0,
+        requiredFieldUnits: requiredJudgeIds.length > 0 ? agg.requiredFieldUnits : 0
       };
     });
 
@@ -1006,7 +1012,9 @@ export class RankingService {
     } else if (!allFinalized) {
       setBlock(
         'INCOMPLETE_ASSESSMENTS',
-        `Terdapat ${incompleteCount} peserta yang penilaiannya belum lengkap dari seluruh dewan hakim.`
+        fieldScope
+          ? `Terdapat ${incompleteCount} peserta yang belum dinilai pada semua bidang rubrik (setiap bidang wajib dinilai minimal satu hakim pemegang bidang itu).`
+          : `Terdapat ${incompleteCount} peserta yang penilaiannya belum lengkap dari seluruh dewan hakim.`
       );
     } else if (missingOverrideReasonParticipant) {
       setBlock(

@@ -37,6 +37,11 @@ function sameId(a?: string, b?: string): boolean {
   return toDeterministicUuid(left) === toDeterministicUuid(right);
 }
 
+/** ID babak sama (mendukung ID lokal Mode Demo maupun UUID database). */
+export function isSameStageId(a?: string, b?: string): boolean {
+  return sameId(a, b);
+}
+
 /** Babak tanpa cabang berlaku untuk semua cabang. */
 export function isGenericStage(stage: StageLike): boolean {
   const branchName = clean(stage.branchName).toLowerCase();

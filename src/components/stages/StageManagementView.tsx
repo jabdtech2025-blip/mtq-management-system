@@ -22,6 +22,7 @@ export const StageManagementView: React.FC = () => {
     judgeAssignments,
     assessments,
     getParticipantStageQuestions,
+    getFieldCoverageForStage,
     currentTenant,
     setCurrentView
   } = useMtq();
@@ -160,7 +161,8 @@ export const StageManagementView: React.FC = () => {
               participants,
               assessments,
               judgeAssignments,
-              stageQuestionsGetter: getParticipantStageQuestions
+              stageQuestionsGetter: getParticipantStageQuestions,
+              resolveFieldCoverage: getFieldCoverageForStage
             });
             const totalStage = stageCompletion.totalParticipantsCount;
             const finalizedStage = stageCompletion.completedParticipantsCount;

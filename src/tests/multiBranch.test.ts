@@ -17,6 +17,13 @@ import {
   sortParticipantsByName,
   sortParticipantsForDisplay
 } from '../utils/participantSort';
+import {
+  buildViewFilterKey,
+  readViewFilters,
+  writeViewFilters,
+  FilterStorageLike
+} from '../utils/viewFilterStorage';
+import { getParticipantStageCompletion } from '../services/completion';
 import { ErrorCategory, JudgeAssessment, JudgeAssignment, Participant, StageParticipation } from '../types/mtq';
 
 type TestResult = { name: string; success: boolean; details?: string };
@@ -316,6 +323,74 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
   });
 
   // ---------------------------------------------------------------------------
+  // Dua tim juri dalam satu babak: kelengkapan per bidang, bukan per hakim
+  // Tim A: a1 (Tajwid+Fashahah), a2 (Lagu+Suara). Tim B: b1 (Tajwid+Fashahah), b2 (Lagu+Suara).
+  // ---------------------------------------------------------------------------
+  const teamScope = {
+    judgeFieldScope: {
+      'a1': ['Tajwid', 'Fashahah'],
+      'a2': ['Lagu', 'Suara'],
+      'b1': ['Tajwid', 'Fashahah'],
+      'b2': ['Lagu', 'Suara']
+    } as Record<string, string[] | null>,
+    rubricFields: seniBacaFields.map((f) => ({ name: f.name, maxScore: f.maxScore, weight: f.weight })),
+    startingScore: 100
+  };
+  const teamJudges = ['a1', 'a2', 'b1', 'b2'];
+  const maqra = [{ questionId: 'q-1', title: 'M1', pageNumber: 1 }];
+
+  check('TIM-01. Peserta dinilai Tim A saja (2 dari 4 hakim) dianggap lengkap: semua bidang sudah dinilai pemegangnya', () => {
+    const agg = aggregateParticipantScores(
+      'p-1', 'Penyisihan', maqra, teamJudges,
+      [sheet('a1', { Tajwid: 29, Fashahah: 30, Lagu: 25, Suara: 15 }), sheet('a2', { Tajwid: 30, Fashahah: 30, Lagu: 24, Suara: 15 })],
+      'st-pa-1', 'sp-1', teamScope
+    );
+    expect(agg.isFullyFinalized === true, 'harus lengkap');
+    expect(agg.coveredFieldUnits === 4 && agg.requiredFieldUnits === 4, `satuan ${agg.coveredFieldUnits}/${agg.requiredFieldUnits}`);
+    expect(agg.averageFinalScore === 98, `total harus 98 (29+30+24+15), dapat ${agg.averageFinalScore}`);
+  });
+
+  check('TIM-02. Bidang Lagu/Suara belum dinilai siapa pun: belum lengkap dan tidak ada nilai akhir', () => {
+    const agg = aggregateParticipantScores(
+      'p-1', 'Penyisihan', maqra, teamJudges,
+      [sheet('b1', { Tajwid: 29, Fashahah: 30, Lagu: 25, Suara: 15 })],
+      'st-pa-1', 'sp-1', teamScope
+    );
+    expect(agg.isFullyFinalized === false, 'harus belum lengkap');
+    expect(agg.coveredFieldUnits === 2 && agg.requiredFieldUnits === 4, `satuan ${agg.coveredFieldUnits}/${agg.requiredFieldUnits}`);
+    expect(agg.averageFinalScore === null, 'nilai akhir harus kosong');
+  });
+
+  check('TIM-03. Status peserta di aplikasi: "Lengkap" dengan dua juri satu tim, "Menunggu Hakim Lain" bila bidang belum dinilai', () => {
+    const participant = {
+      id: 'p-1', tenantId: TENANT, participantId: 'TLW-01', name: 'Peserta Satu', kafilahId: 'k', kafilahName: 'K',
+      branchId: 'br-pa', branchName: 'Tilawah Dewasa Putra', gender: 'Putra', lotteryNumber: '01', questionId: 'q-1',
+      assignedMaqra: 'M1', pageNumber: 1, stageName: 'Penyisihan', status: 'Menunggu'
+    } as unknown as Participant;
+    const fieldCoverage = { fieldNames: seniBacaFields.map((f) => f.name), judgeFieldScope: teamScope.judgeFieldScope };
+    const done = getParticipantStageCompletion({
+      tenantId: TENANT, participant, stageId: 'st-pa-1', stageName: 'Penyisihan', assignedMaqras: maqra,
+      requiredJudgeIds: teamJudges,
+      assessments: [sheet('a1', { Tajwid: 29, Fashahah: 30, Lagu: 25, Suara: 15 }), sheet('a2', { Tajwid: 30, Fashahah: 30, Lagu: 24, Suara: 15 })],
+      fieldCoverage
+    });
+    const partial = getParticipantStageCompletion({
+      tenantId: TENANT, participant, stageId: 'st-pa-1', stageName: 'Penyisihan', assignedMaqras: maqra,
+      requiredJudgeIds: teamJudges,
+      assessments: [sheet('a1', { Tajwid: 29, Fashahah: 30, Lagu: 25, Suara: 15 })],
+      fieldCoverage
+    });
+    const legacy = getParticipantStageCompletion({
+      tenantId: TENANT, participant, stageId: 'st-pa-1', stageName: 'Penyisihan', assignedMaqras: maqra,
+      requiredJudgeIds: teamJudges,
+      assessments: [sheet('a1', { Tajwid: 29, Fashahah: 30, Lagu: 25, Suara: 15 }), sheet('a2', { Tajwid: 30, Fashahah: 30, Lagu: 24, Suara: 15 })]
+    });
+    expect(done.isComplete && done.progressStatus === 'Lengkap', `harus Lengkap, dapat ${done.progressStatus}`);
+    expect(!partial.isComplete && partial.progressStatus === 'Menunggu Hakim Lain', `harus Menunggu Hakim Lain, dapat ${partial.progressStatus}`);
+    expect(!legacy.isComplete, 'tanpa rubrik bidang tetap wajib semua hakim');
+  });
+
+  // ---------------------------------------------------------------------------
   // Urutan peserta (nomor undian per cabang, nama A–Z)
   // ---------------------------------------------------------------------------
   const sortSample = [
@@ -347,6 +422,74 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
       { name: 'budi' }
     ]).map((p) => p.name);
     expect(JSON.stringify(names) === JSON.stringify(['Ahmad', 'budi', 'zaid']), `urutan: ${names.join(', ')}`);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Persistensi filter tampilan per halaman + tenant + pengguna (sessionStorage)
+  // ---------------------------------------------------------------------------
+  const createMemoryStorage = (): FilterStorageLike => {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k) => (map.has(k) ? map.get(k)! : null),
+      setItem: (k, v) => {
+        map.set(k, v);
+      }
+    };
+  };
+
+  check('FLT-01. Filter tersimpan terisolasi per halaman, tenant, dan pengguna', () => {
+    const store = createMemoryStorage();
+    const defaults = { branchFilter: 'Semua Cabang', statusFilter: 'Semua Status' };
+    const keyJudge1 = buildViewFilterKey('penilaian_hakim', 'tenant-a', 'judge-1');
+    const keyJudge2 = buildViewFilterKey('penilaian_hakim', 'tenant-a', 'judge-2');
+    const keyTenantB = buildViewFilterKey('penilaian_hakim', 'tenant-b', 'judge-1');
+
+    writeViewFilters(keyJudge1, { branchFilter: 'Marhalah Mutawassithah', statusFilter: 'Menunggu' }, store);
+    writeViewFilters(keyTenantB, { branchFilter: 'Tilawah Dewasa Putra', statusFilter: 'Final' }, store);
+
+    const read1 = readViewFilters(keyJudge1, defaults, store);
+    const read2 = readViewFilters(keyJudge2, defaults, store);
+    const readB = readViewFilters(keyTenantB, defaults, store);
+
+    expect(
+      read1.branchFilter === 'Marhalah Mutawassithah' && read1.statusFilter === 'Menunggu',
+      `judge-1 harus membaca filternya sendiri: ${JSON.stringify(read1)}`
+    );
+    expect(
+      read2.branchFilter === 'Semua Cabang' && read2.statusFilter === 'Semua Status',
+      `judge-2 harus tetap default: ${JSON.stringify(read2)}`
+    );
+    expect(
+      readB.branchFilter === 'Tilawah Dewasa Putra' && readB.statusFilter === 'Final',
+      `tenant-b tidak boleh tertukar dengan tenant-a: ${JSON.stringify(readB)}`
+    );
+  });
+
+  check('FLT-02. JSON rusak atau field asing diabaikan dengan aman dan fallback ke default', () => {
+    const store = createMemoryStorage();
+    const defaults = { selectedStage: 'Semua Babak', selectedBranch: 'Semua Cabang' };
+    const keyCorrupt = buildViewFilterKey('rekap_nilai', 'tenant-a', 'admin-1');
+    const keyExtra = buildViewFilterKey('rekap_nilai', 'tenant-a', 'admin-2');
+
+    store.setItem(keyCorrupt, '{not-valid-json');
+    store.setItem(
+      keyExtra,
+      JSON.stringify({ selectedBranch: 'Marhalah Ibtidaiyyah', selectedStage: 123, searchQuery: 'harus-diabaikan' })
+    );
+
+    const corruptRes = readViewFilters(keyCorrupt, defaults, store);
+    const extraRes = readViewFilters(keyExtra, defaults, store);
+
+    expect(
+      corruptRes.selectedStage === 'Semua Babak' && corruptRes.selectedBranch === 'Semua Cabang',
+      `JSON rusak harus fallback ke default: ${JSON.stringify(corruptRes)}`
+    );
+    expect(
+      extraRes.selectedBranch === 'Marhalah Ibtidaiyyah' &&
+        extraRes.selectedStage === 'Semua Babak' &&
+        !('searchQuery' in extraRes),
+      `field asing & tipe salah harus disaring: ${JSON.stringify(extraRes)}`
+    );
   });
 
   const passed = results.filter((r) => r.success).length;

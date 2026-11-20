@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Download,
   Search,
@@ -12,7 +12,25 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { buildStageOrderLookup, sortParticipantsForDisplay } from '../../utils/participantSort';
-import { Participant, JudgeAssessment } from '../../types/mtq';
+import { buildViewFilterKey, readViewFilters, writeViewFilters } from '../../utils/viewFilterStorage';
+import { Participant, JudgeAssessment, AssignedMaqraItem } from '../../types/mtq';
+import { aggregateParticipantScores, getActiveRubricFields } from '../../services/scoringEngine';
+import { resolveRequiredJudgeIdsForStage } from '../../services/completion';
+
+const ALLOWED_REKAP_STATUSES = [
+  'Semua Status',
+  'Belum Dimulai',
+  'Berlangsung',
+  'Menunggu Hakim Lain',
+  'Lengkap'
+] as const;
+
+const DEFAULT_REKAP_FILTERS = {
+  selectedStage: 'Semua Babak',
+  selectedBranch: 'Semua Cabang',
+  selectedKafilah: 'Semua Grup',
+  selectedStatus: 'Semua Status'
+};
 
 export const RekapNilaiView: React.FC = () => {
   const {
@@ -30,19 +48,112 @@ export const RekapNilaiView: React.FC = () => {
     getParticipantProgress,
     getParticipantStageQuestions,
     setSelectedParticipantId,
-    setCurrentView
+    setCurrentView,
+    getActiveRubricForBranch,
+    getFieldCoverageForStage,
+    getStageParticipation
   } = useMtq();
+
+  /**
+   * Nilai peserta dihitung sama dengan Hasil & Kelulusan dan server (compute_stage_rankings):
+   * nilai tiap bidang dirata-rata dari hakim pemegang bidang itu, lalu dijumlah. Dipakai saat
+   * hakim memegang bidang berbeda (mis. Tajwid vs Itqon) atau dewan hakim dibagi beberapa tim.
+   * value = nilai final bila lengkap, selain itu nilai sementara.
+   */
+  const computeParticipantScore = (
+    p: Participant,
+    questions: AssignedMaqraItem[]
+  ): { value: number | null; isFinal: boolean; inProgress: boolean } => {
+    const sp = getStageParticipation(p.id, p.stageName);
+    const requiredJudgeIds = resolveRequiredJudgeIdsForStage({
+      tenantId: currentTenant.id,
+      stageId: sp?.stageId || p.stageId,
+      stageName: p.stageName,
+      branchId: p.branchId,
+      branchName: p.branchName,
+      judgeAssignments
+    });
+    const coverage = getFieldCoverageForStage({
+      stageId: sp?.stageId || p.stageId,
+      stageName: p.stageName,
+      branchId: p.branchId,
+      branchName: p.branchName,
+      requiredJudgeIds
+    });
+    const rubric = getActiveRubricForBranch(p.branchName, p.branchId);
+    const fieldScope =
+      coverage && rubric
+        ? {
+            judgeFieldScope: coverage.judgeFieldScope,
+            rubricFields: getActiveRubricFields(rubric).map((f) => ({ name: f.name, maxScore: f.maxScore, weight: f.weight })),
+            startingScore: rubric.startingScore ?? 100
+          }
+        : undefined;
+    const tenantAssessments = assessments.filter((a) => a.tenantId === currentTenant.id && a.participantId === p.id);
+    const agg = aggregateParticipantScores(
+      p.id,
+      p.stageName,
+      questions,
+      requiredJudgeIds,
+      tenantAssessments,
+      sp?.stageId || p.stageId,
+      sp?.id,
+      fieldScope
+    );
+    return {
+      value: agg.isFullyFinalized ? agg.averageFinalScore : agg.provisionalScore,
+      isFinal: agg.isFullyFinalized,
+      inProgress: tenantAssessments.some(
+        (a) => a.status === 'in_progress' && questions.some((q) => q.questionId === a.questionId)
+      )
+    };
+  };
 
   // Data rekap diperbarui otomatis lewat realtime Supabase (lihat MtqContext): setiap lembar nilai yang berubah
   // langsung diterapkan per baris. Tidak ada lagi polling 3 detik yang memuat ulang seluruh data.
 
+  const filterKey = buildViewFilterKey('rekap_nilai', currentTenant.id, currentUser.id);
+  const loadedFilterKeyRef = useRef(filterKey);
+
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStage, setSelectedStage] = useState('Semua Babak');
-  const [selectedBranch, setSelectedBranch] = useState('Semua Cabang');
-  const [selectedKafilah, setSelectedKafilah] = useState('Semua Grup');
-  const [selectedStatus, setSelectedStatus] = useState('Semua Status');
+  const [selectedStage, setSelectedStage] = useState<string>(
+    () => readViewFilters(filterKey, DEFAULT_REKAP_FILTERS).selectedStage || 'Semua Babak'
+  );
+  const [selectedBranch, setSelectedBranch] = useState<string>(
+    () => readViewFilters(filterKey, DEFAULT_REKAP_FILTERS).selectedBranch || 'Semua Cabang'
+  );
+  const [selectedKafilah, setSelectedKafilah] = useState<string>(
+    () => readViewFilters(filterKey, DEFAULT_REKAP_FILTERS).selectedKafilah || 'Semua Grup'
+  );
+  const [selectedStatus, setSelectedStatus] = useState<string>(() => {
+    const saved = readViewFilters(filterKey, DEFAULT_REKAP_FILTERS).selectedStatus;
+    return (ALLOWED_REKAP_STATUSES as readonly string[]).includes(saved) ? saved : 'Semua Status';
+  });
   const [inspectedParticipant, setInspectedParticipant] = useState<Participant | null>(null);
   const [modalSelectedQuestionId, setModalSelectedQuestionId] = useState<string>('');
+
+  useEffect(() => {
+    if (loadedFilterKeyRef.current !== filterKey) {
+      loadedFilterKeyRef.current = filterKey;
+      const saved = readViewFilters(filterKey, DEFAULT_REKAP_FILTERS);
+      setSelectedStage(saved.selectedStage || 'Semua Babak');
+      setSelectedBranch(saved.selectedBranch || 'Semua Cabang');
+      setSelectedKafilah(saved.selectedKafilah || 'Semua Grup');
+      setSelectedStatus(
+        (ALLOWED_REKAP_STATUSES as readonly string[]).includes(saved.selectedStatus)
+          ? saved.selectedStatus
+          : 'Semua Status'
+      );
+      return;
+    }
+
+    writeViewFilters(filterKey, {
+      selectedStage,
+      selectedBranch,
+      selectedKafilah,
+      selectedStatus
+    });
+  }, [filterKey, selectedStage, selectedBranch, selectedKafilah, selectedStatus]);
 
   // Reopen Assessment Modal State (Audit Correction Policy)
   const [reopenTarget, setReopenTarget] = useState<{
@@ -93,6 +204,25 @@ export const RekapNilaiView: React.FC = () => {
     const list = kafilahs.map((k) => k.name);
     return ['Semua Grup', ...Array.from(new Set(list))];
   }, [kafilahs]);
+
+  // Reset nilai tersimpan jika opsi sudah tidak tersedia (hanya setelah daftar opsi termuat)
+  useEffect(() => {
+    if (selectedStage !== 'Semua Babak' && stageOptions.length > 1 && !stageOptions.includes(selectedStage)) {
+      setSelectedStage('Semua Babak');
+    }
+  }, [selectedStage, stageOptions]);
+
+  useEffect(() => {
+    if (selectedBranch !== 'Semua Cabang' && branchOptions.length > 1 && !branchOptions.includes(selectedBranch)) {
+      setSelectedBranch('Semua Cabang');
+    }
+  }, [selectedBranch, branchOptions]);
+
+  useEffect(() => {
+    if (selectedKafilah !== 'Semua Grup' && kafilahOptions.length > 1 && !kafilahOptions.includes(selectedKafilah)) {
+      setSelectedKafilah('Semua Grup');
+    }
+  }, [selectedKafilah, kafilahOptions]);
 
   // Dynamic judges assigned to the competition stage / tenant
   const activeJudges = useMemo(() => {
@@ -226,10 +356,14 @@ export const RekapNilaiView: React.FC = () => {
         });
       });
 
+      const overallScore = computeParticipantScore(p, stageQuestions);
       const participantOverallAvg =
-        allScoresCount > 0
-          ? `${(allScoresSum / allScoresCount).toFixed(2)}${!allUnitsFinalized ? ' (Sementara)' : ''}`
+        overallScore.value !== null
+          ? `${overallScore.value.toFixed(2)}${!overallScore.isFinal ? ' (Sementara)' : ''}`
           : '-';
+      void allScoresSum;
+      void allScoresCount;
+      void allUnitsFinalized;
 
       if (stageQuestions.length === 0) {
         rows.push([
@@ -258,14 +392,13 @@ export const RekapNilaiView: React.FC = () => {
             .map((a) => (a ? a.finalScore : null))
             .filter((s): s is number => s !== null);
 
-          const isMaqraFinalized =
-            judgeAssessments.every((a) => a?.status === 'finalized') && activeJudges.length > 0;
+          const maqraScore = computeParticipantScore(p, [q]);
+          const isMaqraFinalized = maqraScore.isFinal;
+          void validScores;
 
           const maqraAvg =
-            validScores.length > 0
-              ? `${(validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2)}${
-                  !isMaqraFinalized ? ' (Sementara)' : ''
-                }`
+            maqraScore.value !== null
+              ? `${maqraScore.value.toFixed(2)}${!isMaqraFinalized ? ' (Sementara)' : ''}`
               : '-';
 
           const maqraStatus = isMaqraFinalized
@@ -492,8 +625,8 @@ export const RekapNilaiView: React.FC = () => {
                   const overallProgress =
                     stageQuestions.length === 0
                       ? 'Maqra Belum Ditetapkan'
-                      : allFinalized
-                      ? 'Lengkap'
+                      : allFinalized || rawProgress === 'Lengkap'
+                      ? 'Lengkap' // kelengkapan per bidang (mis. dua tim juri): tidak harus semua kolom hakim terisi
                       : rawProgress !== 'Belum Dimulai'
                       ? rawProgress
                       : finalizedScoreCount > 0
@@ -502,8 +635,7 @@ export const RekapNilaiView: React.FC = () => {
                       ? 'Berlangsung'
                       : rawProgress;
 
-                  const overallAvg =
-                    totalScoreCount > 0 ? totalScoreSum / totalScoreCount : null;
+                  const overallAvg = computeParticipantScore(p, stageQuestions).value;
 
                   // Case 1: Participant has NO assigned questions for this stage
                   if (stageQuestions.length === 0) {
@@ -560,13 +692,9 @@ export const RekapNilaiView: React.FC = () => {
                     const validScores = judgeAssessments
                       .map((a) => (a ? a.finalScore : null))
                       .filter((s): s is number => s !== null);
-                    const isSingleFinalized =
-                      judgeAssessments.every((a) => a?.status === 'finalized') &&
-                      activeJudges.length > 0;
-                    const avgScore =
-                      validScores.length > 0
-                        ? validScores.reduce((a, b) => a + b, 0) / validScores.length
-                        : null;
+                    const singleScore = computeParticipantScore(p, stageQuestions);
+                    const isSingleFinalized = singleScore.isFinal;
+                    const avgScore = validScores.length > 0 ? singleScore.value : null;
 
                     return (
                       <tr key={`${p.id}-${pIdx}`} className="hover:bg-slate-50/80 transition-colors group">
@@ -649,13 +777,9 @@ export const RekapNilaiView: React.FC = () => {
                         const validScores = judgeAssessments
                           .map((a) => (a ? a.finalScore : null))
                           .filter((s): s is number => s !== null);
-                        const isMaqraFinalized =
-                          judgeAssessments.every((a) => a?.status === 'finalized') &&
-                          activeJudges.length > 0;
-                        const maqraAvg =
-                          validScores.length > 0
-                            ? validScores.reduce((a, b) => a + b, 0) / validScores.length
-                            : null;
+                        const maqraScore = computeParticipantScore(p, [q]);
+                        const isMaqraFinalized = maqraScore.isFinal;
+                        const maqraAvg = validScores.length > 0 ? maqraScore.value : null;
                         const maqraStatus = isMaqraFinalized
                           ? 'Selesai'
                           : judgeAssessments.some((a) => a?.status === 'in_progress')
@@ -856,10 +980,9 @@ export const RekapNilaiView: React.FC = () => {
         const validJudgeScores = participantAssessments
           .map((a) => (a ? a.finalScore : null))
           .filter((s): s is number => s !== null);
+        const inspectedScore = activeQuestion ? computeParticipantScore(inspectedParticipant, [activeQuestion]) : null;
         const avgScore =
-          validJudgeScores.length > 0
-            ? (validJudgeScores.reduce((a, b) => a + b, 0) / validJudgeScores.length).toFixed(2)
-            : '—';
+          validJudgeScores.length > 0 && inspectedScore?.value != null ? inspectedScore.value.toFixed(2) : '—';
 
         return (
           <div className="fixed inset-0 bg-slate-950/75 flex items-center justify-center p-3 sm:p-5 z-50">
@@ -949,9 +1072,9 @@ export const RekapNilaiView: React.FC = () => {
                   </span>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                  <span className="text-xs text-slate-500 block font-medium">Rata-Rata Maqra Ini</span>
+                  <span className="text-xs text-slate-500 block font-medium">Nilai Maqra Ini</span>
                   <span className="font-mono font-bold text-base text-emerald-900 mt-0.5 block tabular-nums">
-                    {avgScore} {validJudgeScores.length < activeJudges.length && validJudgeScores.length > 0 ? '(Sementara)' : ''}
+                    {avgScore} {inspectedScore && !inspectedScore.isFinal && validJudgeScores.length > 0 ? '(Sementara)' : ''}
                   </span>
                 </div>
               </div>

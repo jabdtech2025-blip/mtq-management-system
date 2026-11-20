@@ -543,6 +543,14 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261122_move_member_and_supervision_log.sql'),
     'utf-8'
   );
+  const questionStage20261123Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261123_question_stage_branch.sql'),
+    'utf-8'
+  );
+  const completionPerField20261124Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261124_completion_per_field.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -665,6 +673,8 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(multiBranch20261120Sql);
       await pg.exec(removeLevels20261121Sql);
       await pg.exec(moveMember20261122Sql);
+      await pg.exec(questionStage20261123Sql);
+      await pg.exec(completionPerField20261124Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -3806,13 +3816,22 @@ export async function runSupabaseTests(): Promise<{
       await asSuper(lottery20261115Sql);
       await asSuper(integrity20261116Sql);
       await asSuper(flow20261117Sql);
+      // Lanjutkan sampai migrasi terbaru, seperti urutan pemasangan nyata. Tanpa ini fungsi server
+      // kembali ke versi 20261117 dan tes-tes sesudahnya berjalan pada versi lama.
+      await asSuper(siteSettings20261118Sql);
+      await asSuper(realtimeCms20261119Sql);
+      await asSuper(multiBranch20261120Sql);
+      await asSuper(removeLevels20261121Sql);
+      await asSuper(moveMember20261122Sql);
+      await asSuper(questionStage20261123Sql);
+      await asSuper(completionPerField20261124Sql);
     } catch (e: any) {
       t7RerunOk = false;
       t7RerunError = String(e?.message || e);
     }
     const t7Status = await pg.query<{ verification_status: string }>(`SELECT verification_status FROM participants WHERE id = '${t7Pending.pId}'`);
     assert(
-      '89. T7 Migrasi Aman Dijalankan Ulang: menjalankan ulang 20261114–20261117 berhasil dan tidak mengubah peserta Diajukan menjadi Diverifikasi',
+      '89. T7 Migrasi Aman Dijalankan Ulang: menjalankan ulang 20261114–20261124 berhasil dan tidak mengubah peserta Diajukan menjadi Diverifikasi',
       t7RerunOk === true && t7Status.rows[0]?.verification_status === 'Diajukan',
       `rerun: ${t7RerunOk} ${t7RerunError}, status: ${t7Status.rows[0]?.verification_status}`
     );
@@ -4052,6 +4071,113 @@ export async function runSupabaseTests(): Promise<{
         supRows.rows.some((r) => r.action === 'SUPERVISION_STARTED' && r.reason === 'Audit operasional pengujian') &&
         supRows.rows.some((r) => r.action === 'SUPERVISION_ENDED'),
       `short: ${supShort.ok}, start: ${supStart.ok} ${supStart.error}, end: ${supEnd.ok}, admin: ${supByAdmin.error}, rows: ${JSON.stringify(supRows.rows)}`
+    );
+
+    // ---------- 97e. Soal tidak boleh tertaut ke babak milik cabang lain ----------
+    const qbA = generateUuid();
+    const qbB = generateUuid();
+    const qsA = generateUuid();
+    const qsB = generateUuid();
+    const qsOnlyA = generateUuid();
+    const qWrong = generateUuid();
+    await asSuper(`
+      INSERT INTO branches (id, tenant_id, code, name) VALUES
+        ('${qbA}', '${tenantJabarId}', 'QB-A', 'Marhalah Uji A'),
+        ('${qbB}', '${tenantJabarId}', 'QB-B', 'Marhalah Uji B');
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order) VALUES
+        ('${qsA}', '${tenantJabarId}', '${qbA}', 'Final', 2),
+        ('${qsB}', '${tenantJabarId}', '${qbB}', 'Final', 2),
+        ('${qsOnlyA}', '${tenantJabarId}', '${qbA}', 'Babak Khusus', 3);
+      INSERT INTO questions (id, tenant_id, code, title, surah_name, surah_number, start_ayah, end_ayah,
+                             page_number, page_start, page_end, branch_id, stage_id, status)
+      VALUES ('${qWrong}', '${tenantJabarId}', 'QSB-01', 'Uji Babak Cabang', 'Al-Mulk', 67, 1, 5,
+              562, 562, 562, '${qbB}', '${qsA}', 'Aktif');
+    `);
+    const qRemapped = await pg.query<{ stage_id: string }>(`SELECT stage_id::text FROM questions WHERE id = '${qWrong}'`);
+    let qMismatchError = '';
+    try {
+      await asSuper(`UPDATE questions SET stage_id = '${qsOnlyA}' WHERE id = '${qWrong}'`);
+    } catch (e: any) {
+      qMismatchError = String(e?.message || e);
+    }
+    assert(
+      '97e. Soal & Babak per Cabang: tautan ke babak cabang lain diluruskan ke babak bernama sama di cabang soal; bila tidak ada, ditolak (QUESTION_STAGE_BRANCH_MISMATCH)',
+      qRemapped.rows[0]?.stage_id === qsB && qMismatchError.includes('QUESTION_STAGE_BRANCH_MISMATCH'),
+      `stage: ${qRemapped.rows[0]?.stage_id} (harus ${qsB}), error: ${qMismatchError}`
+    );
+
+    // ---------- 97f. Dua tim juri dalam satu babak: kelengkapan per bidang, bukan per hakim ----------
+    // Tim A: TA1 (Tajwid+Fashahah), TA2 (Lagu+Suara). Tim B: TB1 (Tajwid+Fashahah), TB2 (Lagu+Suara).
+    // Tim A menilai P1 & P2, Tim B menilai P3 & P4. Tidak ada peserta yang dinilai keempat hakim.
+    const tmJudges = { TA1: generateUuid(), TA2: generateUuid(), TB1: generateUuid(), TB2: generateUuid() };
+    await asSuper(`
+      INSERT INTO auth.users (id, email) VALUES
+        ${Object.entries(tmJudges).map(([k, id]) => `('${id}', 'tm-${k.toLowerCase()}@jabar.mtq.id')`).join(', ')};
+      INSERT INTO tenant_memberships (tenant_id, profile_id, role, status) VALUES
+        ${Object.values(tmJudges).map((id) => `('${tenantJabarId}', '${id}', 'judge', 'Aktif')`).join(', ')};
+    `);
+    const tmStage = await makeStage('IG Penyisihan Dua Tim', 1, 2);
+    const tmFinal = await makeStage('IG Final Dua Tim', 2, 2);
+    for (const [judgeId, fields] of [
+      [tmJudges.TA1, [[tjwFieldId, 'Tajwid'], [fsaFieldId, 'Fashahah']]],
+      [tmJudges.TA2, [[lagFieldId, 'Lagu'], [suaFieldId, 'Suara']]],
+      [tmJudges.TB1, [[tjwFieldId, 'Tajwid'], [fsaFieldId, 'Fashahah']]],
+      [tmJudges.TB2, [[lagFieldId, 'Lagu'], [suaFieldId, 'Suara']]]
+    ] as Array<[string, string[][]]>) {
+      for (const [fieldId, label] of fields) {
+        await runAs(
+          igAdminId,
+          `INSERT INTO judge_assignments (tenant_id, judge_profile_id, stage_id, branch_id, rubric_field_id, judge_field, status)
+           VALUES ('${tenantJabarId}', '${judgeId}', '${tmStage}', '${igBranchId}', '${fieldId}', '${label}', 'Aktif')`
+        );
+      }
+    }
+    const tmP1 = await makeEntrant(tmStage, '971', 'Tim A Peserta 1');
+    const tmP2 = await makeEntrant(tmStage, '972', 'Tim A Peserta 2');
+    const tmP3 = await makeEntrant(tmStage, '973', 'Tim B Peserta 3');
+    const tmP4 = await makeEntrant(tmStage, '974', 'Tim B Peserta 4');
+    const tmFinalize = async (judgeId: string, e: { spId: string; amId: string }, counts: Record<string, number>) => {
+      const id = await addSheet(judgeId, e, counts);
+      return runAs(judgeId, `SELECT finalize_judge_assessment('${id}'::uuid) AS r`);
+    };
+    await tmFinalize(tmJudges.TA1, tmP1, { MKH: 1 });
+    await tmFinalize(tmJudges.TA2, tmP1, { LAG: 1 });
+    await tmFinalize(tmJudges.TA1, tmP2, { MKH: 3 });
+    await tmFinalize(tmJudges.TA2, tmP2, {});
+    await tmFinalize(tmJudges.TB1, tmP3, {});
+    await tmFinalize(tmJudges.TB2, tmP3, { LAG: 2 });
+    // P4 baru dinilai bidang Tajwid+Fashahah; Lagu+Suara belum
+    await tmFinalize(tmJudges.TB1, tmP4, { MKH: 2 });
+    const tmQualified = `ARRAY['${tmP1.pId}','${tmP3.pId}']::uuid[]`;
+    const tmCompletion1 = await runAs(igAdminId, `SELECT get_stage_completion_sql('${tmStage}'::uuid) AS r`);
+    const tmBlocked = await runAs(
+      igAdminId,
+      `SELECT advance_stage_qualifiers('${tmStage}'::uuid, '${tmFinal}'::uuid, ${tmQualified}, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) AS r`
+    );
+    await tmFinalize(tmJudges.TB2, tmP4, {});
+    const tmCompletion2 = await runAs(igAdminId, `SELECT get_stage_completion_sql('${tmStage}'::uuid) AS r`);
+    const tmRanking = await runAs(igAdminId, `SELECT compute_stage_rankings('${tmStage}'::uuid) AS r`);
+    const tmRows = (tmRanking.rows[0]?.r?.rankings || []) as Array<any>;
+    const tmRowP1 = tmRows.find((r) => r.participant_id === tmP1.pId);
+    const tmAdvance = await runAs(
+      igAdminId,
+      `SELECT advance_stage_qualifiers('${tmStage}'::uuid, '${tmFinal}'::uuid, ${tmQualified}, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) AS r`
+    );
+    const tmC1 = tmCompletion1.rows[0]?.r;
+    const tmC2 = tmCompletion2.rows[0]?.r;
+    assert(
+      '97f. Dua Tim Juri dalam Satu Babak: peserta lengkap bila tiap bidang dinilai minimal satu hakim pemegangnya (tidak harus keempat hakim); peserta yang bidangnya belum dinilai menahan pengesahan; nilai bidang tetap dari hakim pemegang bidang',
+      tmC1?.completed_participants_count === 3 &&
+        tmC1?.blocking_code === 'INCOMPLETE_ASSESSMENTS' &&
+        tmBlocked.ok === false &&
+        tmBlocked.error.includes('1 peserta') &&
+        tmC2?.all_complete === true &&
+        tmRanking.rows[0]?.r?.can_finalize === true &&
+        tmRowP1?.is_complete === true &&
+        Number(tmRowP1?.field_scores?.Tajwid) === 29 &&
+        Number(tmRowP1?.field_scores?.Lagu) === 24.5 &&
+        tmAdvance.ok === true,
+      `c1: ${JSON.stringify(tmC1)}, blocked: ${tmBlocked.error}, c2: ${JSON.stringify(tmC2)}, p1: ${JSON.stringify(tmRowP1)}, advance: ${tmAdvance.ok} ${tmAdvance.error}`
     );
 
     // ---------- 98. J6: tidak ada lagi tebakan bidang berdasarkan nama ----------
@@ -4339,9 +4465,13 @@ export async function runSupabaseTests(): Promise<{
       INSERT INTO judge_assignments (id, tenant_id, judge_profile_id, stage_id, branch_id, judge_field, status)
       VALUES
         ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge1Id}', '${e2eStagePenyisihanId}', '${e2eBranchId}', 'Tajwid', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge1Id}', '${e2eStagePenyisihanId}', '${e2eBranchId}', 'Fashahah', 'Aktif'),
         ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge2Id}', '${e2eStagePenyisihanId}', '${e2eBranchId}', 'Lagu', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge2Id}', '${e2eStagePenyisihanId}', '${e2eBranchId}', 'Suara', 'Aktif'),
         ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge1Id}', '${e2eStageFinalId}', '${e2eBranchId}', 'Tajwid', 'Aktif'),
-        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge2Id}', '${e2eStageFinalId}', '${e2eBranchId}', 'Lagu', 'Aktif');
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge1Id}', '${e2eStageFinalId}', '${e2eBranchId}', 'Fashahah', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge2Id}', '${e2eStageFinalId}', '${e2eBranchId}', 'Lagu', 'Aktif'),
+        ('${generateUuid()}', '${e2eTenantId}', '${e2eJudge2Id}', '${e2eStageFinalId}', '${e2eBranchId}', 'Suara', 'Aktif');
 
       -- 2. Pendaftaran 4 Peserta
       INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status, verification_status)
@@ -4446,6 +4576,12 @@ export async function runSupabaseTests(): Promise<{
       [e2ePart1Id]: 95.0, // Juara 2
       [e2ePart3Id]: 88.0  // Juara 3
     };
+    // Nilai bidang harus sesuai total (server menjumlah nilai bidang): 99 = 30+25+29+15, dst.
+    const finalFieldMap: Record<string, string> = {
+      [e2ePart2Id]: '{"Tajwid": 30, "Lagu": 25, "Fashahah": 29, "Suara": 15}',
+      [e2ePart1Id]: '{"Tajwid": 29, "Lagu": 23, "Fashahah": 28, "Suara": 15}',
+      [e2ePart3Id]: '{"Tajwid": 26, "Lagu": 20, "Fashahah": 27, "Suara": 15}'
+    };
 
     for (const pid of [e2ePart1Id, e2ePart2Id, e2ePart3Id]) {
       const spId = spFinMap.get(pid)!;
@@ -4455,8 +4591,8 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(`
         INSERT INTO judge_assessments (id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, is_locked, field_scores, total_deductions, final_score)
         VALUES
-          ('${generateUuid()}', '${e2eTenantId}', '${spId}', '${amId}', '${e2eJudge1Id}', '${e2eRubricId}', 'in_progress', false, '{"Tajwid": 30, "Lagu": 25, "Fashahah": 28, "Suara": 15}'::jsonb, 1, ${sc}),
-          ('${generateUuid()}', '${e2eTenantId}', '${spId}', '${amId}', '${e2eJudge2Id}', '${e2eRubricId}', 'in_progress', false, '{"Tajwid": 30, "Lagu": 25, "Fashahah": 28, "Suara": 15}'::jsonb, 1, ${sc});
+          ('${generateUuid()}', '${e2eTenantId}', '${spId}', '${amId}', '${e2eJudge1Id}', '${e2eRubricId}', 'in_progress', false, '${finalFieldMap[pid]}'::jsonb, 1, ${sc}),
+          ('${generateUuid()}', '${e2eTenantId}', '${spId}', '${amId}', '${e2eJudge2Id}', '${e2eRubricId}', 'in_progress', false, '${finalFieldMap[pid]}'::jsonb, 1, ${sc});
         BEGIN;
         SELECT set_config('mtq.rpc_finalize_active', 'true', true);
         UPDATE judge_assessments SET status = 'finalized', is_locked = true WHERE stage_participation_id = '${spId}'::uuid;

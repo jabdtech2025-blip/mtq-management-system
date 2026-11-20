@@ -1,6 +1,8 @@
 import { stageBelongsToBranch } from '../../services/stageResolver';
 import { buildStageOrderLookup, sortParticipantsForDisplay } from '../../utils/participantSort';
-import React, { useState, useMemo } from 'react';
+import { buildViewFilterKey, readViewFilters, writeViewFilters } from '../../utils/viewFilterStorage';
+import { resolveRequiredJudgeIdsForStage } from '../../services/completion';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   BookmarkCheck,
   Search,
@@ -11,6 +13,21 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { PageHeader, StatCard, Card, Badge, Button, Input, Select, EmptyState } from '../ui';
+
+const ALLOWED_PENILAIAN_STATUS_FILTERS = [
+  'Semua Status',
+  'Berlangsung',
+  'Final',
+  'Menunggu',
+  'Belum Dinilai Siapa Pun',
+  'Dinilai Juri Lain'
+] as const;
+
+const DEFAULT_PENILAIAN_FILTERS = {
+  statusFilter: 'Semua Status',
+  branchFilter: 'Semua Cabang',
+  adminSelectedJudgeId: ''
+};
 
 export const PenilaianHakimListView: React.FC = () => {
   const {
@@ -25,12 +42,12 @@ export const PenilaianHakimListView: React.FC = () => {
     setMonitoringJudgeId,
     setCurrentView,
     cabangList,
-    stages
+    stages,
+    getFieldCoverageForStage
   } = useMtq();
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('Semua Status');
-  const [branchFilter, setBranchFilter] = useState('Semua Cabang');
+  const filterKey = buildViewFilterKey('penilaian_hakim', currentTenant.id, currentUser.id);
+  const loadedFilterKeyRef = useRef(filterKey);
 
   const tenantBranchNames = useMemo(() => {
     const names = (cabangList || [])
@@ -44,9 +61,74 @@ export const PenilaianHakimListView: React.FC = () => {
     return users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id);
   }, [users, currentTenant.id]);
 
-  const [adminSelectedJudgeId, setAdminSelectedJudgeId] = useState<string>(
-    currentUser.role === 'judge' ? currentUser.id : tenantJudges[0]?.id || ''
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    const saved = readViewFilters(filterKey, DEFAULT_PENILAIAN_FILTERS).statusFilter;
+    return (ALLOWED_PENILAIAN_STATUS_FILTERS as readonly string[]).includes(saved)
+      ? saved
+      : 'Semua Status';
+  });
+  const [branchFilter, setBranchFilter] = useState<string>(
+    () => readViewFilters(filterKey, DEFAULT_PENILAIAN_FILTERS).branchFilter || 'Semua Cabang'
   );
+  const [adminSelectedJudgeId, setAdminSelectedJudgeId] = useState<string>(() => {
+    if (currentUser.role === 'judge') return currentUser.id;
+    const savedJudgeId = readViewFilters(filterKey, DEFAULT_PENILAIAN_FILTERS).adminSelectedJudgeId;
+    if (savedJudgeId && (tenantJudges.length === 0 || tenantJudges.some((j) => j.id === savedJudgeId))) {
+      return savedJudgeId;
+    }
+    return tenantJudges[0]?.id || '';
+  });
+
+  // Muat ulang filter jika tenant atau user berubah; simpan perubahan filter ke sessionStorage tab ini
+  useEffect(() => {
+    if (loadedFilterKeyRef.current !== filterKey) {
+      loadedFilterKeyRef.current = filterKey;
+      const saved = readViewFilters(filterKey, DEFAULT_PENILAIAN_FILTERS);
+      setStatusFilter(
+        (ALLOWED_PENILAIAN_STATUS_FILTERS as readonly string[]).includes(saved.statusFilter)
+          ? saved.statusFilter
+          : 'Semua Status'
+      );
+      setBranchFilter(saved.branchFilter || 'Semua Cabang');
+      if (currentUser.role === 'judge') {
+        setAdminSelectedJudgeId(currentUser.id);
+      } else {
+        const nextJudgeId =
+          saved.adminSelectedJudgeId &&
+          (tenantJudges.length === 0 || tenantJudges.some((j) => j.id === saved.adminSelectedJudgeId))
+            ? saved.adminSelectedJudgeId
+            : tenantJudges[0]?.id || '';
+        setAdminSelectedJudgeId(nextJudgeId);
+      }
+      return;
+    }
+
+    writeViewFilters(filterKey, {
+      statusFilter,
+      branchFilter,
+      adminSelectedJudgeId: currentUser.role === 'judge' ? '' : adminSelectedJudgeId
+    });
+  }, [filterKey, statusFilter, branchFilter, adminSelectedJudgeId, currentUser.role, currentUser.id, tenantJudges]);
+
+  // Reset otomatis jika cabang tersimpan sudah tidak aktif/dihapus (hanya setelah daftar cabang termuat)
+  useEffect(() => {
+    if (
+      branchFilter !== 'Semua Cabang' &&
+      tenantBranchNames.length > 0 &&
+      !tenantBranchNames.includes(branchFilter)
+    ) {
+      setBranchFilter('Semua Cabang');
+    }
+  }, [branchFilter, tenantBranchNames]);
+
+  // Reset otomatis jika hakim monitoring tersimpan sudah tidak ada pada tenant ini
+  useEffect(() => {
+    if (currentUser.role === 'judge' || tenantJudges.length === 0) return;
+    if (!tenantJudges.some((j) => j.id === adminSelectedJudgeId)) {
+      setAdminSelectedJudgeId(tenantJudges[0].id);
+    }
+  }, [currentUser.role, tenantJudges, adminSelectedJudgeId]);
 
   const activeJudgeId = currentUser.role === 'judge' ? currentUser.id : adminSelectedJudgeId;
   const activeJudge = users.find((u) => u.id === activeJudgeId) || {
@@ -125,6 +207,58 @@ export const PenilaianHakimListView: React.FC = () => {
         status = 'in_progress';
       }
 
+      // Penilaian juri lain (mis. tim juri lain) untuk peserta ini pada babak yang sama.
+      // "Sudah dinilai juri lain" = semua bidang hakim ini, di setiap maqra, sudah punya lembar final
+      // dari juri lain yang memegang bidang itu.
+      const stageJudgeIds = resolveRequiredJudgeIdsForStage({
+        tenantId: currentTenant.id,
+        stageId: p.stageId,
+        stageName: p.stageName,
+        branchId: p.branchId,
+        branchName: p.branchName,
+        judgeAssignments
+      });
+      const coverage = getFieldCoverageForStage({
+        stageId: p.stageId,
+        stageName: p.stageName,
+        branchId: p.branchId,
+        branchName: p.branchName,
+        requiredJudgeIds: stageJudgeIds
+      });
+      const myFields: string[] | null = coverage
+        ? coverage.judgeFieldScope[activeJudgeId] ?? null
+        : null;
+      const holdsField = (judgeId: string, field: string) => {
+        const scope = coverage?.judgeFieldScope[judgeId];
+        return !scope || scope.some((f) => f.trim().toLowerCase() === field.trim().toLowerCase());
+      };
+      const otherStageAssessments = assessments.filter(
+        (a) =>
+          a.tenantId === currentTenant.id &&
+          a.participantId === p.id &&
+          a.judgeId !== activeJudgeId &&
+          (a.stageName === p.stageName || !a.stageName)
+      );
+      const otherFinalized = otherStageAssessments.filter((a) => a.status === 'finalized');
+      const fieldsToCheck = myFields || coverage?.fieldNames || [];
+      const coveredByOthers =
+        totalQuestions > 0 &&
+        fieldsToCheck.length > 0 &&
+        stageQuestions.every((q) =>
+          fieldsToCheck.every((field) =>
+            otherFinalized.some((a) => a.questionId === q.questionId && holdsField(a.judgeId, field))
+          )
+        );
+      const otherJudgeNames = Array.from(
+        new Set(
+          otherFinalized
+            .filter((a) => fieldsToCheck.length === 0 || fieldsToCheck.some((field) => holdsField(a.judgeId, field)))
+            .map((a) => users.find((u) => u.id === a.judgeId)?.name || a.judgeName || 'Juri lain')
+        )
+      );
+      const assessedByAnyone =
+        finalizedCount > 0 || inProgressAsms.length > 0 || otherStageAssessments.length > 0;
+
       let score = '--';
       if (finalizedCount > 0) {
         const sum = finalizedAsms.reduce((acc, curr) => acc + (curr?.finalScore || 0), 0);
@@ -137,10 +271,13 @@ export const PenilaianHakimListView: React.FC = () => {
         finalizedCount,
         totalQuestions,
         judgeScore: score,
-        judgeStatus: status
+        judgeStatus: status,
+        coveredByOthers,
+        otherJudgeNames,
+        assessedByAnyone
       };
     });
-  }, [assignedParticipants, assessments, currentTenant.id, activeJudgeId, getParticipantStageQuestions]);
+  }, [assignedParticipants, assessments, currentTenant.id, activeJudgeId, getParticipantStageQuestions, judgeAssignments, users, getFieldCoverageForStage]);
 
   // Urut cabang, babak, lalu nomor undian (urutan tampil) agar sama dengan urutan maju peserta
   const stageOrder = useMemo(() => buildStageOrderLookup(stages), [stages]);
@@ -160,7 +297,9 @@ export const PenilaianHakimListView: React.FC = () => {
       statusFilter === 'Semua Status' ||
       (statusFilter === 'Final' && p.judgeStatus === 'finalized') ||
       (statusFilter === 'Berlangsung' && p.judgeStatus === 'in_progress') ||
-      (statusFilter === 'Menunggu' && (p.judgeStatus === 'not_started' || p.judgeStatus === 'no_maqra'));
+      (statusFilter === 'Menunggu' && (p.judgeStatus === 'not_started' || p.judgeStatus === 'no_maqra')) ||
+      (statusFilter === 'Belum Dinilai Siapa Pun' && !p.assessedByAnyone && p.judgeStatus !== 'no_maqra') ||
+      (statusFilter === 'Dinilai Juri Lain' && p.coveredByOthers && p.judgeStatus === 'not_started');
 
     const matchesBranch =
       branchFilter === 'Semua Cabang' || p.branchName === branchFilter;
@@ -268,6 +407,8 @@ export const PenilaianHakimListView: React.FC = () => {
           <option value="Berlangsung">Berlangsung</option>
           <option value="Final">Final/Terkunci</option>
           <option value="Menunggu">Menunggu</option>
+          <option value="Belum Dinilai Siapa Pun">Belum Dinilai Siapa Pun</option>
+          <option value="Dinilai Juri Lain">Sudah Dinilai Juri Lain</option>
         </Select>
 
         <Select
@@ -359,10 +500,19 @@ export const PenilaianHakimListView: React.FC = () => {
                           <Badge variant="warning" dot>
                             Berlangsung ({p.finalizedCount}/{p.totalQuestions} Maqra)
                           </Badge>
+                        ) : p.coveredByOthers ? (
+                          <Badge variant="info" icon={<Lock className="w-3 h-3" />}>
+                            Sudah Dinilai Juri Lain
+                          </Badge>
                         ) : (
                           <Badge variant="neutral" icon={<Clock className="w-3 h-3" />}>
                             Belum Dimulai (0/{p.totalQuestions} Maqra)
                           </Badge>
+                        )}
+                        {p.otherJudgeNames.length > 0 && p.judgeStatus !== 'no_maqra' && (
+                          <p className="mt-1 text-[11px] text-slate-500" data-testid="other-judges-note">
+                            Dinilai juga: {p.otherJudgeNames.join(', ')}
+                          </p>
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-center font-bold font-mono text-sm tabular-nums text-slate-900">

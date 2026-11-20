@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Award,
   CheckCircle2,
@@ -19,11 +19,18 @@ import { useMtq } from '../../context/MtqContext';
 import { Participant } from '../../types/mtq';
 import { RankingService } from '../../services/rankingService';
 import { supabaseDataService } from '../../services/supabaseDataService';
+import { buildViewFilterKey, readViewFilters, writeViewFilters } from '../../utils/viewFilterStorage';
 import { ConfirmDialog, Modal, Badge, Button, Select, Textarea, Input, Card } from '../ui';
+
+const DEFAULT_HASIL_FILTERS = {
+  selectedStageName: '',
+  selectedBranch: 'Semua Cabang'
+};
 
 export const HasilKelulusanView: React.FC = () => {
   const {
     currentTenant,
+    currentUser,
     participants,
     stageParticipations,
     assessments,
@@ -87,19 +94,45 @@ export const HasilKelulusanView: React.FC = () => {
     return uniqueStages[0];
   }, [uniqueStages]);
 
-  const [selectedStageName, setSelectedStageName] = useState<string>(
-    () => defaultRunningStage?.name || 'Penyisihan'
-  );
+  const filterKey = buildViewFilterKey('hasil_kelulusan', currentTenant.id, currentUser.id);
+  const loadedFilterKeyRef = useRef(filterKey);
 
-  useEffect(() => {
-    if (defaultRunningStage?.name) {
-      setSelectedStageName(defaultRunningStage.name);
-    }
-  }, [defaultRunningStage?.name]);
+  const [selectedStageName, setSelectedStageName] = useState<string>(() => {
+    const saved = readViewFilters(filterKey, DEFAULT_HASIL_FILTERS).selectedStageName;
+    return saved || defaultRunningStage?.name || '';
+  });
 
   // Selected branch filter for multi-branch isolation & participant search query
-  const [selectedBranch, setSelectedBranch] = useState<string>('Semua Cabang');
+  const [selectedBranch, setSelectedBranch] = useState<string>(
+    () => readViewFilters(filterKey, DEFAULT_HASIL_FILTERS).selectedBranch || 'Semua Cabang'
+  );
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Muat ulang filter jika tenant/user berubah; simpan pilihan babak & cabang ke sessionStorage
+  useEffect(() => {
+    if (loadedFilterKeyRef.current !== filterKey) {
+      loadedFilterKeyRef.current = filterKey;
+      const saved = readViewFilters(filterKey, DEFAULT_HASIL_FILTERS);
+      setSelectedStageName(saved.selectedStageName || defaultRunningStage?.name || '');
+      setSelectedBranch(saved.selectedBranch || 'Semua Cabang');
+      return;
+    }
+
+    if (!selectedStageName) return;
+    writeViewFilters(filterKey, {
+      selectedStageName,
+      selectedBranch
+    });
+  }, [filterKey, selectedStageName, selectedBranch, defaultRunningStage?.name]);
+
+  // Hanya terapkan babak default jika belum ada pilihan tersimpan yang cocok pada daftar babak tenant ini
+  useEffect(() => {
+    if (uniqueStages.length === 0 || !defaultRunningStage?.name) return;
+    const stageExists = uniqueStages.some((s) => s.name === selectedStageName);
+    if (!stageExists) {
+      setSelectedStageName(defaultRunningStage.name);
+    }
+  }, [uniqueStages, defaultRunningStage?.name, selectedStageName]);
 
   // Active stage participations for current tenant & stage
   const currentStageParticipations = useMemo(() => {
@@ -139,8 +172,10 @@ export const HasilKelulusanView: React.FC = () => {
     return ['Semua Cabang', ...Array.from(branchSet)];
   }, [currentStageParticipations, participants, tenantStages, currentTenant.id, selectedStageName]);
 
-  // Default ke cabang pertama agar pengesahan (yang wajib per cabang) langsung dapat dilakukan
+  // Default ke cabang pertama agar pengesahan (yang wajib per cabang) langsung dapat dilakukan,
+  // namun tunggu sampai opsi cabang termuat agar cabang tersimpan tidak terhapus saat hidrasi awal.
   useEffect(() => {
+    if (branchOptions.length <= 1) return;
     if (!branchOptions.includes(selectedBranch)) {
       setSelectedBranch(branchOptions[1] || 'Semua Cabang');
     } else if (selectedBranch === 'Semua Cabang' && branchOptions.length > 2) {
@@ -1131,7 +1166,7 @@ export const HasilKelulusanView: React.FC = () => {
                 <th className="px-4 py-3 w-20">Undian</th>
                 <th className="px-5 py-3">Nama Peserta & Grup</th>
                 <th className="px-4 py-3 text-right">Nilai Akhir</th>
-                <th className="px-4 py-3 text-center">Kelengkapan Juri</th>
+                <th className="px-4 py-3 text-center">Kelengkapan Penilaian</th>
                 <th className="px-4 py-3 text-center">Status Kelulusan</th>
                 <th className="px-5 py-3 text-right">Aksi Override</th>
               </tr>
@@ -1248,7 +1283,9 @@ export const HasilKelulusanView: React.FC = () => {
                       {/* Completeness */}
                       <td className="px-4 py-3.5 text-center">
                         <span className="text-xs font-mono tabular-nums font-medium text-slate-700">
-                          {item.finalizedJudgeCount} / {item.totalAssignedJudges} Juri Final
+                          {(item.requiredFieldUnits ?? 0) > 0
+                            ? `${item.coveredFieldUnits ?? 0} / ${item.requiredFieldUnits} Bidang Dinilai`
+                            : `${item.finalizedJudgeCount} / ${item.totalAssignedJudges} Juri Final`}
                         </span>
                       </td>
 

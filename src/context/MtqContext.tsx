@@ -55,7 +55,11 @@ import {
   validateMaqraAssignmentForParticipant
 } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
-import { getParticipantStageCompletion, resolveRequiredJudgeIdsForStage } from '../services/completion';
+import {
+  FieldCoverageSpec,
+  getParticipantStageCompletion,
+  resolveRequiredJudgeIdsForStage
+} from '../services/completion';
 import { mapJudgeAssessmentRow, TenantRealtimeEvent, supabaseDataService, AuthenticatedSupabaseProfile } from '../services/supabaseDataService';
 import {
   SupabaseConnectionInfo,
@@ -250,6 +254,14 @@ interface MtqContextType {
     participantId: string,
     stageName?: string
   ) => ParticipantProgressStatus;
+  /** Kelengkapan per bidang untuk sebuah babak (dipakai getStageCompletion). */
+  getFieldCoverageForStage: (args: {
+    stageId?: string;
+    stageName: string;
+    branchId?: string;
+    branchName?: string;
+    requiredJudgeIds: string[];
+  }) => FieldCoverageSpec | undefined;
   getStageParticipation: (
     participantId: string,
     stageName?: string
@@ -2229,6 +2241,42 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * P0: Status "Lengkap" ONLY when ALL required judges have finalized ALL assigned questions for that stage.
    * If no maqras assigned on this stage, returns "Maqra Belum Ditetapkan".
    */
+  /**
+   * Kelengkapan per bidang: bidang rubrik aktif cabang + cakupan bidang tiap hakim wajib babak itu.
+   * Peserta lengkap bila setiap bidang (per maqra) sudah dinilai minimal satu hakim pemegangnya,
+   * sehingga dewan hakim bisa dibagi menjadi beberapa tim dalam satu babak.
+   */
+  const getFieldCoverageForStage = (args: {
+    stageId?: string;
+    stageName: string;
+    branchId?: string;
+    branchName?: string;
+    requiredJudgeIds: string[];
+  }): FieldCoverageSpec | undefined => {
+    if (args.requiredJudgeIds.length === 0) return undefined;
+    const rubric = getActiveRubricForBranch(args.branchName || '', args.branchId);
+    if (!rubric) return undefined;
+    const activeFields = getActiveRubricFields(rubric);
+    if (activeFields.length === 0) return undefined;
+    const fieldNameById = new Map<string, string>();
+    rubricVersions.forEach((rv) => (rv.fields || []).forEach((f) => fieldNameById.set(f.id, f.name)));
+    const stageAssignments = judgeAssignments.filter(
+      (ja) =>
+        ja.tenantId === currentTenantId &&
+        ja.status !== 'Nonaktif' &&
+        (args.stageId && ja.stageId ? ja.stageId === args.stageId : ja.stageName === args.stageName)
+    );
+    const judgeFieldScope: Record<string, string[] | null> = {};
+    args.requiredJudgeIds.forEach((judgeId) => {
+      judgeFieldScope[judgeId] = resolveJudgeFieldScope(
+        stageAssignments.filter((ja) => ja.judgeId === judgeId),
+        activeFields,
+        fieldNameById
+      );
+    });
+    return { fieldNames: activeFields.map((f) => f.name), judgeFieldScope };
+  };
+
   const getParticipantProgress = (
     participantId: string,
     stageName?: string
@@ -2255,7 +2303,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stageName: targetStage,
       assignedMaqras: stageQuestions,
       requiredJudgeIds,
-      assessments
+      assessments,
+      fieldCoverage: getFieldCoverageForStage({
+        stageId: sp?.stageId,
+        stageName: targetStage,
+        branchId: part.branchId,
+        branchName: part.branchName,
+        requiredJudgeIds
+      })
     });
 
     return completion.progressStatus;
@@ -6111,10 +6166,15 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       if (!rpcRes.success) {
-        return {
-          success: false,
-          message: rpcRes.message || 'Gagal menjalankan undian server.'
-        };
+        const raw = rpcRes.message || 'Gagal menjalankan undian server.';
+        // Pesan server lama masih menyebut "jenjang"; jenjang sudah tidak dipakai
+        const message = raw.startsWith('INSUFFICIENT_QUESTION_POOL')
+          ? raw
+              .replace(/^INSUFFICIENT_QUESTION_POOL:\s*/, '')
+              .replace('cabang/jenjang/babak', `cabang dan babak ${stageName}`) +
+            ' Pastikan soal berstatus Aktif dan tertaut ke babak milik cabang ini (lihat keterangan di bawah daftar soal).'
+          : raw;
+        return { success: false, message };
       }
 
       const rpcData = (rpcRes.data || {}) as {
@@ -8428,6 +8488,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         discardOutboxItems,
         getJudgeAssessment,
         getParticipantProgress,
+        getFieldCoverageForStage,
         getStageParticipation,
         getParticipantStageQuestions,
         addKafilah,

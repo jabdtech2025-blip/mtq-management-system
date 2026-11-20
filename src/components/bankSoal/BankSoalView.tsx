@@ -23,6 +23,7 @@ import { AppModal } from '../common/AppModal';
 import { formatDateTimeWIB } from '../../utils/dateTime';
 import { validateMaqraAssignmentForParticipant } from '../../services/scoringEngine';
 import { sortParticipantsByName } from '../../utils/participantSort';
+import { isSameStageId, resolveStageForBranch } from '../../services/stageResolver';
 import {
   getAllSurahs,
   getSurah,
@@ -382,8 +383,36 @@ export const BankSoalView: React.FC = () => {
     });
   }, [participants, lotteryStage, lotteryBranch]);
 
-  // Questions available for lottery (by Stage + Branch)
-  const eligibleLotteryQuestions = useMemo(() => {
+  // Babak yang benar-benar diundi (milik cabang terpilih)
+  const lotteryStageObj = useMemo(() => {
+    if (!lotteryStage || lotteryBranch === 'Semua Cabang') return undefined;
+    const branch = cabangList.find((c) => isSameBranch(c.name, lotteryBranch));
+    return resolveStageForBranch(stages, {
+      tenantId: currentTenant.id,
+      stageName: lotteryStage,
+      branchId: branch?.id,
+      branchName: lotteryBranch
+    });
+  }, [stages, cabangList, lotteryStage, lotteryBranch, currentTenant.id]);
+
+  /**
+   * Alasan soal tidak bisa diundi, memakai aturan yang sama dengan server (draw_lottery_server):
+   * status harus Aktif dan soal harus tertaut ke babak milik cabang yang diundi.
+   * String kosong = boleh diundi.
+   */
+  const lotteryQuestionBlockReason = (q: Question): string => {
+    if (q.status !== 'Aktif') return `Status soal "${q.status}" (harus Aktif)`;
+    if (lotteryStageObj && q.stageId && !isSameStageId(q.stageId, lotteryStageObj.id)) {
+      const linked = stages.find((s) => isSameStageId(s.id, q.stageId));
+      return linked?.branchName && !isSameBranch(linked.branchName, lotteryBranch)
+        ? `Tertaut ke babak ${linked.name} milik cabang ${linked.branchName}`
+        : 'Tertaut ke babak lain';
+    }
+    return '';
+  };
+
+  // Soal sesuai nama babak & cabang, dipisah menjadi yang bisa diundi dan yang tidak
+  const lotteryQuestionCandidates = useMemo(() => {
     return questions.filter((q) => {
       const matchStage = !lotteryStage || q.stageName === lotteryStage;
       const qBranch = q.branchName || q.branchAndLevel || '';
@@ -392,6 +421,31 @@ export const BankSoalView: React.FC = () => {
       return matchStage && matchBranch && q.status !== 'Nonaktif';
     });
   }, [questions, lotteryStage, lotteryBranch]);
+
+  const eligibleLotteryQuestions = useMemo(
+    () => lotteryQuestionCandidates.filter((q) => !lotteryQuestionBlockReason(q)),
+    [lotteryQuestionCandidates, lotteryStageObj, stages] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const blockedLotteryQuestions = useMemo(
+    () =>
+      lotteryQuestionCandidates
+        .map((q) => ({ question: q, reason: lotteryQuestionBlockReason(q) }))
+        .filter((x) => x.reason),
+    [lotteryQuestionCandidates, lotteryStageObj, stages] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Pilihan pool hanya boleh berisi soal yang benar-benar bisa diundi
+  useEffect(() => {
+    const allowed = new Set(eligibleLotteryQuestions.map((q) => q.id));
+    if (selectedQuestionPoolIds.some((id) => !allowed.has(id))) {
+      setSelectedQuestionPoolIds((prev) => prev.filter((id) => allowed.has(id)));
+    }
+  }, [eligibleLotteryQuestions, selectedQuestionPoolIds]);
+
+  // Pesan galat undian lama dibuang setiap kali pengaturan undian berubah
+  useEffect(() => {
+    setLotteryFeedback('');
+  }, [lotteryStage, lotteryBranch, lotteryDrawMode, lotteryQuestionsPerParticipant]);
 
   // Initialize lottery participant & question pool selection when opening modal
   const handleOpenLotteryWorkflow = () => {
@@ -1748,7 +1802,9 @@ export const BankSoalView: React.FC = () => {
                 >
                   {eligibleLotteryQuestions.length === 0 ? (
                     <div className="p-4 text-center text-slate-400">
-                      Tidak ada soal aktif sesuai filter ini.
+                      {blockedLotteryQuestions.length > 0
+                        ? 'Tidak ada soal yang bisa diundi. Lihat keterangan di bawah.'
+                        : 'Tidak ada soal aktif sesuai filter ini.'}
                     </div>
                   ) : (
                     eligibleLotteryQuestions.map((q, idx) => {
@@ -1785,6 +1841,27 @@ export const BankSoalView: React.FC = () => {
                     })
                   )}
                 </div>
+                {blockedLotteryQuestions.length > 0 && (
+                  <div
+                    data-testid="lottery-blocked-questions"
+                    className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-1"
+                  >
+                    <p className="font-bold">
+                      {blockedLotteryQuestions.length} soal tidak ikut diundi:
+                    </p>
+                    <ul className="list-disc pl-4 space-y-0.5 max-h-24 overflow-y-auto">
+                      {blockedLotteryQuestions.slice(0, 20).map(({ question, reason }) => (
+                        <li key={question.id}>
+                          <span className="font-mono font-semibold">{question.code}</span>: {reason}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-amber-800">
+                      Buka soalnya lalu simpan ulang dengan cabang dan babak yang benar, atau minta pengelola menjalankan
+                      migrasi 20261123 yang meluruskan tautan babak secara otomatis.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
