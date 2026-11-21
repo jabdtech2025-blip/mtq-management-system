@@ -98,6 +98,7 @@ const MainLayout: React.FC = () => {
   };
 
   const isScoringView = currentView === 'penilaian_dual_panel';
+  const isWideStickyTableView = currentView === 'rekap_nilai';
 
   return (
     <div className="flex h-screen w-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
@@ -153,7 +154,15 @@ const MainLayout: React.FC = () => {
         {/* Render unified TopHeader across all views */}
         <TopHeader />
 
-        <main className={`flex-1 min-w-0 ${isScoringView ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden'}`}>
+        <main
+          className={`flex-1 min-w-0 ${
+            isScoringView
+              ? 'overflow-hidden'
+              : isWideStickyTableView
+              ? 'overflow-auto'
+              : 'overflow-y-auto overflow-x-hidden'
+          }`}
+        >
           <React.Suspense
             fallback={
               <div className="p-6 space-y-4">

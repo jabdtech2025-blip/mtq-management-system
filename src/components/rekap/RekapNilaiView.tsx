@@ -131,127 +131,34 @@ export const RekapNilaiView: React.FC = () => {
   });
   const [inspectedParticipant, setInspectedParticipant] = useState<Participant | null>(null);
   const [modalSelectedQuestionId, setModalSelectedQuestionId] = useState<string>('');
-  const tableCardRef = useRef<HTMLDivElement>(null);
-  const tableScrollRef = useRef<HTMLDivElement>(null);
-  const prevTableScrollTopRef = useRef(0);
-  const [tableViewportMaxHeight, setTableViewportMaxHeight] = useState<number | null>(null);
+  const pageContainerRef = useRef<HTMLDivElement>(null);
+  const [headerBlockWidth, setHeaderBlockWidth] = useState<number | null>(null);
 
-  // Ukur tinggi area <main> agar saat bagian judul & filter tergulir ke atas, tabel mengisi penuh viewport
+  // Ukur lebar area <main> agar judul, tombol Ekspor CSV, dan bilah filter tetap sejajar layar
+  // saat tabel lebar digulir horizontal, sementara scroll vertikal menyatu penuh di <main>
   useEffect(() => {
-    const tableEl = tableScrollRef.current;
-    const mainEl = tableEl?.closest('main') as HTMLElement | null;
+    const mainEl = pageContainerRef.current?.closest('main') as HTMLElement | null;
     if (!mainEl) return;
 
-    const updateHeight = () => {
-      const h = mainEl.clientHeight;
-      if (h > 0) {
-        setTableViewportMaxHeight(Math.max(240, h - 26));
+    const updateWidth = () => {
+      const w = mainEl.clientWidth;
+      if (w > 0) {
+        const horizontalPad = window.innerWidth >= 640 ? 64 : 32;
+        setHeaderBlockWidth(Math.min(1280, Math.max(280, w - horizontalPad)));
       }
     };
 
-    updateHeight();
+    updateWidth();
 
     if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(updateHeight);
+      const observer = new ResizeObserver(updateWidth);
       observer.observe(mainEl);
       return () => observer.disconnect();
     }
 
-    window.addEventListener('resize', updateHeight);
-    return () => window.removeEventListener('resize', updateHeight);
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
   }, []);
-
-  // Scroll chaining: saat pengguna menggulir tabel ke bawah, gulir halaman (<main>) terlebih dahulu
-  // hingga bagian judul, tombol Ekspor CSV, dan filter tergulir ke atas, baru gulir isi tabel
-  useEffect(() => {
-    const tableEl = tableScrollRef.current;
-    if (!tableEl) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.deltaY === 0) return;
-
-      const mainEl = tableEl.closest('main') as HTMLElement | null;
-      const cardEl = tableCardRef.current;
-      if (!mainEl || !cardEl) return;
-
-      let deltaY = e.deltaY;
-      if (e.deltaMode === 1) deltaY *= 32;
-      else if (e.deltaMode === 2) deltaY *= mainEl.clientHeight;
-
-      const maxMainScroll = mainEl.scrollHeight - mainEl.clientHeight;
-      if (maxMainScroll <= 1) return;
-
-      const mainRect = mainEl.getBoundingClientRect();
-      const cardRect = cardEl.getBoundingClientRect();
-      const dockGap = 12;
-      const dockScrollTop = Math.max(
-        0,
-        Math.min(maxMainScroll, mainEl.scrollTop + (cardRect.top - mainRect.top) - dockGap)
-      );
-
-      if (deltaY > 0) {
-        const remainingMainDown = dockScrollTop - mainEl.scrollTop;
-        if (remainingMainDown > 0.5) {
-          e.preventDefault();
-          const consumedByMain = Math.min(deltaY, remainingMainDown);
-          mainEl.scrollTop += consumedByMain;
-          const leftover = deltaY - consumedByMain;
-          if (leftover > 0.5 && tableEl.scrollHeight > tableEl.clientHeight + 1) {
-            tableEl.scrollTop += leftover;
-          }
-        }
-      } else {
-        const canScrollTableUp = tableEl.scrollTop > 0.5;
-        if (canScrollTableUp) {
-          const nextTableTop = tableEl.scrollTop + deltaY;
-          if (nextTableTop < 0 && mainEl.scrollTop > 0.5) {
-            e.preventDefault();
-            tableEl.scrollTop = 0;
-            mainEl.scrollTop = Math.max(0, mainEl.scrollTop + nextTableTop);
-          }
-        } else if (mainEl.scrollTop > 0.5) {
-          e.preventDefault();
-          mainEl.scrollTop = Math.max(0, mainEl.scrollTop + deltaY);
-        }
-      }
-    };
-
-    tableEl.addEventListener('wheel', handleWheel, { passive: false });
-    return () => {
-      tableEl.removeEventListener('wheel', handleWheel);
-    };
-  }, []);
-
-  const handleTableScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const tableEl = e.currentTarget;
-    const prevTop = prevTableScrollTopRef.current;
-    const currTop = tableEl.scrollTop;
-    prevTableScrollTopRef.current = currTop;
-
-    // Fallback saat pengguna menyeret scrollbar tabel atau menggeser layar sentuh ke bawah
-    if (currTop > prevTop && currTop > 2) {
-      const mainEl = tableEl.closest('main') as HTMLElement | null;
-      const cardEl = tableCardRef.current;
-      if (!mainEl || !cardEl) return;
-
-      const maxMainScroll = mainEl.scrollHeight - mainEl.clientHeight;
-      if (maxMainScroll <= 1) return;
-
-      const mainRect = mainEl.getBoundingClientRect();
-      const cardRect = cardEl.getBoundingClientRect();
-      const dockGap = 12;
-      const remainingMainDown = cardRect.top - mainRect.top - dockGap;
-
-      if (remainingMainDown > 8 && mainEl.scrollTop < maxMainScroll - 1) {
-        const targetMainTop = Math.max(
-          0,
-          Math.min(maxMainScroll, mainEl.scrollTop + remainingMainDown)
-        );
-        mainEl.scrollTo({ top: targetMainTop, behavior: 'smooth' });
-      }
-    }
-  };
 
   useEffect(() => {
     if (loadedFilterKeyRef.current !== filterKey) {
@@ -558,8 +465,20 @@ export const RekapNilaiView: React.FC = () => {
   };
 
   return (
-    <div className="px-4 pt-4 pb-3 sm:px-8 sm:pt-6 sm:pb-3 max-w-7xl mx-auto space-y-5">
-      {/* Top Header */}
+    <div
+      ref={pageContainerRef}
+      className="px-4 pt-4 pb-8 sm:px-8 sm:pt-6 sm:pb-8 w-fit min-w-full"
+    >
+      <div
+        className="mx-auto w-fit"
+        style={headerBlockWidth ? { minWidth: `${headerBlockWidth}px` } : undefined}
+      >
+        {/* Blok Judul, Ekspor CSV, dan Filter: tergulir ke atas saat scroll vertikal, stabil saat scroll horizontal */}
+        <div
+          className="sticky left-4 sm:left-8 space-y-5 mb-5"
+          style={headerBlockWidth ? { width: `${headerBlockWidth}px` } : undefined}
+        >
+          {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
@@ -643,17 +562,10 @@ export const RekapNilaiView: React.FC = () => {
         </select>
       </div>
 
-      {/* Dynamic Grouped-Header Table with Sticky Header, Sticky Identification & 2-Axis Scrolling */}
-      <div
-        ref={tableCardRef}
-        className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden"
-      >
-        <div
-          ref={tableScrollRef}
-          onScroll={handleTableScroll}
-          style={tableViewportMaxHeight ? { maxHeight: `${tableViewportMaxHeight}px` } : undefined}
-          className="overflow-auto max-w-full max-h-[calc(100dvh-92px)]"
-        >
+        </div>
+
+        {/* Dynamic Grouped-Header Table: scroll vertikal & horizontal menyatu langsung di <main> agar thead freeze penuh */}
+        <div className="bg-white rounded-sm border border-slate-200 shadow-sm">
           <table className="w-full text-left border-separate border-spacing-0 min-w-[950px]">
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-[0_-2px_0_0_#f1f5f9,0_1px_0_0_#cbd5e1]">
               {/* Top Grouped Header */}
