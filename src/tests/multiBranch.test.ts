@@ -24,6 +24,7 @@ import {
   writeViewFilters,
   FilterStorageLike
 } from '../utils/viewFilterStorage';
+import { buildJudgeAssignmentLabels, resolveRekapJudgeColumns } from '../utils/judgeAssignmentLabels';
 import {
   canSuperviseTenant,
   filterTenantsForManagement,
@@ -603,6 +604,114 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
     expect(activeOnly.length === 1 && activeOnly[0].id === 't-1', `filter Aktif salah: ${JSON.stringify(activeOnly)}`);
     expect(archivedOnly.length === 1 && archivedOnly[0].id === 't-2', `filter Nonaktif salah: ${JSON.stringify(archivedOnly)}`);
     expect(allTenants.length === 2, `filter Semua harus 2, dapat ${allTenants.length}`);
+  });
+
+  check('UA-01. Kolom Penugasan di Manajemen Akun memakai penugasan hakim sebenarnya, bukan teks bawaan', () => {
+    const base = { tenantId: 't-1', judgeName: 'Hakim A', judgeField: 'Tajwid' };
+    const assignments = [
+      { ...base, id: 'a1', judgeId: 'j-1', stageId: 's-final', stageName: 'Final', branchName: 'Marhalah Ibtidaiyyah Karawang', rubricFieldName: 'Tajwid' },
+      { ...base, id: 'a2', judgeId: 'j-1', stageId: 's-pen', stageName: 'Penyisihan', branchName: 'Marhalah Ibtidaiyyah Karawang', rubricFieldName: 'Tajwid' },
+      // duplikat persis harus dibuang
+      { ...base, id: 'a3', judgeId: 'j-1', stageId: 's-pen', stageName: 'Penyisihan', branchName: 'Marhalah Ibtidaiyyah Karawang', rubricFieldName: 'Tajwid' },
+      // penugasan Nonaktif dan milik penyelenggara lain tidak ikut
+      { ...base, id: 'a4', judgeId: 'j-1', stageName: 'Final', branchName: 'Tilawah Dewasa', status: 'Nonaktif' as const },
+      { ...base, id: 'a5', judgeId: 'j-1', tenantId: 't-2', stageName: 'Final', branchName: 'Tilawah Dewasa' },
+      // tanpa cabang/babak = semua
+      { ...base, id: 'a6', judgeId: 'j-2', stageName: '', branchName: '', judgeField: 'Lagu' }
+    ];
+    const order = new Map<string, number>([['s-pen', 1], ['s-final', 2]]);
+    const labels = buildJudgeAssignmentLabels(assignments, 't-1', order);
+
+    const j1 = labels.get('j-1') || [];
+    expect(j1.length === 2, `hakim j-1 harus punya 2 penugasan unik, dapat ${JSON.stringify(j1)}`);
+    expect(j1[0].stage === 'Penyisihan' && j1[1].stage === 'Final', `urutan babak salah: ${JSON.stringify(j1)}`);
+    expect(j1.every((l) => l.branch === 'Marhalah Ibtidaiyyah Karawang'), 'cabang harus dari penugasan, bukan "Tilawah Dewasa"');
+
+    const j2 = labels.get('j-2') || [];
+    expect(j2.length === 1 && j2[0].branch === 'Semua Cabang' && j2[0].stage === 'Semua Babak' && j2[0].field === 'Lagu',
+      `penugasan tanpa cabang/babak salah: ${JSON.stringify(j2)}`);
+
+    expect(!labels.has('j-3'), 'hakim tanpa penugasan tidak boleh mendapat cabang palsu');
+  });
+
+  check('RK-01. Kolom hakim Rekap Nilai hanya dari penugasan aktif (tanpa admin, hakim tak ditugaskan, atau bidang akun)', () => {
+    const users = [
+      { id: 'adm', name: 'Admin Satu', role: 'admin' },
+      { id: 'j-itqon', name: 'Hakim Itqon', role: 'judge', judgeField: 'Tajwid' },
+      { id: 'j-dua', name: 'Hakim Dua Bidang', role: 'judge', judgeField: 'Tajwid' },
+      { id: 'j-free1', name: 'Hakim Belum Tugas 1', role: 'judge', judgeField: 'Tajwid' },
+      { id: 'j-free2', name: 'Hakim Belum Tugas 2', role: 'judge', judgeField: 'Tajwid' }
+    ];
+    const participants = [
+      { id: 'p1', tenantId: 't-1', stageName: 'Penyisihan', branchName: 'Marhalah Ibtidaiyyah Karawang' }
+    ];
+    const base = { tenantId: 't-1', stageName: 'Penyisihan', branchName: 'Marhalah Ibtidaiyyah Karawang' };
+
+    // Kasus 1: belum ada penugasan sama sekali -> tidak ada kolom (bukan admin / akun sembarang)
+    const none = resolveRekapJudgeColumns({
+      tenantId: 't-1', selectedStage: 'Semua Babak', selectedBranch: 'Semua Cabang',
+      assignments: [], assessments: [], participants, users
+    });
+    expect(none.length === 0, `tanpa penugasan harus 0 kolom, dapat ${JSON.stringify(none)}`);
+
+    // Kasus 3 & 4: hanya hakim yang ditugaskan; bidang dari penugasan (Itqon), bukan bidang akun (Tajwid)
+    const assignments = [
+      { ...base, id: 'a1', judgeId: 'j-itqon', judgeName: 'Hakim Itqon', judgeField: 'Itqon', rubricFieldId: 'f-itqon' },
+      { ...base, id: 'a2', judgeId: 'j-dua', judgeName: 'Hakim Dua Bidang', judgeField: 'Tajwid' },
+      { ...base, id: 'a3', judgeId: 'j-dua', judgeName: 'Hakim Dua Bidang', judgeField: 'Lagu' },
+      { ...base, id: 'a4', judgeId: 'j-free1', judgeName: 'Hakim Belum Tugas 1', judgeField: 'Tajwid', status: 'Nonaktif' as const },
+      { ...base, id: 'a5', judgeId: 'j-free2', judgeName: 'x', judgeField: 'Tajwid', tenantId: 't-2' }
+    ];
+    const cols = resolveRekapJudgeColumns({
+      tenantId: 't-1', selectedStage: 'Semua Babak', selectedBranch: 'Semua Cabang',
+      assignments, assessments: [], participants, users,
+      rubricFieldNameById: new Map([['f-itqon', 'Itqon']])
+    });
+    expect(cols.map((c) => c.id).join(',') === 'j-itqon,j-dua', `kolom salah: ${JSON.stringify(cols)}`);
+    expect(cols[0].field === 'Itqon', `bidang hakim Itqon salah: ${cols[0].field}`);
+    expect(cols[1].field === 'Tajwid, Lagu', `hakim dua bidang harus "Tajwid, Lagu", dapat ${cols[1].field}`);
+    expect(cols.every((c) => !c.isUnassigned), 'hakim aktif tidak boleh bertanda dicabut');
+
+    // Filter babak lain tanpa penugasan -> tidak ada kolom (tidak jatuh ke semua hakim)
+    const otherStage = resolveRekapJudgeColumns({
+      tenantId: 't-1', selectedStage: 'Final', selectedBranch: 'Semua Cabang',
+      assignments, assessments: [], participants, users
+    });
+    expect(otherStage.length === 0, `babak tanpa penugasan harus 0 kolom, dapat ${JSON.stringify(otherStage)}`);
+  });
+
+  check('RK-02. Hakim yang dicabut: tetap tampil (ditandai) bila sudah menilai, hilang bila belum menilai', () => {
+    const users = [
+      { id: 'j-a', name: 'Hakim Aktif', role: 'judge' },
+      { id: 'j-dicabut-nilai', name: 'Hakim Dicabut Sudah Menilai', role: 'judge' },
+      { id: 'j-dicabut-kosong', name: 'Hakim Dicabut Belum Menilai', role: 'judge' }
+    ];
+    const participants = [
+      { id: 'p1', tenantId: 't-1', stageName: 'Penyisihan', branchName: 'Cabang A' },
+      { id: 'p2', tenantId: 't-1', stageName: 'Penyisihan', branchName: 'Cabang B' }
+    ];
+    const assignments = [
+      { id: 'a1', tenantId: 't-1', judgeId: 'j-a', judgeName: 'Hakim Aktif', stageName: 'Penyisihan', branchName: 'Cabang A', judgeField: 'Tajwid' }
+    ];
+    const assessments = [
+      { tenantId: 't-1', participantId: 'p1', judgeId: 'j-dicabut-nilai', judgeName: 'Hakim Dicabut Sudah Menilai', judgeField: 'Lagu', stageName: 'Penyisihan' }
+    ];
+
+    const colsA = resolveRekapJudgeColumns({
+      tenantId: 't-1', selectedStage: 'Penyisihan', selectedBranch: 'Cabang A',
+      assignments, assessments, participants, users
+    });
+    expect(colsA.map((c) => c.id).join(',') === 'j-a,j-dicabut-nilai', `kolom Cabang A salah: ${JSON.stringify(colsA)}`);
+    const former = colsA[1];
+    expect(former.isUnassigned === true && former.field === 'Lagu', `hakim dicabut harus ditandai dengan bidang Lagu: ${JSON.stringify(former)}`);
+    expect(!colsA.some((c) => c.id === 'j-dicabut-kosong'), 'hakim dicabut yang belum menilai tidak boleh tampil');
+
+    // Di Cabang B, hakim dicabut tidak punya nilai -> tidak tampil
+    const colsB = resolveRekapJudgeColumns({
+      tenantId: 't-1', selectedStage: 'Penyisihan', selectedBranch: 'Cabang B',
+      assignments, assessments, participants, users
+    });
+    expect(!colsB.some((c) => c.id === 'j-dicabut-nilai'), `hakim dicabut tidak boleh tampil di cabang tanpa nilainya: ${JSON.stringify(colsB)}`);
   });
 
   const passed = results.filter((r) => r.success).length;

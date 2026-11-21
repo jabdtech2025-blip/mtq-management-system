@@ -16,6 +16,7 @@ import { buildViewFilterKey, readViewFilters, writeViewFilters } from '../../uti
 import { Participant, JudgeAssessment, AssignedMaqraItem } from '../../types/mtq';
 import { aggregateParticipantScores, getActiveRubricFields } from '../../services/scoringEngine';
 import { resolveRequiredJudgeIdsForStage } from '../../services/completion';
+import { resolveRekapJudgeColumns } from '../../utils/judgeAssignmentLabels';
 
 const ALLOWED_REKAP_STATUSES = [
   'Semua Status',
@@ -51,7 +52,8 @@ export const RekapNilaiView: React.FC = () => {
     setCurrentView,
     getActiveRubricForBranch,
     getFieldCoverageForStage,
-    getStageParticipation
+    getStageParticipation,
+    rubricVersions
   } = useMtq();
 
   /**
@@ -252,59 +254,39 @@ export const RekapNilaiView: React.FC = () => {
     }
   }, [selectedKafilah, kafilahOptions]);
 
-  // Dynamic judges assigned to the competition stage / tenant
-  const activeJudges = useMemo(() => {
-    // If specific stage is selected, filter judge assignments for that stage
-    if (selectedStage !== 'Semua Babak') {
-      // Hanya hakim babak ini pada cabang terpilih. Satu hakim dengan beberapa bidang tampil satu kolom.
-      const seenJudgeIds = new Set<string>();
-      const assigned = judgeAssignments.filter((ja) => {
-        if (ja.tenantId !== currentTenant.id || ja.status === 'Nonaktif') return false;
-        if (ja.stageName !== selectedStage) return false;
-        if (
-          selectedBranch !== 'Semua Cabang' &&
-          ja.branchName &&
-          ja.branchName !== 'Semua Cabang' &&
-          ja.branchName !== selectedBranch
-        ) {
-          return false;
-        }
-        if (seenJudgeIds.has(ja.judgeId)) return false;
-        seenJudgeIds.add(ja.judgeId);
-        return true;
-      });
-      if (assigned.length > 0) {
-        return assigned.map((ja) => {
-          const userObj = users.find((u) => u.id === ja.judgeId);
-          return {
-            id: ja.judgeId,
-            name: ja.judgeName,
-            field: ja.judgeField,
-            category: userObj?.judgeCategory || 'Hakim'
-          };
-        });
-      }
-    }
-
-    // Default to all judges in current tenant
-    const judgesInTenant = users.filter((u) => u.role === 'judge' && u.tenantId === currentTenant.id);
-    if (judgesInTenant.length > 0) {
-      return judgesInTenant.map((u) => ({
-        id: u.id,
-        name: u.name,
-        field: u.judgeField || 'Dewan Hakim',
-        category: u.judgeCategory || 'Hakim'
-      }));
-    }
-
-    // Fallback if none defined
-    return users.slice(1, 4).map((u) => ({
-      id: u.id,
-      name: u.name,
-      field: u.judgeField || 'Dewan Hakim',
-      category: u.judgeCategory || 'Hakim'
+  // Kolom hakim: HANYA dari penugasan hakim aktif sesuai filter babak & cabang.
+  // Hakim yang penugasannya dicabut tetap tampil (ditandai) bila sudah sempat menilai peserta dalam cakupan ini.
+  const rubricFieldNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    rubricVersions.forEach((rv) => rv.fields.forEach((f) => {
+      if (f.id && f.name) map.set(f.id, f.name);
     }));
-  }, [selectedStage, selectedBranch, judgeAssignments, users, currentTenant.id]);
+    return map;
+  }, [rubricVersions]);
+
+  const activeJudges = useMemo(
+    () =>
+      resolveRekapJudgeColumns({
+        tenantId: currentTenant.id,
+        selectedStage,
+        selectedBranch,
+        assignments: judgeAssignments,
+        assessments,
+        participants,
+        users,
+        rubricFieldNameById
+      }),
+    [currentTenant.id, selectedStage, selectedBranch, judgeAssignments, assessments, participants, users, rubricFieldNameById]
+  );
+
+  const openJudgeAssignmentPage = () => {
+    try {
+      sessionStorage.setItem('mtq_master_tab', 'hakim');
+    } catch {
+      /* penyimpanan tidak tersedia: tetap buka Master Data */
+    }
+    setCurrentView('master_data');
+  };
 
   // Filter participants
   // Urut cabang, babak, lalu nomor undian (urutan tampil); dipakai juga untuk ekspor CSV
@@ -349,8 +331,8 @@ export const RekapNilaiView: React.FC = () => {
       'Babak',
       'Kode Maqra',
       'Judul Maqra',
-      ...activeJudges.map((j) => `Pengurangan ${j.name} (${j.field})`),
-      ...activeJudges.map((j) => `Nilai ${j.name} (${j.field})`),
+      ...activeJudges.map((j) => `Pengurangan ${j.name} (${j.field})${j.isUnassigned ? ' [tidak lagi ditugaskan]' : ''}`),
+      ...activeJudges.map((j) => `Nilai ${j.name} (${j.field})${j.isUnassigned ? ' [tidak lagi ditugaskan]' : ''}`),
       'Rata-rata Maqra',
       'Status Maqra',
       'Rata-rata Keseluruhan',
@@ -564,6 +546,30 @@ export const RekapNilaiView: React.FC = () => {
 
         </div>
 
+        {activeJudges.length === 0 && (
+          <div
+            className="sticky left-4 sm:left-8 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900"
+            style={headerBlockWidth ? { width: `${headerBlockWidth}px` } : undefined}
+          >
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <p>
+                Belum ada hakim yang ditugaskan
+                {selectedStage !== 'Semua Babak' ? ` pada babak ${selectedStage}` : ''}
+                {selectedBranch !== 'Semua Cabang' ? ` di cabang ${selectedBranch}` : ''}. Kolom nilai hakim akan
+                muncul setelah hakim ditugaskan.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={openJudgeAssignmentPage}
+              className="self-start sm:self-auto shrink-0 rounded-md bg-white border border-amber-300 px-3 py-1.5 font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
+            >
+              Buka Penugasan Hakim
+            </button>
+          </div>
+        )}
+
         {/* Dynamic Grouped-Header Table: scroll vertikal & horizontal menyatu langsung di <main> agar thead freeze penuh */}
         <div className="bg-white rounded-sm border border-slate-200 shadow-sm">
           <table className="w-full text-left border-separate border-spacing-0 min-w-[950px]">
@@ -586,9 +592,17 @@ export const RekapNilaiView: React.FC = () => {
                     className="px-3 py-2.5 border-b border-r border-slate-200 text-center bg-slate-50 shadow-[0_1px_0_0_#e2e8f0]"
                   >
                     <span className="block text-slate-800">{j.name.split(',')[0]}</span>
-                    <span className="text-xs text-slate-400 font-normal lowercase tracking-normal">
+                    <span className="text-xs text-slate-400 font-normal normal-case tracking-normal">
                       {j.field}
                     </span>
+                    {j.isUnassigned && (
+                      <span
+                        className="block mt-0.5 text-[11px] font-semibold normal-case tracking-normal text-amber-700"
+                        title="Penugasan hakim ini sudah dicabut, tetapi ia sudah memberi penilaian. Nilainya tetap ditampilkan."
+                      >
+                        Tidak lagi ditugaskan
+                      </span>
+                    )}
                   </th>
                 ))}
                 <th

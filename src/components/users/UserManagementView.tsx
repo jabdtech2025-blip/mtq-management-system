@@ -11,10 +11,14 @@ import {
   Power,
   Trash2,
   X,
-  AlertCircle
+  AlertCircle,
+  ArrowRight
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { User, UserRole } from '../../types/mtq';
+import { buildJudgeAssignmentLabels } from '../../utils/judgeAssignmentLabels';
+
+const MAX_ASSIGNMENT_ROWS = 3;
 
 export const UserManagementView: React.FC = () => {
   const {
@@ -29,15 +33,30 @@ export const UserManagementView: React.FC = () => {
     requestPasswordReset,
     currentTenant,
     isLiveSupabaseMode,
-    cabangList,
-    rubricVersions
+    rubricVersions,
+    judgeAssignments,
+    stages,
+    setCurrentView
   } = useMtq();
 
-  // Active branches from Master Data
-  const activeBranches = React.useMemo(() => {
-    const active = cabangList.filter((c) => c.status === 'Aktif');
-    return active.length > 0 ? active : cabangList;
-  }, [cabangList]);
+  // Penugasan hakim yang sebenarnya (Master Data & Rubrik > Penugasan Hakim), per hakim
+  const assignmentsByJudge = React.useMemo(() => {
+    const stageOrder = new Map<string, number>();
+    (stages || []).forEach((s) => {
+      if (s.id) stageOrder.set(s.id, s.order ?? 999);
+    });
+    return buildJudgeAssignmentLabels(judgeAssignments || [], currentTenant.id, stageOrder);
+  }, [judgeAssignments, stages, currentTenant.id]);
+
+  const openJudgeAssignmentPage = () => {
+    try {
+      sessionStorage.setItem('mtq_master_tab', 'hakim');
+    } catch {
+      /* penyimpanan tidak tersedia: tetap buka Master Data */
+    }
+    setIsModalOpen(false);
+    setCurrentView('master_data');
+  };
 
   // Active rubric fields from Master Data
   const activeRubricFields = React.useMemo(() => {
@@ -81,8 +100,6 @@ export const UserManagementView: React.FC = () => {
   const [formPassword, setFormPassword] = useState('');
   const [formRole, setFormRole] = useState<UserRole>('judge');
   const [formField, setFormField] = useState('');
-  const [formBranch, setFormBranch] = useState('');
-  const [formStage, setFormStage] = useState('Penyisihan');
 
   // Filter users by current tenant (or platform for superadmin viewing)
   const tenantUsers = users.filter(
@@ -90,11 +107,18 @@ export const UserManagementView: React.FC = () => {
   );
 
   const filteredUsers = tenantUsers.filter((u) => {
+    const q = searchQuery.toLowerCase();
     const matchesSearch =
-      u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (u.email && u.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (u.judgeField && u.judgeField.toLowerCase().includes(searchQuery.toLowerCase()));
+      u.name.toLowerCase().includes(q) ||
+      u.username.toLowerCase().includes(q) ||
+      (u.email && u.email.toLowerCase().includes(q)) ||
+      (u.judgeField && u.judgeField.toLowerCase().includes(q)) ||
+      (assignmentsByJudge.get(u.id) || []).some(
+        (a) =>
+          a.field.toLowerCase().includes(q) ||
+          a.branch.toLowerCase().includes(q) ||
+          a.stage.toLowerCase().includes(q)
+      );
     const matchesRole =
       selectedRoleFilter === 'Semua Peran' ||
       (selectedRoleFilter === 'Admin' && u.role === 'admin') ||
@@ -112,8 +136,6 @@ export const UserManagementView: React.FC = () => {
     setFormPassword('');
     setFormRole('judge');
     setFormField(activeRubricFields[0] || 'Bidang Tajwid');
-    setFormBranch(activeBranches[0]?.name || '');
-    setFormStage('Penyisihan');
     setIsModalOpen(true);
   };
 
@@ -125,8 +147,6 @@ export const UserManagementView: React.FC = () => {
     setFormPassword('');
     setFormRole(u.role);
     setFormField(u.judgeField || activeRubricFields[0] || '');
-    setFormBranch(u.assignedBranch || activeBranches[0]?.name || '');
-    setFormStage(u.assignedStage || 'Penyisihan');
     setIsModalOpen(true);
   };
 
@@ -150,9 +170,7 @@ export const UserManagementView: React.FC = () => {
           username: formUsername,
           email: formEmail,
           role: formRole,
-          judgeField: formRole === 'judge' ? formField : undefined,
-          assignedBranch: formRole === 'judge' ? formBranch : undefined,
-          assignedStage: formRole === 'judge' ? formStage : undefined
+          judgeField: formRole === 'judge' ? formField : undefined
         });
         setOperationBanner({
           type: res.success ? 'success' : 'warning',
@@ -168,8 +186,6 @@ export const UserManagementView: React.FC = () => {
           status: 'Aktif',
           judgeCategory: formRole === 'judge' ? 'Dewan Hakim' : undefined,
           judgeField: formRole === 'judge' ? formField : undefined,
-          assignedBranch: formRole === 'judge' ? formBranch : undefined,
-          assignedStage: formRole === 'judge' ? formStage : undefined,
           initialPassword: formPassword.trim() || undefined
         });
         setOperationBanner({
@@ -331,12 +347,44 @@ export const UserManagementView: React.FC = () => {
                       </td>
                       <td className="px-4 py-3.5">
                         {u.role === 'judge' ? (
-                          <div>
-                            <p className="font-semibold text-slate-800">{u.judgeField}</p>
-                            <p className="text-xs text-slate-500">
-                              {u.assignedBranch || 'Tilawah Dewasa'} ({u.assignedStage || 'Penyisihan'})
-                            </p>
-                          </div>
+                          (() => {
+                            const labels = assignmentsByJudge.get(u.id) || [];
+                            if (labels.length === 0) {
+                              return (
+                                <div>
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                    <AlertCircle className="w-3 h-3" />
+                                    Belum ditugaskan
+                                  </span>
+                                  {u.judgeField && (
+                                    <p className="text-xs text-slate-400 mt-1">Bidang akun: {u.judgeField}</p>
+                                  )}
+                                </div>
+                              );
+                            }
+                            const shown = labels.slice(0, MAX_ASSIGNMENT_ROWS);
+                            const hidden = labels.slice(MAX_ASSIGNMENT_ROWS);
+                            return (
+                              <div className="space-y-1.5">
+                                {shown.map((a) => (
+                                  <div key={a.key}>
+                                    <p className="font-semibold text-slate-800">{a.field}</p>
+                                    <p className="text-xs text-slate-500">
+                                      {a.branch} ({a.stage})
+                                    </p>
+                                  </div>
+                                ))}
+                                {hidden.length > 0 && (
+                                  <p
+                                    className="text-xs font-semibold text-emerald-800"
+                                    title={hidden.map((a) => `${a.field} · ${a.branch} (${a.stage})`).join('\n')}
+                                  >
+                                    +{hidden.length} penugasan lainnya
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })()
                         ) : (
                           <span className="text-slate-400">-</span>
                         )}
@@ -542,43 +590,58 @@ export const UserManagementView: React.FC = () => {
               {formRole === 'judge' && (
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
                   <p className="font-bold text-xs uppercase tracking-wider text-emerald-800">
-                    Konfigurasi Penugasan Hakim
+                    Bidang & Penugasan Hakim
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian</label>
-                      <select
-                        value={formField}
-                        onChange={(e) => setFormField(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-800"
-                      >
-                        {activeRubricFields.map((fieldName) => (
-                          <option key={fieldName} value={fieldName}>
-                            {fieldName}
-                          </option>
-                        ))}
-                        {formField && !activeRubricFields.includes(formField) && (
-                          <option value={formField}>{formField}</option>
-                        )}
-                      </select>
-                    </div>
+                  <div>
+                    <label className="font-bold text-slate-600 block mb-1">Bidang Penilaian Utama</label>
+                    <select
+                      value={formField}
+                      onChange={(e) => setFormField(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-800"
+                    >
+                      {activeRubricFields.map((fieldName) => (
+                        <option key={fieldName} value={fieldName}>
+                          {fieldName}
+                        </option>
+                      ))}
+                      {formField && !activeRubricFields.includes(formField) && (
+                        <option value={formField}>{formField}</option>
+                      )}
+                    </select>
+                  </div>
 
+                  {editingUser && (assignmentsByJudge.get(editingUser.id) || []).length > 0 && (
                     <div>
-                      <label className="font-bold text-slate-600 block mb-1">Cabang Penugasan</label>
-                      <select
-                        value={formBranch}
-                        onChange={(e) => setFormBranch(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-800"
-                      >
-                        {activeBranches.map((cab) => (
-                          <option key={cab.id} value={cab.name}>
-                            {cab.name}
-                          </option>
+                      <p className="font-bold text-slate-600 mb-1">Penugasan saat ini</p>
+                      <ul className="space-y-0.5 text-slate-700">
+                        {(assignmentsByJudge.get(editingUser.id) || []).map((a) => (
+                          <li key={a.key}>
+                            <span className="font-semibold">{a.field}</span>
+                            <span className="text-slate-500">
+                              {' '}· {a.branch} ({a.stage})
+                            </span>
+                          </li>
                         ))}
-                        {formBranch && !activeBranches.some((c) => c.name === formBranch) && (
-                          <option value={formBranch}>{formBranch}</option>
-                        )}
-                      </select>
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="flex items-start gap-2 rounded-lg bg-white border border-slate-200 p-2.5 text-slate-600 leading-relaxed">
+                    <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-700" />
+                    <div className="space-y-1.5">
+                      <p>
+                        {editingUser
+                          ? 'Cabang, babak, dan bidang yang dinilai hakim diatur di menu Penugasan Hakim, bukan di formulir ini.'
+                          : 'Setelah akun dibuat, tugaskan hakim pada cabang, babak, dan bidang di menu Penugasan Hakim.'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={openJudgeAssignmentPage}
+                        className="inline-flex items-center gap-1 font-bold text-emerald-800 hover:text-emerald-950 cursor-pointer"
+                      >
+                        <span>Buka Master Data &amp; Rubrik › Penugasan Hakim</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 </div>
