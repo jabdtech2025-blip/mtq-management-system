@@ -21,6 +21,8 @@ import { RankingService } from '../../services/rankingService';
 import { resolveSnapshotForStage } from '../../services/stageResolver';
 import { supabaseDataService } from '../../services/supabaseDataService';
 import { buildViewFilterKey, readViewFilters, writeViewFilters } from '../../utils/viewFilterStorage';
+import { collectUnsavedSheets, formatUnsavedSheetsForLog } from '../../utils/unsavedSheets';
+import { buildCombinedScoringContext } from '../../utils/combinedScoring';
 import { ConfirmDialog, Modal, Badge, Button, Select, Textarea, Input, Card } from '../ui';
 
 const DEFAULT_HASIL_FILTERS = {
@@ -314,6 +316,20 @@ export const HasilKelulusanView: React.FC = () => {
     if (pendingSnapshotId) void loadSnapshotRef.current(pendingSnapshotId);
   }, [pendingSnapshotId]);
 
+  // Nilai juara gabungan babak ini (null = nilai babak ini saja). Nilai babak sumber dari snapshot resmi.
+  const combinedScoring = useMemo(
+    () =>
+      effectiveBranchName
+        ? buildCombinedScoringContext({ stage: currentStage, stages: tenantStages, snapshots: stageSnapshots })
+        : null,
+    [effectiveBranchName, currentStage, tenantStages, stageSnapshots]
+  );
+  const combinedSnapshotIdsKey = (combinedScoring?.snapshotIdsToLoad || []).join(',');
+  useEffect(() => {
+    if (!combinedSnapshotIdsKey) return;
+    combinedSnapshotIdsKey.split(',').forEach((id) => void loadSnapshotRef.current(id));
+  }, [combinedSnapshotIdsKey]);
+
   // Manual overrides state: { [participantId]: boolean } and reasons { [participantId]: string }
   const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
   const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
@@ -323,6 +339,11 @@ export const HasilKelulusanView: React.FC = () => {
 
   // Confirmation modal & feedback
   const [isConfirmAdvancementOpen, setIsConfirmAdvancementOpen] = useState(false);
+  // Persetujuan admin untuk tetap mengesahkan walau ada lembar penilaian yang belum disimpan hakim
+  const [unsavedAcknowledged, setUnsavedAcknowledged] = useState(false);
+  useEffect(() => {
+    if (isConfirmAdvancementOpen) setUnsavedAcknowledged(false);
+  }, [isConfirmAdvancementOpen]);
   const [advancementSuccessMessage, setAdvancementSuccessMessage] = useState('');
   const [advancementErrorMessage, setAdvancementErrorMessage] = useState('');
 
@@ -343,9 +364,11 @@ export const HasilKelulusanView: React.FC = () => {
       manualOverrides,
       overrideReasons,
       customRuleConfigs: competitionRules,
-      customRubricVersions: rubricVersions
+      customRubricVersions: rubricVersions,
+      stageSnapshots
     });
   }, [
+    stageSnapshots,
     currentTenant.id,
     selectedStageName,
     stageParticipations,
@@ -389,9 +412,11 @@ export const HasilKelulusanView: React.FC = () => {
       customRuleConfigs: competitionRules,
       customRubricVersions: rubricVersions,
       isFinalStage: Boolean(currentStage) && !nextStage,
-      championCount: currentStage?.championCount || 3
+      championCount: currentStage?.championCount || 3,
+      combinedScoring
     });
   }, [
+    combinedScoring,
     nextStage,
     currentStage,
     currentTenant.id,
@@ -665,7 +690,43 @@ export const HasilKelulusanView: React.FC = () => {
   };
 
   // P0-02 & P1-05: Confirm Advancement to Next Stage OR Finalize Championship with explicit stageId, nextStageId, branchId, branchName, and manualOverrides
+  // Lembar yang sudah dibuka hakim tetapi belum dikunci: nilainya TIDAK ikut dihitung saat babak disahkan
+  const unsavedSheets = useMemo(
+    () =>
+      collectUnsavedSheets({
+        tenantId: currentTenant.id,
+        stageId: currentStage?.id,
+        stageName: selectedStageName,
+        entries: evaluatedParticipants,
+        assessments,
+        users,
+        judgeAssignments
+      }),
+    [currentTenant.id, currentStage?.id, selectedStageName, evaluatedParticipants, assessments, users, judgeAssignments]
+  );
+  const hasUnsavedSheets = unsavedSheets.sheetCount > 0 && !currentStage?.isFinalized;
+
   const handleConfirmAdvancement = async () => {
+    if (hasUnsavedSheets && !unsavedAcknowledged) return;
+    if (hasUnsavedSheets) {
+      // Jejak audit: admin mengesahkan walau ada lembar yang belum disimpan (gagal mencatat tidak menghalangi)
+      try {
+        await supabaseDataService.appendAuditLog({
+          id: '',
+          timestamp: new Date().toISOString(),
+          actor: currentUser.name,
+          action: 'RATIFICATION_UNSAVED_SHEETS_ACKNOWLEDGED',
+          target: `Babak ${selectedStageName}${effectiveBranchName ? ` · ${effectiveBranchName}` : ''}`,
+          tenantName: currentTenant.name,
+          tenantId: currentTenant.id,
+          summary: `Pengesahan dengan ${unsavedSheets.sheetCount} lembar belum disimpan (${unsavedSheets.participantCount} peserta): ${formatUnsavedSheetsForLog(unsavedSheets)}`,
+          reason: 'Admin mencentang persetujuan: nilai dari lembar yang belum disimpan tidak dihitung dalam hasil resmi.',
+          outcome: 'Warning'
+        });
+      } catch {
+        /* pencatatan log bersifat tambahan */
+      }
+    }
     const qualifiedIds = qualifiedParticipants.map((item) => item.participant.id);
     const targetNextStage = nextStage ? nextStage.name : '';
     const result = await advanceQualifiers({
@@ -1058,6 +1119,29 @@ export const HasilKelulusanView: React.FC = () => {
                       {helperReason}
                     </span>
                   )}
+                  {hasUnsavedSheets && (
+                    <div
+                      className="max-w-[360px] text-right text-xs text-rose-700 leading-relaxed"
+                      role="alert"
+                      data-testid="unsaved-sheets-warning"
+                    >
+                      <p className="font-bold">
+                        ⚠ {unsavedSheets.participantCount} peserta punya lembar penilaian yang belum disimpan hakim:
+                      </p>
+                      {unsavedSheets.groups.map((g) => (
+                        <p key={g.judgeId}>
+                          <span className="font-semibold">
+                            {g.judgeName} ({g.judgeField}):
+                          </span>{' '}
+                          {g.items
+                            .slice(0, 5)
+                            .map((i) => `#${i.lotteryNumber} ${i.participantName}`)
+                            .join(', ')}
+                          {g.items.length > 5 ? `, +${g.items.length - 5} lainnya` : ''}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -1176,6 +1260,21 @@ export const HasilKelulusanView: React.FC = () => {
           </div>
         )}
 
+        {combinedScoring && (
+          <div
+            className="mx-4 mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-900"
+            data-testid="combined-scoring-info"
+          >
+            <span className="font-bold">Nilai Juara Gabungan:</span> {combinedScoring.formula}. Peringkat dan juara memakai
+            nilai gabungan; bila sama, nilai babak {combinedScoring.stageName} yang lebih tinggi didahulukan.
+            {combinedScoring.pendingStageNames.length > 0 && (
+              <span className="block mt-1 font-semibold text-rose-700">
+                Babak {combinedScoring.pendingStageNames.join(', ')} belum disahkan, sehingga nilai gabungan belum lengkap
+                dan babak ini belum bisa disahkan.
+              </span>
+            )}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[760px] text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 border-b border-slate-200 font-bold uppercase text-xs tracking-wider">
@@ -1183,7 +1282,17 @@ export const HasilKelulusanView: React.FC = () => {
                 <th className="px-5 py-3 w-16 text-center">Rank</th>
                 <th className="px-4 py-3 w-20">Undian</th>
                 <th className="px-5 py-3">Nama Peserta & Grup</th>
-                <th className="px-4 py-3 text-right">Nilai Akhir</th>
+                {combinedScoring?.sources.map((src) => (
+                  <th key={src.stageId} className="px-3 py-3 text-right">
+                    {src.stageName} ×{String(src.weight).replace('.', ',')}
+                  </th>
+                ))}
+                <th className="px-4 py-3 text-right">
+                  {combinedScoring
+                    ? `${combinedScoring.stageName} ×${String(combinedScoring.selfWeight).replace('.', ',')}`
+                    : 'Nilai Akhir'}
+                </th>
+                {combinedScoring && <th className="px-4 py-3 text-right">Nilai Gabungan</th>}
                 <th className="px-4 py-3 text-center">Kelengkapan Penilaian</th>
                 <th className="px-4 py-3 text-center">Status Kelulusan</th>
                 <th className="px-5 py-3 text-right">Aksi Override</th>
@@ -1192,7 +1301,10 @@ export const HasilKelulusanView: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {filteredEvaluatedParticipants.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400 text-xs">
+                  <td
+                    colSpan={7 + (combinedScoring ? combinedScoring.sources.length + 1 : 0)}
+                    className="p-8 text-center text-slate-400 text-xs"
+                  >
                     {searchQuery.trim()
                       ? 'Tidak ada peserta yang sesuai dengan pencarian.'
                       : `Belum ada peserta di babak ${selectedStageName}.`}
@@ -1275,6 +1387,25 @@ export const HasilKelulusanView: React.FC = () => {
                         )}
                       </td>
 
+                      {/* Nilai babak sumber (nilai juara gabungan) */}
+                      {combinedScoring?.sources.map((src) => {
+                        const comp = item.combinedComponents?.find((c) => c.stageId === src.stageId);
+                        return (
+                          <td key={src.stageId} className="px-3 py-3.5 text-right font-mono tabular-nums">
+                            {comp && comp.score !== null ? (
+                              <span className="font-bold text-sm text-slate-700">{comp.score.toFixed(2)}</span>
+                            ) : (
+                              <span
+                                className="text-xs font-semibold text-rose-700"
+                                title="Peserta tidak punya nilai resmi di babak ini; dihitung 0"
+                              >
+                                {src.ratified ? 'Tidak ada (0)' : 'Belum disahkan'}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+
                       {/* Score */}
                       <td className="px-4 py-3.5 text-right font-mono tabular-nums">
                         {item.isFullyFinalized && item.averageFinalScore !== null ? (
@@ -1297,6 +1428,19 @@ export const HasilKelulusanView: React.FC = () => {
                           </div>
                         )}
                       </td>
+
+                      {combinedScoring && (
+                        <td className="px-4 py-3.5 text-right font-mono tabular-nums" data-testid="combined-score-cell">
+                          <span
+                            className={`font-extrabold text-sm ${item.isFullyFinalized ? 'text-emerald-900' : 'text-slate-600'}`}
+                          >
+                            {item.displayScore !== null ? item.displayScore.toFixed(2) : '—'}
+                          </span>
+                          <span className="block text-xs font-medium text-slate-400">
+                            {item.isFullyFinalized ? 'Gabungan' : '(Sementara)'}
+                          </span>
+                        </td>
+                      )}
 
                       {/* Completeness */}
                       <td className="px-4 py-3.5 text-center">
@@ -1442,7 +1586,58 @@ export const HasilKelulusanView: React.FC = () => {
         }
         confirmLabel={nextStage ? 'Ya, Loloskan Peserta' : 'Sahkan Juara Sekarang'}
         cancelLabel="Batal"
+        confirmDisabled={hasUnsavedSheets && !unsavedAcknowledged}
       >
+        {hasUnsavedSheets && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 p-3 space-y-2 text-xs text-rose-900">
+            <p className="flex items-start gap-1.5 font-bold">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                Ada {unsavedSheets.sheetCount} lembar penilaian ({unsavedSheets.participantCount} peserta) yang sudah dibuka
+                hakim tetapi BELUM disimpan. Nilai dari lembar ini TIDAK akan dihitung dalam hasil resmi.
+              </span>
+            </p>
+            <div className="max-h-40 overflow-y-auto space-y-1.5 rounded bg-white/70 border border-rose-100 p-2">
+              {unsavedSheets.groups.map((g) => (
+                <div key={g.judgeId}>
+                  <p className="font-semibold">
+                    {g.judgeName} ({g.judgeField}) · {g.items.length} lembar
+                  </p>
+                  <ul className="pl-3 list-disc">
+                    {g.items.map((i) => (
+                      <li key={i.assessmentId}>
+                        #{i.lotteryNumber} {i.participantName}
+                        {i.isEmpty ? ' (lembar kosong)' : ' (sudah berisi catatan)'}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <p className="text-rose-800">
+              Sebaiknya minta hakim tersebut menekan <strong>Simpan Penilaian</strong> terlebih dahulu. Setelah disahkan,
+              hasil tidak dapat diubah.
+            </p>
+            <label className="flex items-start gap-2 font-semibold cursor-pointer">
+              <input
+                type="checkbox"
+                checked={unsavedAcknowledged}
+                onChange={(e) => setUnsavedAcknowledged(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-rose-700"
+                data-testid="unsaved-sheets-ack"
+              />
+              <span>
+                Saya memahami bahwa nilai dari lembar yang belum disimpan tidak akan dihitung, dan saya tetap ingin
+                mengesahkan hasil ini.
+              </span>
+            </label>
+          </div>
+        )}
+        {combinedScoring && (
+          <p className="text-xs font-semibold text-emerald-900">
+            Nilai di bawah adalah Nilai Juara Gabungan: {combinedScoring.formula}.
+          </p>
+        )}
         <div className="bg-slate-50 border border-slate-200 rounded-md p-3 max-h-48 overflow-y-auto space-y-1 text-xs">
           {(nextStage ? qualifiedParticipants : evaluatedParticipants).map((item, idx) => (
             <div

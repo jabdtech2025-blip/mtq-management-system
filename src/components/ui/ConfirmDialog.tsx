@@ -13,6 +13,8 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   variant?: 'danger' | 'primary' | 'warning';
   isLoading?: boolean;
+  /** Nonaktifkan tombol konfirmasi (mis. sampai kotak persetujuan dicentang). */
+  confirmDisabled?: boolean;
   children?: React.ReactNode;
 }
 
@@ -26,6 +28,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   cancelLabel = 'Batal',
   variant = 'danger',
   isLoading = false,
+  confirmDisabled = false,
   children
 }) => {
   const icon =
@@ -60,6 +63,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             variant={variant === 'danger' ? 'danger' : 'primary'}
             onClick={onConfirm}
             loading={isLoading}
+            disabled={confirmDisabled || isLoading}
           >
             {confirmLabel}
           </Button>

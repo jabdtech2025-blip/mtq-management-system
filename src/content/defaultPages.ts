@@ -122,6 +122,8 @@ Data **tidak dijual** dan **tidak dipakai untuk iklan**.
 
 Hasil yang telah disahkan dapat diumumkan oleh penyelenggara sesuai ketentuan lomba.
 
+**Layar Live Scoring.** Penyelenggara dapat menayangkan peserta yang sedang tampil di halaman publik (alamat /live/kode-penyelenggara) yang bisa dibuka siapa pun tanpa login. Data yang tampil hanya nama penyelenggara, cabang/marhalah, babak, nomor undian, nama lengkap, nama ayah, dan asal (kafilah/instansi). Maqra (surat, ayat, halaman mushaf) dirahasiakan dan baru tampil bila panitia menampilkannya saat peserta membaca. **Nilai tidak pernah ditampilkan.** Data ini tampil hanya selama sesi berlangsung dan langsung dihapus dari halaman publik ketika sesi dihentikan. Penyelenggara dapat menyembunyikan nama peserta. Banyak peserta MTQ masih anak-anak, sehingga penyelenggara bertanggung jawab memberi tahu peserta dan orang tua/wali bahwa nama akan ditayangkan, dan wajib menyembunyikan nama bila ada keberatan.
+
 ## 5. Penyimpanan dan keamanan
 - Akses dibatasi per peran dan per penyelenggara di tingkat database.
 - Koneksi terenkripsi (HTTPS).

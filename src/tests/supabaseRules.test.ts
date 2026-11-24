@@ -564,6 +564,14 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261125_annotation_count.sql'),
     'utf-8'
   );
+  const combinedScore20261126Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261126_combined_champion_score.sql'),
+    'utf-8'
+  );
+  const liveScoring20261127Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261127_live_scoring.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -689,6 +697,8 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(questionStage20261123Sql);
       await pg.exec(completionPerField20261124Sql);
       await pg.exec(annotationCount20261125Sql);
+      await pg.exec(combinedScore20261126Sql);
+      await pg.exec(liveScoring20261127Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -3933,6 +3943,8 @@ export async function runSupabaseTests(): Promise<{
       await asSuper(questionStage20261123Sql);
       await asSuper(completionPerField20261124Sql);
       await asSuper(annotationCount20261125Sql);
+      await asSuper(combinedScore20261126Sql);
+      await asSuper(liveScoring20261127Sql);
     } catch (e: any) {
       t7RerunOk = false;
       t7RerunError = String(e?.message || e);
@@ -4286,6 +4298,216 @@ export async function runSupabaseTests(): Promise<{
         Number(tmRowP1?.field_scores?.Lagu) === 24.5 &&
         tmAdvance.ok === true,
       `c1: ${JSON.stringify(tmC1)}, blocked: ${tmBlocked.error}, c2: ${JSON.stringify(tmC2)}, p1: ${JSON.stringify(tmRowP1)}, advance: ${tmAdvance.ok} ${tmAdvance.error}`
+    );
+
+    // ---------- 97g. Nilai juara gabungan: Penyisihan x1 + Final x2 ----------
+    // tmStage (Penyisihan) sudah disahkan di 97f; P1 & P3 lolos ke tmFinal.
+    const cgUnratified = await makeStage('IG Babak Belum Sah', 1, 2);
+    const cgOtherBranch = generateUuid();
+    const cgOtherStage = generateUuid();
+    await asSuper(`
+      INSERT INTO branches (id, tenant_id, code, name) VALUES ('${cgOtherBranch}', '${tenantJabarId}', 'CG-X', 'Cabang Lain Gabungan');
+      INSERT INTO stages (id, tenant_id, branch_id, name, stage_order) VALUES ('${cgOtherStage}', '${tenantJabarId}', '${cgOtherBranch}', 'Penyisihan', 1);
+    `);
+    const cgSet = (cfg: unknown) =>
+      runAs(igAdminId, `UPDATE stages SET combined_scoring = '${JSON.stringify(cfg)}'::jsonb WHERE id = '${tmFinal}'`);
+    const cgSelf = await cgSet({ self_weight: 2, sources: [{ stage_id: tmFinal, weight: 1 }] });
+    const cgOther = await cgSet({ self_weight: 2, sources: [{ stage_id: cgOtherStage, weight: 1 }] });
+    const cgZero = await cgSet({ self_weight: 2, sources: [{ stage_id: tmStage, weight: 0 }] });
+    const cgPendingSet = await cgSet({
+      self_weight: 2,
+      sources: [{ stage_id: tmStage, weight: 1 }, { stage_id: cgUnratified, weight: 1 }]
+    });
+
+    // Babak Final dinilai: hakim semua bidang, maqra untuk P1 & P3
+    await asSuper(`INSERT INTO judge_assignments (tenant_id, judge_profile_id, stage_id, branch_id, judge_field, status)
+      VALUES ('${tenantJabarId}', '${igJudgeAllId}', '${tmFinal}', '${igBranchId}', 'Dewan Hakim', 'Aktif');`);
+    const cgSpRows = await pg.query<{ id: string; participant_id: string }>(
+      `SELECT id::text, participant_id::text FROM stage_participations WHERE stage_id = '${tmFinal}'`
+    );
+    const cgEntry = async (pId: string) => {
+      const spId = cgSpRows.rows.find((r) => r.participant_id === pId)!.id;
+      const amId = generateUuid();
+      await asSuper(`INSERT INTO assigned_maqras (id, tenant_id, stage_participation_id, question_id)
+        VALUES ('${amId}', '${tenantJabarId}', '${spId}', '${questionPenyisihanId}');`);
+      return { spId, amId };
+    };
+    const cgP1 = await cgEntry(tmP1.pId);
+    const cgP3 = await cgEntry(tmP3.pId);
+    // P1 lebih baik di Final, P3 lebih baik di Penyisihan
+    await tmFinalize(igJudgeAllId, cgP1, {});
+    await tmFinalize(igJudgeAllId, cgP3, { MKH: 4 });
+
+    const cgPendingRank = await runAs(igAdminId, `SELECT compute_stage_rankings('${tmFinal}'::uuid) AS r`);
+    const cgPendingAdvance = await runAs(
+      igAdminId,
+      `SELECT advance_stage_qualifiers('${tmFinal}'::uuid, NULL, ARRAY[]::uuid[], '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) AS r`
+    );
+    const cgOkSet = await cgSet({ self_weight: 2, sources: [{ stage_id: tmStage, weight: 1 }] });
+    const cgRank = await runAs(igAdminId, `SELECT compute_stage_rankings('${tmFinal}'::uuid) AS r`);
+    const cgData = cgRank.rows[0]?.r;
+    const cgRows = (cgData?.rankings || []) as Array<any>;
+    const cgPenSnap = await pg.query<{ s: any }>(
+      `SELECT rankings_snapshot AS s FROM stage_result_snapshots WHERE stage_id = '${tmStage}'`
+    );
+    const cgPenScore = (pid: string) =>
+      Number((cgPenSnap.rows[0]?.s || []).find((e: any) => e.participant_id === pid)?.final_score);
+    const cgExpect = (pid: string) => {
+      const row = cgRows.find((r) => r.participant_id === pid);
+      return Math.round(((cgPenScore(pid) * 1 + Number(row?.stage_score) * 2) / 3) * 100) / 100;
+    };
+    const cgRowsOk = cgRows.every(
+      (r) =>
+        Number(r.combined_score) === cgExpect(r.participant_id) &&
+        Number(r.computed_score) === Number(r.combined_score) &&
+        Array.isArray(r.combined_components) &&
+        r.combined_components.length === 2 &&
+        r.combined_components[1].is_current === true
+    );
+    const cgSorted = cgRows.slice().sort((a, b) => Number(b.combined_score) - Number(a.combined_score));
+    const cgAdvance = await runAs(
+      igAdminId,
+      `SELECT advance_stage_qualifiers('${tmFinal}'::uuid, NULL, ARRAY[]::uuid[], '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) AS r`
+    );
+    const cgFinalSp = await pg.query<{ participant_id: string; final_score: string; champion_rank: number }>(
+      `SELECT participant_id::text, final_score::text, champion_rank FROM stage_participations WHERE stage_id = '${tmFinal}'`
+    );
+    const cgSnap = await pg.query<{ s: any }>(
+      `SELECT rankings_snapshot AS s FROM stage_result_snapshots WHERE stage_id = '${tmFinal}'`
+    );
+    const cgSnapRows = (cgSnap.rows[0]?.s || []) as Array<any>;
+    const cgChampion = cgFinalSp.rows.find((r) => r.champion_rank === 1);
+    const cgAudit = await pg.query<{ summary: string }>(
+      `SELECT summary FROM audit_logs WHERE action = 'STAGE_FINALIZED' AND target LIKE '%${tmFinal}%'`
+    );
+    // Setelah disahkan: admin tidak bisa mengubah (RLS/trigger), superuser pun ditolak trigger
+    const cgLockedByAdmin = await cgSet({ self_weight: 1, sources: [{ stage_id: tmStage, weight: 1 }] });
+    let cgLockedError = '';
+    try {
+      await asSuper(`UPDATE stages SET combined_scoring = '{"self_weight":1,"sources":[{"stage_id":"${tmStage}","weight":1}]}'::jsonb WHERE id = '${tmFinal}'`);
+    } catch (e: any) {
+      cgLockedError = String(e?.message || e);
+    }
+    const cgAfterLock = await pg.query<{ c: any }>(`SELECT combined_scoring AS c FROM stages WHERE id = '${tmFinal}'`);
+    const cgLockedEdit = {
+      ok: !(cgLockedError.includes('STAGE_STRUCTURE_LOCKED') && Number(cgAfterLock.rows[0]?.c?.self_weight) === 2),
+      error: cgLockedError.includes('STAGE_STRUCTURE_LOCKED') && Number(cgAfterLock.rows[0]?.c?.self_weight) === 2
+        ? 'STAGE_STRUCTURE_LOCKED'
+        : `admin: ${cgLockedByAdmin.ok} ${cgLockedByAdmin.error}; super: ${cgLockedError}; now: ${JSON.stringify(cgAfterLock.rows[0]?.c)}`
+    };
+    assert(
+      '97g. Nilai Juara Gabungan: (Penyisihan×1 + Final×2) ÷ 3 dari snapshot resmi; peringkat, juara, final_score, snapshot, dan audit memakai nilai gabungan; babak sumber belum disahkan memblokir; konfigurasi divalidasi dan terkunci setelah disahkan',
+      !cgSelf.ok && cgSelf.error.includes('COMBINED_SCORING_INVALID') &&
+        !cgOther.ok && cgOther.error.includes('COMBINED_SCORING_INVALID') &&
+        !cgZero.ok && cgZero.error.includes('COMBINED_SCORING_INVALID') &&
+        cgPendingSet.ok &&
+        cgPendingRank.rows[0]?.r?.can_finalize === false &&
+        (cgPendingRank.rows[0]?.r?.combined_scoring?.pending_sources || []).includes('IG Babak Belum Sah') &&
+        !cgPendingAdvance.ok && cgPendingAdvance.error.includes('COMBINED_SOURCE_NOT_RATIFIED') &&
+        cgOkSet.ok &&
+        cgData?.combined_scoring?.formula === '(IG Penyisihan Dua Tim×1 + IG Final Dua Tim×2) ÷ 3' &&
+        cgData?.can_finalize === true &&
+        cgRows.length === 2 && cgRowsOk &&
+        cgSorted[0].rank === 1 && cgSorted[1].rank === 2 &&
+        cgAdvance.ok &&
+        cgChampion?.participant_id === cgSorted[0].participant_id &&
+        Number(cgChampion?.final_score) === Number(cgSorted[0].combined_score) &&
+        cgSnapRows.length === 2 &&
+        cgSnapRows.every((e) => e.stage_score !== null && e.combined_score !== null && Array.isArray(e.combined_components)) &&
+        (cgAudit.rows[0]?.summary || '').includes('Nilai juara gabungan: (IG Penyisihan Dua Tim×1') &&
+        !cgLockedEdit.ok && cgLockedEdit.error.includes('STAGE_STRUCTURE_LOCKED'),
+      `self: ${cgSelf.error}; other: ${cgOther.error}; zero: ${cgZero.error}; pendingSet: ${cgPendingSet.error}; pending: ${JSON.stringify(cgPendingRank.rows[0]?.r?.combined_scoring)} adv: ${cgPendingAdvance.error}; ok: ${cgOkSet.error}; data: ${JSON.stringify(cgData?.combined_scoring)} rows: ${JSON.stringify(cgRows.map((r) => [r.participant_name, r.stage_score, r.combined_score, r.rank]))} pen: ${JSON.stringify(cgPenSnap.rows[0]?.s?.map((e: any) => [e.participant_id, e.final_score]))}; advance: ${cgAdvance.error}; sp: ${JSON.stringify(cgFinalSp.rows)}; audit: ${cgAudit.rows[0]?.summary}; locked: ${cgLockedEdit.error}`
+    );
+
+    // ---------- 97h. Live scoring: layar publik peserta yang sedang tampil (tanpa nilai) ----------
+    const lvAnon = async (sql: string) => {
+      try {
+        await pg.exec(`BEGIN; SELECT set_config('request.jwt.claim.sub', '', true); SET LOCAL ROLE anon;`);
+        const r = await pg.query<any>(sql);
+        await pg.exec('COMMIT;');
+        return { ok: true, rows: r.rows, error: '' };
+      } catch (e: any) {
+        await pg.exec('ROLLBACK;');
+        return { ok: false, rows: [] as any[], error: String(e?.message || e) };
+      }
+    };
+    const lvCode = (await pg.query<{ code: string }>(`SELECT code FROM tenants WHERE id = '${tenantJabarId}'`)).rows[0]?.code;
+    const lvStage = await makeStage('IG Live Penyisihan', 1, 2);
+    const lvA = await makeEntrant(lvStage, '03', 'Live Peserta A');
+    const lvB = await makeEntrant(lvStage, '1', 'Live Peserta B');
+    const lvC = await makeEntrant(lvStage, '2', 'Live Peserta C');
+    await makeEntrant(lvStage, '0', 'Live Peserta Ditolak', 'Ditolak');
+    await asSuper(`UPDATE participants SET father_name = 'Ayah Peserta B' WHERE id = '${lvB.pId}'`);
+    const lvCtl = (action: string, sp: string | null = null, hide: boolean | null = null, who = igAdminId, maqra: number | null = null) =>
+      runAs(who, `SELECT live_session_control('${lvStage}'::uuid, '${action}', ${sp ? `'${sp}'::uuid` : 'NULL'}, ${hide === null ? 'NULL' : hide}, ${maqra === null ? 'NULL' : maqra}) AS r`);
+    const lvSurah = (await pg.query<{ s: string }>(`SELECT surah_name AS s FROM questions WHERE id = '${questionPenyisihanId}'`)).rows[0]?.s || '';
+    const lvGet = () => lvAnon(`SELECT get_live_sessions('${lvCode?.toLowerCase()}') AS r`);
+    const lvBefore = await lvGet();
+    const lvNextBeforeStart = await lvCtl('next');
+    const lvStart = await lvCtl('start');
+    const lvD = (res: any) => res.rows[0]?.r?.display;
+    const lvNext = await lvCtl('next');
+    const lvPrev = await lvCtl('prev');
+    const lvSetA = await lvCtl('set', lvA.spId);
+    const lvNextAtEnd = await lvCtl('next');
+    const lvHide = await lvCtl('options', null, true);
+    const lvPublic = await lvGet();
+    const lvPublicJson = JSON.stringify(lvPublic.rows[0]?.r || {});
+    // Maqra: tersembunyi bawaan, tampil satu per satu, tersembunyi lagi saat pindah peserta
+    const lvShow1 = await lvCtl('show_maqra', null, null, igAdminId, 1);
+    const lvPublicShown = JSON.stringify((await lvGet()).rows[0]?.r || {});
+    const lvShow2 = await lvCtl('show_maqra', null, null, igAdminId, 2);
+    const lvPrevReset = await lvCtl('prev');
+    const lvShowAgain = await lvCtl('show_maqra', null, null, igAdminId, 1);
+    const lvHideMaqra = await lvCtl('hide_maqra');
+    const lvOtherStage = await lvCtl('set', tmP1.spId);
+    const lvJudge = await lvCtl('next', null, null, igJudgeAllId);
+    const lvAnonCtl = await lvAnon(`SELECT live_session_control('${lvStage}'::uuid, 'next') AS r`);
+    const lvAnonUpdate = await lvAnon(`UPDATE live_sessions SET hide_names = false`);
+    const lvAnonSelect = await lvAnon(`SELECT count(*)::int AS c FROM live_sessions`);
+    const lvStop = await lvCtl('stop');
+    const lvAfterStop = await lvGet();
+    const lvNextAfterStop = await lvCtl('next');
+    const lvAudit = await pg.query<{ action: string }>(
+      `SELECT action FROM audit_logs WHERE action LIKE 'LIVE_SESSION_%' AND target LIKE 'Live: IG Live Penyisihan%' ORDER BY created_at`
+    );
+    const lvBaseDisplay = lvD(lvStart);
+    assert(
+      '97h. Live Scoring: admin memulai sesi, berpindah peserta menurut nomor undian (Ditolak tidak ikut), menyembunyikan nama, dan menghentikan sesi; publik membaca tanpa login tanpa nilai; anon/hakim tidak bisa mengendalikan; mulai/berhenti tercatat di audit',
+      lvBefore.ok && (lvBefore.rows[0]?.r?.sessions || []).length === 0 &&
+        lvPublic.rows[0]?.r?.found === true && lvPublic.rows[0]?.r?.tenant_id === tenantJabarId &&
+        !lvNextBeforeStart.ok && lvNextBeforeStart.error.includes('LIVE_NOT_ACTIVE') &&
+        lvStart.ok && lvBaseDisplay?.participant?.lottery_number === '1' && lvBaseDisplay?.participant?.name === 'Live Peserta B' &&
+        lvBaseDisplay?.position === 1 && lvBaseDisplay?.total === 3 &&
+        lvBaseDisplay?.participant?.maqra === null && lvBaseDisplay?.participant?.maqra_count === 1 &&
+        lvBaseDisplay?.participant?.father_name === 'Ayah Peserta B' && !lvPublicJson.includes('Ayah Peserta') &&
+        Boolean(lvSurah) && !lvPublicJson.includes(lvSurah) && !lvPublicJson.includes('page_start') &&
+        lvShow1.ok && lvD(lvShow1)?.participant?.maqra?.index === 1 && lvD(lvShow1)?.participant?.maqra?.surah_name === lvSurah &&
+        lvShow1.rows[0]?.r?.shown_maqra_index === 1 && lvPublicShown.includes(lvSurah) &&
+        !lvShow2.ok && lvShow2.error.includes('LIVE_INVALID_MAQRA') &&
+        lvD(lvPrevReset)?.participant?.name === null && lvD(lvPrevReset)?.participant?.maqra === null &&
+        lvPrevReset.rows[0]?.r?.shown_maqra_index === null &&
+        lvD(lvShowAgain)?.participant?.maqra?.index === 1 &&
+        lvD(lvHideMaqra)?.participant?.maqra === null &&
+        lvD(lvNext)?.participant?.name === 'Live Peserta C' &&
+        lvD(lvPrev)?.participant?.name === 'Live Peserta B' &&
+        lvD(lvSetA)?.participant?.name === 'Live Peserta A' && lvD(lvSetA)?.position === 3 &&
+        lvD(lvNextAtEnd)?.participant?.name === 'Live Peserta A' &&
+        lvD(lvHide)?.participant?.name === null && lvD(lvHide)?.participant?.name_hidden === true &&
+        lvPublic.ok && (lvPublic.rows[0]?.r?.sessions || []).length === 1 &&
+        !lvPublicJson.includes('Live Peserta A') && !/score|nilai/i.test(lvPublicJson) &&
+        !lvOtherStage.ok && lvOtherStage.error.includes('LIVE_INVALID_PARTICIPANT') &&
+        !lvJudge.ok && lvJudge.error.includes('Otorisasi ditolak') &&
+        !lvAnonCtl.ok && lvAnonCtl.error.includes('permission denied') &&
+        !lvAnonUpdate.ok &&
+        lvAnonSelect.ok &&
+        lvStop.ok && JSON.stringify(lvD(lvStop)) === '{}' && lvStop.rows[0]?.r?.is_active === false &&
+        (lvAfterStop.rows[0]?.r?.sessions || []).length === 0 &&
+        !lvNextAfterStop.ok && lvNextAfterStop.error.includes('LIVE_NOT_ACTIVE') &&
+        lvAudit.rows.map((r) => r.action).join(',') === 'LIVE_SESSION_STARTED,LIVE_SESSION_STOPPED' &&
+        lvB.spId !== lvC.spId,
+      `maqra: show1 ${lvShow1.error} ${JSON.stringify(lvD(lvShow1)?.participant)}; shownPublic ${lvPublicShown.includes(lvSurah)}; show2 ${lvShow2.error}; prev ${JSON.stringify(lvD(lvPrevReset)?.participant)}; again ${JSON.stringify(lvD(lvShowAgain)?.participant?.maqra)}; hide ${JSON.stringify(lvD(lvHideMaqra)?.participant?.maqra)} | ` +
+      `before: ${JSON.stringify(lvBefore.rows[0]?.r)} ${lvBefore.error}; nbs: ${lvNextBeforeStart.error}; start: ${lvStart.error} ${JSON.stringify(lvBaseDisplay)}; next: ${JSON.stringify(lvD(lvNext)?.participant?.name)}; prev: ${lvD(lvPrev)?.participant?.name}; setA: ${lvD(lvSetA)?.participant?.name}; end: ${lvD(lvNextAtEnd)?.participant?.name}; hide: ${JSON.stringify(lvD(lvHide)?.participant)}; public: ${lvPublicJson}; other: ${lvOtherStage.error}; judge: ${lvJudge.error}; anonCtl: ${lvAnonCtl.error}; anonUpd: ${lvAnonUpdate.ok} ${lvAnonUpdate.error}; anonSel: ${lvAnonSelect.error}; stop: ${lvStop.error} ${JSON.stringify(lvStop.rows[0]?.r)}; after: ${JSON.stringify(lvAfterStop.rows[0]?.r)}; nas: ${lvNextAfterStop.error}; audit: ${JSON.stringify(lvAudit.rows)}`
     );
 
     // ---------- 98. J6: tidak ada lagi tebakan bidang berdasarkan nama ----------

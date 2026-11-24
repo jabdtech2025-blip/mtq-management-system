@@ -19,6 +19,13 @@ import {
   FieldScopedAggregation
 } from './scoringEngine';
 import { StructuredBlockingReason } from './completion';
+import {
+  CombinedScoringContext,
+  CombinedScoreComponent,
+  buildCombinedScoringContext,
+  computeCombinedScore,
+  isCombinedContextLoading
+} from '../utils/combinedScoring';
 
 
 export function getFieldScoreWithAlias(
@@ -82,6 +89,12 @@ export interface EvaluatedParticipantStage {
   hasUnresolvedTie?: boolean;
   /** true bila seri tak terpecahkan ini menentukan hasil (batas kuota / posisi juara) dan wajib diputuskan pleno */
   isDecisiveTie?: boolean;
+  /** Nilai juara gabungan: nilai babak ini sendiri (displayScore berisi nilai gabungan) */
+  stageScore?: number | null;
+  /** Rincian nilai gabungan per babak (urut babak, babak ini terakhir) */
+  combinedComponents?: CombinedScoreComponent[];
+  /** Peserta tidak punya nilai di salah satu babak sumber (dihitung 0) */
+  combinedMissing?: boolean;
 }
 
 export interface StageEvaluationResult {
@@ -141,6 +154,8 @@ export class RankingService {
     overrideReasons?: Record<string, string>;
     customRuleConfigs?: CompetitionRuleConfig[];
     customRubricVersions?: RubricVersion[];
+    /** Snapshot hasil resmi (untuk nilai juara gabungan) */
+    stageSnapshots?: StageResultSnapshot[];
   }): BranchStageEvaluationGroup[] {
     const {
       tenantId,
@@ -155,7 +170,8 @@ export class RankingService {
       manualOverrides = {},
       overrideReasons = {},
       customRuleConfigs,
-      customRubricVersions = INITIAL_RUBRIC_VERSIONS
+      customRubricVersions = INITIAL_RUBRIC_VERSIONS,
+      stageSnapshots = []
     } = params;
 
     const tenantStages = stages.filter((s) => s.tenantId === tenantId);
@@ -273,7 +289,8 @@ export class RankingService {
         customRuleConfigs,
         customRubricVersions,
         isFinalStage: Boolean(branchStage) && !branchNextStage,
-        championCount: branchStage?.championCount || 3
+        championCount: branchStage?.championCount || 3,
+        combinedScoring: buildCombinedScoringContext({ stage: branchStage, stages, snapshots: stageSnapshots })
       });
 
       if (evaluation.evaluatedParticipants.length > 0) {
@@ -315,6 +332,8 @@ export class RankingService {
     isFinalStage?: boolean;
     /** jumlah juara di babak final (bawaan 3) */
     championCount?: number;
+    /** Nilai juara gabungan babak ini (null = nilai babak ini saja) */
+    combinedScoring?: CombinedScoringContext | null;
   }): StageEvaluationResult {
     const {
       tenantId,
@@ -333,7 +352,8 @@ export class RankingService {
       customRuleConfigs,
       customRubricVersions = INITIAL_RUBRIC_VERSIONS,
       isFinalStage = false,
-      championCount: championCountParam
+      championCount: championCountParam,
+      combinedScoring = null
     } = params;
     const championCount =
       typeof championCountParam === 'number' && Number.isInteger(championCountParam) && championCountParam > 0
@@ -788,12 +808,41 @@ export class RankingService {
     const tieBreakLogMap: Record<string, string> = {};
     const unresolvedMap: Record<string, boolean> = {};
 
-    evaluatedItems.sort((a, b) => {
+    // Nilai juara gabungan: displayScore diganti nilai gabungan; nilai babak ini disimpan di stageScore
+    // dan menjadi kriteria tie-break pertama (sebelum urutan bidang resmi). Sama dengan server.
+    const combinedItems = evaluatedItems as Array<
+      (typeof evaluatedItems)[number] & Pick<EvaluatedParticipantStage, 'stageScore' | 'combinedComponents' | 'combinedMissing'>
+    >;
+    if (combinedScoring) {
+      combinedItems.forEach((item) => {
+        const stageScore = item.displayScore;
+        const res = computeCombinedScore(combinedScoring, item.participant.id, stageScore);
+        item.stageScore = stageScore;
+        item.combinedComponents = res.components;
+        item.combinedMissing = res.missing;
+        item.displayScore = res.combined;
+      });
+    }
+
+    combinedItems.sort((a, b) => {
       const scoreA = a.displayScore ?? -1;
       const scoreB = b.displayScore ?? -1;
 
       if (scoreA !== scoreB) {
         return scoreB - scoreA;
+      }
+
+      if (combinedScoring) {
+        const stA = a.stageScore ?? null;
+        const stB = b.stageScore ?? null;
+        if (stA !== null && stB !== null && stA !== stB) {
+          const label = `nilai ${combinedScoring.stageName}`;
+          tieBreakLogMap[a.participant.id] =
+            stA > stB ? `Diputuskan unggul melalui ${label} (${stA.toFixed(2)} vs ${stB.toFixed(2)})` : `Peringkat diselesaikan melalui ${label} (${stA.toFixed(2)} vs ${stB.toFixed(2)})`;
+          tieBreakLogMap[b.participant.id] =
+            stB > stA ? `Diputuskan unggul melalui ${label} (${stB.toFixed(2)} vs ${stA.toFixed(2)})` : `Peringkat diselesaikan melalui ${label} (${stB.toFixed(2)} vs ${stA.toFixed(2)})`;
+          return stB - stA;
+        }
       }
 
       // Skor total sama -> terapkan urutan tie-break resmi dinamis jika valid (DESC NULLS LAST)
@@ -1004,6 +1053,13 @@ export class RankingService {
         'FIELD_WITHOUT_JUDGE',
         `Bidang ${uncoveredRubricFields.join(', ')} belum dipegang hakim mana pun pada babak "${stageName}" cabang "${targetBranch}". Tugaskan hakim untuk bidang tersebut.`
       );
+    } else if (combinedScoring && combinedScoring.pendingStageNames.length > 0) {
+      setBlock(
+        'COMBINED_SOURCE_NOT_RATIFIED',
+        `Nilai juara gabungan memakai nilai babak ${combinedScoring.pendingStageNames.join(', ')} yang belum disahkan. Sahkan babak tersebut lebih dulu.`
+      );
+    } else if (combinedScoring && isCombinedContextLoading(combinedScoring)) {
+      setBlock('COMBINED_SOURCE_NOT_RATIFIED', 'Sedang memuat nilai resmi babak sebelumnya untuk nilai juara gabungan…');
     } else if (missingMaqraCount > 0) {
       setBlock(
         'NO_MAQRA',
@@ -1129,7 +1185,10 @@ export class RankingService {
           : item.isQualified
           ? `Lolos Kuota Top ${quota}`
           : 'Tidak memenuhi kuota kelulusan',
-        tieBreakResolvedBy: item.tieBreakResolvedBy
+        tieBreakResolvedBy: item.tieBreakResolvedBy,
+        stageScore: item.combinedComponents ? item.stageScore ?? null : item.displayScore,
+        combinedScore: item.combinedComponents ? item.displayScore : null,
+        combinedComponents: item.combinedComponents
       };
     });
 

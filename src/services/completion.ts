@@ -19,7 +19,8 @@ export type StageBlockingCode =
   | 'QUOTA_EXCEEDED'
   | 'MISSING_OVERRIDE_REASON'
   | 'MULTI_BRANCH_SELECTION'
-  | 'FIELD_WITHOUT_JUDGE';
+  | 'FIELD_WITHOUT_JUDGE'
+  | 'COMBINED_SOURCE_NOT_RATIFIED';
 
 /**
  * Kelengkapan per bidang: peserta lengkap bila setiap (maqra x bidang) sudah punya lembar final

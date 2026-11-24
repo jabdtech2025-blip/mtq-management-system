@@ -33,6 +33,8 @@ import {
 } from '../types/mtq';
 import { generateUuid, isValidUuid, toDeterministicUuid, validateDatabaseUuids } from '../utils/uuid';
 import { formatDateTimeWIB } from '../utils/dateTime';
+import { normalizeCombinedScoring, toDbCombinedScoring } from '../utils/combinedScoring';
+import { LiveSessionRow, normalizeLiveSessionRow } from './liveScoring';
 
 export interface RpcServiceResult<T = Record<string, any>> {
   success: boolean;
@@ -1210,7 +1212,11 @@ export const supabaseDataService = {
         qualificationMethod: (s.qualification_method as 'top_n' | 'manual') || 'top_n',
         isFinalized: Boolean(s.is_finalized),
         finalizedAt: s.finalized_at ? String(s.finalized_at) : undefined,
-        finalizedBy: s.finalized_by ? String(s.finalized_by) : undefined
+        finalizedBy: s.finalized_by ? String(s.finalized_by) : undefined,
+        // Kolom ada (migrasi 20261126) -> null atau konfigurasi; kolom belum ada -> undefined (tidak dikirim saat simpan)
+        ...(Object.prototype.hasOwnProperty.call(s, 'combined_scoring')
+          ? { combinedScoring: normalizeCombinedScoring(s.combined_scoring) }
+          : {})
       };
     });
 
@@ -1948,6 +1954,69 @@ export const supabaseDataService = {
   /**
    * RPC 2b: Perhitungan Peringkat & Deteksi Seri Resmi di Server (compute_stage_rankings).
    */
+  /** Live scoring: daftar sesi live penyelenggara (admin). */
+  async fetchLiveSessions(
+    tenantId: string
+  ): Promise<{ success: boolean; message?: string; sessions: LiveSessionRow[]; missingTable?: boolean }> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client || !isValidUuid(tenantId)) {
+      return { success: false, message: 'Live scoring membutuhkan koneksi database.', sessions: [] };
+    }
+    const { data, error } = await client.from('live_sessions').select('*').eq('tenant_id', tenantId);
+    if (error) {
+      const missingTable = /live_sessions/i.test(error.message) && /exist|schema cache|relation/i.test(error.message);
+      return {
+        success: false,
+        missingTable,
+        message: missingTable
+          ? 'Tabel live scoring belum ada. Jalankan migrasi 20261127_live_scoring.sql di SQL Editor Supabase.'
+          : error.message,
+        sessions: []
+      };
+    }
+    return {
+      success: true,
+      sessions: (data || [])
+        .map((r: unknown) => normalizeLiveSessionRow(r))
+        .filter((r: LiveSessionRow | null): r is LiveSessionRow => Boolean(r))
+    };
+  },
+
+  /** Live scoring: mulai/hentikan sesi, pindah peserta, atau ubah opsi (RPC live_session_control). */
+  async liveSessionControl(params: {
+    stageId: string;
+    action: 'start' | 'stop' | 'set' | 'next' | 'prev' | 'options' | 'refresh' | 'show_maqra' | 'hide_maqra';
+    stageParticipationId?: string | null;
+    hideNames?: boolean | null;
+    /** Nomor maqra yang ditampilkan (1, 2, ...) untuk action show_maqra */
+    maqraIndex?: number | null;
+  }): Promise<{ success: boolean; message?: string; session?: LiveSessionRow }> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client) {
+      return { success: false, message: 'Live scoring membutuhkan koneksi database.' };
+    }
+    if (!isValidUuid(params.stageId) || (params.stageParticipationId && !isValidUuid(params.stageParticipationId))) {
+      return { success: false, message: 'Babak atau peserta tidak valid.' };
+    }
+    const { data, error } = await client.rpc('live_session_control', {
+      p_stage_id: params.stageId,
+      p_action: params.action,
+      p_stage_participation_id: params.stageParticipationId ?? null,
+      p_hide_names: params.hideNames ?? null,
+      p_maqra_index: params.maqraIndex ?? null
+    });
+    if (error) {
+      const missing = /live_session_control/i.test(error.message) && /find|exist|schema cache/i.test(error.message);
+      return {
+        success: false,
+        message: missing
+          ? 'Fungsi live scoring belum ada di database. Jalankan migrasi 20261127_live_scoring.sql di SQL Editor Supabase.'
+          : error.message.replace(/^LIVE_[A-Z_]+:\s*/, '')
+      };
+    }
+    return { success: true, session: normalizeLiveSessionRow(data) || undefined };
+  },
+
   async computeStageRankingsRpc(stageId: string): Promise<RpcServiceResult> {
     const uuidCheck = this.validateReferences({ p_stage_id: stageId });
     if (!uuidCheck.valid) {
@@ -3631,9 +3700,23 @@ export const supabaseDataService = {
       champion_count: stage.championCount ?? 3,
       qualification_method: stage.qualificationMethod || 'top_n',
       status: stage.status === 'Selesai' ? 'Aktif' : stage.status,
-      is_finalized: false
+      is_finalized: false,
+      // Nilai juara gabungan: hanya dikirim bila kolomnya dikenal (undefined = migrasi 20261126 belum dijalankan)
+      ...(stage.combinedScoring !== undefined
+        ? { combined_scoring: toDbCombinedScoring(stage.combinedScoring, toDeterministicUuid) }
+        : {})
     });
-    if (error) return { success: false, mode: 'supabase_live', message: error.message };
+    if (error) {
+      if (/combined_scoring/i.test(error.message) && /column|schema cache/i.test(error.message)) {
+        return {
+          success: false,
+          mode: 'supabase_live',
+          message:
+            'Kolom nilai juara gabungan belum ada di database. Jalankan migrasi 20261126_combined_champion_score.sql di SQL Editor Supabase.'
+        };
+      }
+      return { success: false, mode: 'supabase_live', message: error.message };
+    }
     return { success: true, mode: 'supabase_live', message: 'Konfigurasi babak tersimpan di Supabase.' };
   },
 

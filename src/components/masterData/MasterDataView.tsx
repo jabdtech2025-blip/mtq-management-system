@@ -23,6 +23,12 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import {
+  eligibleCombinedSourceStages,
+  formatCombinedFormula,
+  isValidCombinedWeight,
+  normalizeCombinedScoring
+} from '../../utils/combinedScoring';
+import {
   ErrorCategory,
   CompetitionStage,
   JudgeAssignment,
@@ -147,6 +153,9 @@ export const MasterDataView: React.FC = () => {
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
   const [stageStatus, setStageStatus] = useState<'Menunggu' | 'Aktif'>('Menunggu');
   const [stageFormError, setStageFormError] = useState('');
+  // Nilai juara gabungan: babak sumber yang dicentang beserta bobotnya (teks agar bisa mengetik desimal)
+  const [stageCombinedSources, setStageCombinedSources] = useState<Record<string, { checked: boolean; weight: string }>>({});
+  const [stageSelfWeight, setStageSelfWeight] = useState('1');
 
   // Generic add state
   const [isAddGenericOpen, setIsAddGenericOpen] = useState(false);
@@ -436,6 +445,8 @@ export const MasterDataView: React.FC = () => {
     setStageChampionCount(3);
     setStageStatus('Menunggu');
     setStageFormError('');
+    setStageCombinedSources({});
+    setStageSelfWeight('1');
     setIsAddStageOpen(true);
   };
 
@@ -448,18 +459,68 @@ export const MasterDataView: React.FC = () => {
     setStageChampionCount(stg.championCount || 3);
     setStageStatus(stg.status === 'Aktif' ? 'Aktif' : 'Menunggu');
     setStageFormError('');
+    const combined = normalizeCombinedScoring(stg.combinedScoring);
+    setStageCombinedSources(
+      Object.fromEntries((combined?.sources || []).map((src) => [src.stageId, { checked: true, weight: String(src.weight) }]))
+    );
+    setStageSelfWeight(String(combined?.selfWeight ?? 1));
     setIsAddStageOpen(true);
   };
 
+  // Babak sebelumnya (cabang sama, urutan lebih awal) yang bisa dipilih untuk nilai juara gabungan
+  const editingStage = editingStageId ? stages.find((s) => s.id === editingStageId) : undefined;
+  const combinedEligibleStages = useMemo(() => {
+    if (!isAddStageOpen) return [];
+    const isGeneric = !stageBranch || stageBranch === 'Semua Cabang';
+    return eligibleCombinedSourceStages(
+      {
+        id: editingStageId || '__babak_baru__',
+        tenantId: editingStage?.tenantId || stages[0]?.tenantId || '',
+        order: Number(stageOrder) || 0,
+        branchId: isGeneric ? undefined : cabangList.find((c) => c.name === stageBranch)?.id,
+        branchName: isGeneric ? 'Semua Cabang' : stageBranch
+      },
+      stages
+    );
+  }, [isAddStageOpen, stageBranch, stageOrder, editingStageId, editingStage?.tenantId, stages, cabangList]);
+  const checkedCombinedSources = combinedEligibleStages.filter((st) => stageCombinedSources[st.id]?.checked);
+  const combinedFormulaPreview =
+    checkedCombinedSources.length > 0
+      ? formatCombinedFormula([
+          ...checkedCombinedSources.map((st) => ({
+            stageName: st.name,
+            weight: Number(String(stageCombinedSources[st.id]?.weight || '').replace(',', '.')) || 0
+          })),
+          { stageName: stageName.trim() || 'Babak ini', weight: Number(stageSelfWeight.replace(',', '.')) || 0 }
+        ])
+      : '';
+
   const handleSaveStage = (e: React.FormEvent) => {
     e.preventDefault();
+    const parseWeight = (v: string) => Number(String(v || '').replace(',', '.'));
+    const combinedSources = checkedCombinedSources.map((st) => ({
+      stageId: st.id,
+      weight: parseWeight(stageCombinedSources[st.id]?.weight || '')
+    }));
+    const selfWeight = parseWeight(stageSelfWeight);
+    if (combinedSources.length > 0) {
+      const badWeight =
+        !isValidCombinedWeight(selfWeight) || combinedSources.some((src) => !isValidCombinedWeight(src.weight));
+      if (badWeight) {
+        setStageFormError('Bobot nilai juara gabungan harus angka lebih dari 0 dan paling besar 100 (maksimal 2 angka desimal).');
+        return;
+      }
+    }
+    const combinedScoring = combinedSources.length > 0 ? { selfWeight, sources: combinedSources } : null;
     const payload = {
       name: stageName.trim(),
       order: Number(stageOrder),
       branchName: stageBranch,
       status: stageStatus,
       qualificationQuota: Number(stageQuota),
-      championCount: Number(stageChampionCount) || 3
+      championCount: Number(stageChampionCount) || 3,
+      // Kirim null hanya bila babak ini sudah mengenal kolomnya, agar database lama tidak menolak
+      ...(combinedScoring || (editingStage && editingStage.combinedScoring !== undefined) ? { combinedScoring } : {})
     };
     const res = editingStageId
       ? updateStage(editingStageId, payload)
@@ -1260,7 +1321,25 @@ export const MasterDataView: React.FC = () => {
                         return (
                           <tr key={stg.id} className="hover:bg-slate-50/70">
                             <td className="px-5 py-3 text-center font-mono font-bold text-slate-700">{stg.order}</td>
-                            <td className="px-4 py-3 font-bold text-slate-900">{stg.name}</td>
+                            <td className="px-4 py-3 font-bold text-slate-900">
+                              {stg.name}
+                              {(() => {
+                                const combined = normalizeCombinedScoring(stg.combinedScoring);
+                                if (!combined) return null;
+                                const parts = [
+                                  ...combined.sources.map((src) => ({
+                                    stageName: stages.find((x) => x.id === src.stageId)?.name || 'Babak dihapus',
+                                    weight: src.weight
+                                  })),
+                                  { stageName: stg.name, weight: combined.selfWeight }
+                                ];
+                                return (
+                                  <div className="text-[10px] font-semibold text-emerald-800" data-testid="stage-combined-badge">
+                                    Nilai gabungan: {formatCombinedFormula(parts)}
+                                  </div>
+                                );
+                              })()}
+                            </td>
                             <td className="px-4 py-3 text-center font-mono">{stg.qualificationQuota}</td>
                             <td className="px-4 py-3 text-center font-mono">{stg.championCount ?? 3}</td>
                             <td className="px-4 py-3 text-center">
@@ -2032,7 +2111,7 @@ export const MasterDataView: React.FC = () => {
       {/* Add / Edit Stage Modal */}
       {isAddStageOpen && (
         <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-lg border border-slate-200 p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="font-extrabold text-base text-slate-900 mb-4">
               {editingStageId ? 'Ubah Babak' : 'Tambah Babak Baru'}
             </h3>
@@ -2120,6 +2199,79 @@ export const MasterDataView: React.FC = () => {
                   <option value="Aktif">Aktif (sedang berjalan)</option>
                 </select>
               </div>
+              {combinedEligibleStages.length > 0 && (
+                <div
+                  className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 space-y-2"
+                  data-testid="combined-scoring-section"
+                >
+                  <div className="font-bold text-slate-700">Nilai Juara Gabungan</div>
+                  <p className="text-[11px] text-slate-500">
+                    Centang babak sebelumnya yang nilainya ikut dihitung, lalu isi bobotnya. Nilai babak sebelumnya
+                    diambil dari hasil resmi yang sudah disahkan. Biarkan tanpa centang untuk memakai nilai babak ini saja.
+                  </p>
+                  {combinedEligibleStages.map((st) => {
+                    const entry = stageCombinedSources[st.id] || { checked: false, weight: '1' };
+                    return (
+                      <div key={st.id} className="flex items-center gap-2">
+                        <label className="flex flex-1 items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={entry.checked}
+                            data-testid={`combined-source-${st.name}`}
+                            onChange={(e) =>
+                              setStageCombinedSources((prev) => ({
+                                ...prev,
+                                [st.id]: { weight: entry.weight || '1', checked: e.target.checked }
+                              }))
+                            }
+                          />
+                          <span className="font-semibold text-slate-700">{st.name}</span>
+                          {!st.isFinalized && <span className="text-[10px] text-amber-700">(belum disahkan)</span>}
+                        </label>
+                        <span className="text-slate-500">Bobot</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={entry.weight}
+                          disabled={!entry.checked}
+                          data-testid={`combined-weight-${st.name}`}
+                          onChange={(e) =>
+                            setStageCombinedSources((prev) => ({
+                              ...prev,
+                              [st.id]: { checked: entry.checked, weight: e.target.value }
+                            }))
+                          }
+                          className="w-16 px-2 py-1 border border-slate-300 rounded-lg font-mono text-center disabled:bg-slate-100"
+                        />
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center gap-2">
+                    <label className="flex flex-1 items-center gap-2">
+                      <input type="checkbox" checked disabled />
+                      <span className="font-semibold text-slate-700">{stageName.trim() || 'Babak ini'} (babak ini)</span>
+                    </label>
+                    <span className="text-slate-500">Bobot</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={stageSelfWeight}
+                      disabled={checkedCombinedSources.length === 0}
+                      data-testid="combined-weight-self"
+                      onChange={(e) => setStageSelfWeight(e.target.value)}
+                      className="w-16 px-2 py-1 border border-slate-300 rounded-lg font-mono text-center disabled:bg-slate-100"
+                    />
+                  </div>
+                  {combinedFormulaPreview ? (
+                    <p className="text-[11px] font-semibold text-emerald-900" data-testid="combined-formula">
+                      Nilai Gabungan = {combinedFormulaPreview}. Peringkat dan juara memakai nilai ini; bila sama,
+                      nilai babak ini yang lebih tinggi didahulukan.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-slate-500">Saat ini memakai nilai babak ini saja.</p>
+                  )}
+                </div>
+              )}
               <p className="text-[11px] text-slate-500">
                 Urutan dihitung per cabang: Penyisihan = 1, Final = 2. Kuota lolos dipakai saat pengesahan babak;
                 jumlah juara dipakai di babak terakhir. Setelah ada lembar penilaian, nama, cabang, dan urutan

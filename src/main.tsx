@@ -2,6 +2,7 @@ import React, { Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { slugFromPath } from './content/publicRoutes';
+import { liveCodeFromPath } from './services/liveScoring';
 
 // Landing page di "/" dan aplikasi di "/app" (serta rute aplikasi lain seperti /dashboard)
 // dimuat terpisah, sehingga pengunjung landing tidak ikut mengunduh kode aplikasi.
@@ -9,6 +10,8 @@ const LandingPage = React.lazy(() => import('./landing/LandingPage'));
 const App = React.lazy(() => import('./App.tsx'));
 // Halaman publik: Panduan, Kebijakan Privasi, Ketentuan Penggunaan, dan halaman lain dari Superadmin (CMS)
 const PublicPage = React.lazy(() => import('./public/PublicPage'));
+// Layar publik Live Scoring per penyelenggara: /live/<KODE>
+const LiveScoringPage = React.lazy(() => import('./live/LiveScoringPage'));
 
 const APP_FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Scheherazade+New:wght@400;700&display=swap';
@@ -39,20 +42,29 @@ function prepareAppDocument(): void {
   document.head.appendChild(fonts);
 }
 
-const publicSlug = slugFromPath(window.location.pathname);
-const landing = !publicSlug && isLandingRoute();
-if (!landing && !publicSlug) prepareAppDocument();
+const liveCode = liveCodeFromPath(window.location.pathname);
+const publicSlug = liveCode ? null : slugFromPath(window.location.pathname);
+const landing = !liveCode && !publicSlug && isLandingRoute();
+if (!landing && !publicSlug && !liveCode) prepareAppDocument();
 
 const Fallback = () => (
   <div
     role="status"
     aria-label="Memuat"
-    style={{ minHeight: '100vh', background: landing ? '#06201F' : publicSlug ? '#FFFFFF' : '#F8FAFC' }}
+    style={{ minHeight: '100vh', background: liveCode ? '#020617' : landing ? '#06201F' : publicSlug ? '#FFFFFF' : '#F8FAFC' }}
   />
 );
 
 createRoot(document.getElementById('root')!).render(
   <Suspense fallback={<Fallback />}>
-    {publicSlug ? <PublicPage slug={publicSlug} /> : landing ? <LandingPage /> : <App />}
+    {liveCode ? (
+      <LiveScoringPage tenantCode={liveCode} />
+    ) : publicSlug ? (
+      <PublicPage slug={publicSlug} />
+    ) : landing ? (
+      <LandingPage />
+    ) : (
+      <App />
+    )}
   </Suspense>
 );

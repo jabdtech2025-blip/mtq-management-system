@@ -25,6 +25,7 @@ const SuperadminHealthView = React.lazy(() => import('./components/superadmin/Su
 const SuperadminAuditView = React.lazy(() => import('./components/superadmin/SuperadminAuditView').then((m) => ({ default: m.SuperadminAuditView })));
 const SuperadminContentView = React.lazy(() => import('./components/superadmin/SuperadminContentView').then((m) => ({ default: m.SuperadminContentView })));
 const SuperadminSettingsView = React.lazy(() => import('./components/superadmin/SuperadminSettingsView').then((m) => ({ default: m.SuperadminSettingsView })));
+const LiveScoringControlView = React.lazy(() => import('./components/live/LiveScoringControlView').then((m) => ({ default: m.LiveScoringControlView })));
 const ActivityLogView = React.lazy(() => import('./components/activityLog/ActivityLogView').then((m) => ({ default: m.ActivityLogView })));
 import { useDocumentMeta } from './hooks/useDocumentMeta';
 import { AuthenticationGateView } from './components/auth/AuthenticationGateView';
@@ -75,6 +76,8 @@ const MainLayout: React.FC = () => {
         return <PenilaianDualPanelView />;
       case 'log_aktivitas':
         return <ActivityLogView />;
+      case 'live_scoring':
+        return <LiveScoringControlView />;
 
       // Superadmin Platform
       case 'superadmin_dashboard':

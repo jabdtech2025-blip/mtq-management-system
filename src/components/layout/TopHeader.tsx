@@ -133,6 +133,7 @@ export const TopHeader: React.FC = () => {
     },
     hasil_kelulusan: { section: 'Hasil', title: 'Hasil & Kelulusan' },
     log_aktivitas: { section: 'Audit', title: 'Log Aktivitas' },
+    live_scoring: { section: 'Pelaksanaan', title: 'Sesi Live Scoring' },
     superadmin_dashboard: { section: 'Superadmin Platform', title: 'Dashboard Platform' },
     superadmin_tenants: { section: 'Superadmin Platform', title: 'Penyelenggara MTQ (Manajemen MTQ)' },
     superadmin_users: { section: 'Superadmin Platform', title: 'Manajemen Akun' },

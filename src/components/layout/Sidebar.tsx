@@ -13,6 +13,7 @@ import {
   Building,
   UserCheck,
   History,
+  Radio,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -142,6 +143,11 @@ export const Sidebar: React.FC = () => {
           id: 'rekap_nilai',
           label: 'Rekap Nilai Real-Time',
           icon: <FileSpreadsheet className="w-4 h-4 shrink-0" />
+        },
+        {
+          id: 'live_scoring',
+          label: 'Sesi Live Scoring',
+          icon: <Radio className="w-4 h-4 shrink-0" />
         }
       ]
     },

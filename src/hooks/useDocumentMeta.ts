@@ -14,6 +14,7 @@ const VIEW_PAGE_TITLES: Record<ViewType, string> = {
   stage_management: 'Manajemen Babak & Penugasan Hakim',
   hasil_kelulusan: 'Hasil Babak & Kelulusan',
   log_aktivitas: 'Log Aktivitas',
+  live_scoring: 'Sesi Live Scoring',
   superadmin_dashboard: 'Dashboard Platform',
   superadmin_tenants: 'Penyelenggara MTQ',
   superadmin_users: 'Manajemen Akun',

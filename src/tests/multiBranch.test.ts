@@ -27,6 +27,18 @@ import {
 import { buildJudgeAssignmentLabels, resolveRekapJudgeColumns } from '../utils/judgeAssignmentLabels';
 import { applyStageParticipationRealtimeUpdate } from '../utils/realtimeRowApply';
 import { carryOverLoadedAnnotations } from '../utils/annotationCarryOver';
+import { collectUnsavedSheets, formatUnsavedSheetsForLog } from '../utils/unsavedSheets';
+import {
+  applyLiveSessionChange,
+  buildLiveDisplay,
+  formatLiveMaqra,
+  liveCodeFromPath,
+  liveMushafPages,
+  liveScoringPath,
+  normalizeLivePublicState,
+  orderLiveMaqras,
+  stepLiveEntry
+} from '../services/liveScoring';
 import {
   canSuperviseTenant,
   filterTenantsForManagement,
@@ -763,6 +775,107 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
 
     const baru = carryOverLoadedAnnotations([{ ...base, id: 'a-2', annotations: [], annotationCount: 2, annotationsLoaded: false }], prev);
     expect(baru[0].annotationsLoaded === false, 'lembar yang belum pernah diunduh tetap ditandai belum termuat');
+  });
+
+  check('PS-01. Peringatan pengesahan: lembar yang dibuka hakim tetapi belum disimpan terdeteksi per hakim', () => {
+    const mkPart = (id: string, name: string, lottery: string) => ({ id, name, lotteryNumber: lottery, tenantId: 't-1' } as any);
+    const mkSp = (id: string, pid: string, lottery: string) => ({ id, participantId: pid, stageId: 's-final', stageName: 'Final', lotteryNumber: lottery, tenantId: 't-1' } as any);
+    const entries = [
+      { participant: mkPart('p-1', 'Ahmad', '3'), participation: mkSp('sp-1', 'p-1', '3') },
+      { participant: mkPart('p-2', 'Hasan', '5'), participation: mkSp('sp-2', 'p-2', '5') },
+      { participant: mkPart('p-3', 'Umar', '1'), participation: mkSp('sp-3', 'p-3', '1') }
+    ];
+    const baseA: any = { tenantId: 't-1', stageId: 's-final', stageName: 'Final', deductions: {}, totalDeductions: 0, finalScore: 100, annotations: [], lastUpdated: '' };
+    const assessments: any[] = [
+      // Tajwid 2: membuka 2 peserta, belum menyimpan (satu berisi catatan, satu kosong)
+      { ...baseA, id: 'a-1', stageParticipationId: 'sp-1', participantId: 'p-1', judgeId: 'j-tajwid2', judgeName: 'Ust. Tajwid Dua', status: 'in_progress', errorCounts: { k1: 2 } },
+      { ...baseA, id: 'a-2', stageParticipationId: 'sp-2', participantId: 'p-2', judgeId: 'j-tajwid2', judgeName: 'Ust. Tajwid Dua', status: 'in_progress', errorCounts: {} },
+      // Lembar terkunci tidak boleh muncul
+      { ...baseA, id: 'a-3', stageParticipationId: 'sp-1', participantId: 'p-1', judgeId: 'j-tajwid1', judgeName: 'Ust. Tajwid Satu', status: 'finalized', isLocked: true, errorCounts: { k1: 1 } },
+      // Babak lain tidak boleh muncul
+      { ...baseA, id: 'a-4', stageParticipationId: 'sp-penyisihan', participantId: 'p-3', stageId: 's-pen', stageName: 'Penyisihan', judgeId: 'j-itqon1', judgeName: 'Ust. Itqon', status: 'in_progress', errorCounts: { k2: 1 } },
+      // Penyelenggara lain tidak boleh muncul
+      { ...baseA, id: 'a-5', tenantId: 't-2', stageParticipationId: 'sp-3', participantId: 'p-3', judgeId: 'j-x', judgeName: 'X', status: 'in_progress', errorCounts: {} }
+    ];
+    const judgeAssignments: any[] = [
+      { id: 'ja-1', tenantId: 't-1', judgeId: 'j-tajwid2', judgeName: 'Ust. Tajwid Dua', stageId: 's-final', stageName: 'Final', branchName: 'A', judgeField: 'Tajwid' }
+    ];
+    const summary = collectUnsavedSheets({
+      tenantId: 't-1', stageId: 's-final', stageName: 'Final', entries, assessments,
+      users: [{ id: 'j-tajwid2', name: 'Al Ustadz Tajwid Dua' } as any], judgeAssignments
+    });
+    expect(summary.sheetCount === 2 && summary.participantCount === 2, `jumlah salah: ${JSON.stringify(summary)}`);
+    expect(summary.groups.length === 1 && summary.groups[0].judgeName === 'Al Ustadz Tajwid Dua' && summary.groups[0].judgeField === 'Tajwid',
+      `kelompok hakim salah: ${JSON.stringify(summary.groups)}`);
+    const items = summary.groups[0].items;
+    expect(items[0].lotteryNumber === '3' && items[1].lotteryNumber === '5', 'urut menurut nomor undian');
+    expect(items[0].isEmpty === false && items[1].isEmpty === true, 'penanda lembar kosong / berisi catatan salah');
+    const logText = formatUnsavedSheetsForLog(summary);
+    expect(logText.includes('Al Ustadz Tajwid Dua (Tajwid): #3 Ahmad, #5 Hasan [kosong]'), `teks log salah: ${logText}`);
+
+    const clean = collectUnsavedSheets({
+      tenantId: 't-1', stageId: 's-final', stageName: 'Final', entries,
+      assessments: assessments.filter((a) => a.status === 'finalized'), users: [], judgeAssignments
+    });
+    expect(clean.sheetCount === 0 && clean.groups.length === 0, 'tanpa lembar terbuka, tidak ada peringatan');
+  });
+
+  check('LV-01. Live scoring: rute publik, format maqra, halaman mushaf, urutan undian, sembunyikan nama, dan event realtime', () => {
+    expect(liveCodeFromPath('/live/LPTQ-JBR') === 'LPTQ-JBR' && liveCodeFromPath('/live/LPTQ-JBR/') === 'LPTQ-JBR', 'kode dari path');
+    expect(liveCodeFromPath('/live') === null && liveCodeFromPath('/live/a/b') === null && liveCodeFromPath('/dashboard') === null, 'bukan rute live');
+    expect(liveScoringPath('MTQ Kota') === '/live/MTQ%20Kota', `path: ${liveScoringPath('MTQ Kota')}`);
+    const label = formatLiveMaqra({ surahName: 'Al-Mulk', surahNumber: 67, startAyah: 1, endAyah: 5, pageStart: 562, pageEnd: 563 });
+    expect(label === 'QS. Al-Mulk (67): 1–5 · Hal. 562–563', `label: ${label}`);
+    expect(formatLiveMaqra({ surahName: 'Al-Ikhlas', startAyah: 1, endAyah: 1, pageStart: 604, pageEnd: 604 }) === 'QS. Al-Ikhlas: 1 · Hal. 604', 'satu ayat satu halaman');
+    const pages = liveMushafPages([{ surahName: 'A', pageStart: 563, pageEnd: 564 }, { surahName: 'B', pageStart: 562, pageEnd: 563 }]);
+    expect(pages.join() === '562,563,564', `halaman: ${pages.join()}`);
+    expect(liveMushafPages([{ surahName: 'A', pageStart: 1, pageEnd: 10 }], 4).length === 4, 'dibatasi 4 halaman');
+
+    const entries = [
+      {
+        id: 'sp-a',
+        lotteryNumber: '03',
+        name: 'A',
+        fatherName: 'Abdullah',
+        origin: 'Kota A',
+        maqras: [
+          { surahName: 'Al-Mulk', surahNumber: 67, startAyah: 1, endAyah: 5, pageStart: 562, pageEnd: 562 },
+          { surahName: 'Al-Kahf', surahNumber: 18, startAyah: 1, endAyah: 10, pageStart: 293, pageEnd: 294 }
+        ]
+      },
+      { id: 'sp-b', lotteryNumber: '1', name: 'B', origin: 'Kota B', maqras: [] },
+      { id: 'sp-c', lotteryNumber: '2', name: 'C', origin: 'Kota C', maqras: [] }
+    ];
+    const shown = buildLiveDisplay({ stageName: 'Final', branchName: 'Tilawah', hideNames: false, entries, currentId: 'sp-c' });
+    expect(shown.position === 2 && shown.total === 3 && shown.participant?.name === 'C', `urutan: ${JSON.stringify(shown)}`);
+    const hidden = buildLiveDisplay({ stageName: 'Final', branchName: 'Tilawah', hideNames: true, entries, currentId: 'sp-a' });
+    expect(hidden.participant?.name === null && hidden.participant?.nameHidden === true && hidden.participant?.origin === 'Kota A', 'nama disembunyikan');
+    expect(hidden.participant?.maqra === null && hidden.participant?.maqraCount === 2, 'maqra tersembunyi bawaan, hanya jumlahnya');
+    expect(hidden.participant?.fatherName === null, 'nama ayah ikut disembunyikan');
+    const shownMaqra = buildLiveDisplay({ stageName: 'Final', branchName: 'Tilawah', hideNames: false, entries, currentId: 'sp-a', shownMaqraIndex: 2 });
+    expect(shownMaqra.participant?.fatherName === 'Abdullah', 'nama ayah tampil');
+    expect(shownMaqra.participant?.maqra?.index === 2 && shownMaqra.participant?.maqra?.surahName === 'Al-Kahf', `maqra 2: ${JSON.stringify(shownMaqra.participant?.maqra)}`);
+    expect(liveMushafPages(shownMaqra.participant?.maqra ? [shownMaqra.participant.maqra] : []).join() === '293,294', 'halaman hanya milik maqra yang tampil');
+    const sorted = orderLiveMaqras(entries[0].maqras);
+    expect(sorted[0].surahName === 'Al-Kahf', 'urutan maqra menurut halaman (sama dengan server)');
+    expect(stepLiveEntry(entries, null, 1) === 'sp-b' && stepLiveEntry(entries, 'sp-b', 1) === 'sp-c', 'berikutnya');
+    expect(stepLiveEntry(entries, 'sp-a', 1) === 'sp-a' && stepLiveEntry(entries, 'sp-b', -1) === 'sp-b', 'berhenti di ujung');
+
+    const state = normalizeLivePublicState({
+      found: true,
+      tenant_id: 't-1',
+      tenant_name: 'LPTQ',
+      sessions: [{ id: 's-1', stage_id: 'st-1', display: { stage_name: 'Final', branch_name: 'Tilawah', participant: { lottery_number: '7', name: 'Zaid', origin: 'Kab. X', maqra_count: 2, maqra: { index: 1, surah_name: 'An-Naba', page_start: 582, page_end: 582 } }, position: 1, total: 4 } }]
+    });
+    expect(state.found && state.sessions.length === 1 && state.sessions[0].display?.participant?.name === 'Zaid', 'baca state publik');
+    expect(state.sessions[0].display?.participant?.maqra?.surahName === 'An-Naba' && state.sessions[0].display?.participant?.maqraCount === 2, 'baca maqra yang ditampilkan');
+    const withNew = applyLiveSessionChange(state.sessions, {
+      id: 's-2', stage_id: 'st-2', is_active: true, display: { stage_name: 'Penyisihan', branch_name: 'Hifzh', participant: null, total: 0 }
+    });
+    expect(withNew.length === 2 && withNew[0].id === 's-2', 'sesi baru ditambahkan dan diurutkan');
+    const stopped = applyLiveSessionChange(withNew, { id: 's-1', stage_id: 'st-1', is_active: false, display: {} });
+    expect(stopped.length === 1 && stopped[0].id === 's-2', 'sesi yang dihentikan dihapus dari layar');
+    expect(normalizeLivePublicState({ found: false }).sessions.length === 0, 'kode tidak dikenal');
   });
 
   const passed = results.filter((r) => r.success).length;

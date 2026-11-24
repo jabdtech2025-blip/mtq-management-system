@@ -57,6 +57,12 @@ import {
 } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
 import {
+  buildCombinedScoringContext,
+  eligibleCombinedSourceStages,
+  isValidCombinedWeight,
+  normalizeCombinedScoring
+} from '../utils/combinedScoring';
+import {
   FieldCoverageSpec,
   getParticipantStageCompletion,
   resolveRequiredJudgeIdsForStage
@@ -99,6 +105,7 @@ export type ViewType =
   | 'hasil_kelulusan'
   | 'penilaian_dual_panel'
   | 'log_aktivitas'
+  | 'live_scoring'
   // Superadmin
   | 'superadmin_dashboard'
   | 'superadmin_tenants'
@@ -783,6 +790,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     stage_management: '/manajemen-babak',
     user_management: '/pengguna-hakim',
     log_aktivitas: '/log-aktivitas',
+    live_scoring: '/sesi-live',
     superadmin_dashboard: '/platform/dashboard',
     superadmin_tenants: '/platform/tenants',
     superadmin_users: '/platform/users',
@@ -7437,6 +7445,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (sameBranch.some((s) => s.order === candidate.order)) {
       return `Urutan ${candidate.order} sudah dipakai babak lain di cabang ${isGeneric ? 'umum' : `"${candidate.branchName}"`}.`;
     }
+    // Nilai juara gabungan: hanya babak sebelumnya di cabang yang sama, bobot > 0
+    if (candidate.combinedScoring) {
+      const combined = normalizeCombinedScoring(candidate.combinedScoring);
+      const rawCount = candidate.combinedScoring.sources?.length || 0;
+      if (!combined || combined.sources.length !== rawCount || !isValidCombinedWeight(candidate.combinedScoring.selfWeight)) {
+        return 'Bobot nilai juara gabungan harus angka lebih dari 0 dan paling besar 100.';
+      }
+      const eligible = eligibleCombinedSourceStages(candidate, stages.filter((s) => s.tenantId === currentTenantId));
+      const invalidSource = combined.sources.find((src) => !eligible.some((e) => e.id === src.stageId));
+      if (invalidSource) {
+        return 'Nilai juara gabungan hanya boleh memakai babak sebelumnya (urutan lebih awal) di cabang yang sama.';
+      }
+    }
     return null;
   };
 
@@ -7860,6 +7881,23 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? currentStg.id
         : undefined;
 
+    // Nilai juara gabungan: pastikan daftar peringkat resmi babak sumber sudah diunduh
+    let combinedSnapshots = stageSnapshots;
+    let combinedScoring = buildCombinedScoringContext({ stage: currentStg, stages, snapshots: combinedSnapshots });
+    if (combinedScoring && combinedScoring.snapshotIdsToLoad.length > 0) {
+      const loaded = await Promise.all(
+        combinedScoring.snapshotIdsToLoad.map(async (snapId) => ({
+          snapId,
+          res: await supabaseDataService.fetchStageSnapshotRankings(snapId)
+        }))
+      );
+      combinedSnapshots = combinedSnapshots.map((snap) => {
+        const hit = loaded.find((l) => l.snapId === snap.id && l.res.success);
+        return hit && hit.res.success ? { ...snap, rankings: hit.res.rankings, rankingsLoaded: true } : snap;
+      });
+      combinedScoring = buildCombinedScoringContext({ stage: currentStg, stages, snapshots: combinedSnapshots });
+    }
+
     // 5. P1-05: First evaluate automatic rankings (without overrides) so we only mark actual deviations or explicit manualOverrides as overridden
     const baseEvalResult = RankingService.evaluateStageParticipants({
       tenantId: currentTenantId,
@@ -7876,7 +7914,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       manualOverrides: {},
       overrideReasons: {},
       customRuleConfigs: competitionRules,
-      customRubricVersions: rubricVersions
+      customRubricVersions: rubricVersions,
+      combinedScoring
     });
 
     const autoQualifiedIdsSet = new Set(
@@ -7910,7 +7949,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       manualOverrides: manualOverridesMap,
       overrideReasons,
       customRuleConfigs: competitionRules,
-      customRubricVersions: rubricVersions
+      customRubricVersions: rubricVersions,
+      combinedScoring
     });
 
     if (!evalResult.canFinalize) {

@@ -4,6 +4,7 @@ import {
   validateMaqraAssignmentForParticipant
 } from '../services/scoringEngine';
 import { RankingService } from '../services/rankingService';
+import { buildCombinedScoringContext, eligibleCombinedSourceStages, normalizeCombinedScoring } from '../utils/combinedScoring';
 import { OFFICIAL_SENI_BACA_RUBRIC, getBranchRuleConfig } from '../services/competitionRules';
 import {
   ErrorCategory,
@@ -455,6 +456,88 @@ export function runDomainTests(): { passed: number; failed: number; results: Arr
     evalBoundary.boundaryTie === true && evalBoundary.unresolvedTiesCount > 0,
     `boundaryTie: ${evalBoundary.boundaryTie}, unresolvedCount: ${evalBoundary.unresolvedTiesCount}`
   );
+
+  // 7b. Nilai juara gabungan (Babak Awal x1 + babak ini x2) / 3 dari snapshot resmi
+  {
+    const cgStages = [
+      { id: 'stg-0', tenantId: 't-1', name: 'Babak Awal', order: 1, branchName: 'Tilawah Dewasa Putra', status: 'Selesai', qualificationQuota: 2, qualificationMethod: 'top_n', isFinalized: true },
+      { id: 'stg-1', tenantId: 't-1', name: 'Penyisihan', order: 2, branchName: 'Tilawah Dewasa Putra', status: 'Aktif', qualificationQuota: 1, qualificationMethod: 'top_n',
+        combinedScoring: { selfWeight: 2, sources: [{ stageId: 'stg-0', weight: 1 }] } }
+    ] as any[];
+    const cgSnap = (rankings: any[], loaded = true) => [{
+      id: 'snap-0', tenantId: 't-1', stageId: 'stg-0', stageName: 'Babak Awal', branchName: 'Tilawah Dewasa Putra',
+      quota: 2, qualificationMethod: 'top_n', finalizedAt: '', finalizedBy: '', rubricVersionId: '', tieBreakRuleUsed: '',
+      rankings, rankingsLoaded: loaded
+    }] as any[];
+    const cgCtx = buildCombinedScoringContext({
+      stage: cgStages[1],
+      stages: cgStages,
+      // p-tie-2: snapshot babak gabungan lama -> pakai stageScore (nilai babak itu sendiri), bukan totalScore
+      snapshots: cgSnap([{ participantId: 'p-tie-1', totalScore: 80 }, { participantId: 'p-tie-2', stageScore: 95, totalScore: 50 }])
+    });
+    const cgRun = (ctx: any, assessments = tieAssessments) => RankingService.evaluateStageParticipants({
+      tenantId: 't-1',
+      stageName: 'Penyisihan',
+      branchName: 'Tilawah Dewasa Putra',
+      participations: tieParticipations,
+      participants: [partTied1, partTied2],
+      assessments,
+      judgeAssignments: [{ id: 'ja1', tenantId: 't-1', judgeId: 'j-1', judgeName: 'H1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', judgeField: 'Semua Bidang' }],
+      stageQuestionsGetter: () => [{ questionId: 'q-1', title: 'M1', pageNumber: 305 }],
+      quota: 1,
+      combinedScoring: ctx
+    });
+    const cgEval = cgRun(cgCtx);
+    const cgFirst = cgEval.evaluatedParticipants[0];
+    const cgSecond = cgEval.evaluatedParticipants[1];
+
+    // Nilai gabungan sama -> nilai babak ini lebih tinggi didahulukan
+    const tieSheets = [
+      { ...tieAssessments[0] },
+      { ...tieAssessments[1], finalScore: 88, totalDeductions: 12, fieldScores: { Tajwid: 26.0, Lagu: 25.0, Fashahah: 23.0, Suara: 14.0 } }
+    ];
+    const cgTieCtx = buildCombinedScoringContext({
+      stage: { ...cgStages[1], combinedScoring: { selfWeight: 1, sources: [{ stageId: 'stg-0', weight: 1 }] } },
+      stages: cgStages,
+      snapshots: cgSnap([{ participantId: 'p-tie-1', totalScore: 86 }, { participantId: 'p-tie-2', totalScore: 88 }])
+    });
+    const cgTieEval = cgRun(cgTieCtx, tieSheets);
+    const cgPendingCtx = buildCombinedScoringContext({ stage: cgStages[1], stages: cgStages, snapshots: [] });
+    const cgLoadingCtx = buildCombinedScoringContext({ stage: cgStages[1], stages: cgStages, snapshots: cgSnap([], false) });
+    const cgPending = cgRun(cgPendingCtx);
+    const cgLoading = cgRun(cgLoadingCtx);
+    const cgMissingCtx = buildCombinedScoringContext({
+      stage: cgStages[1], stages: cgStages, snapshots: cgSnap([{ participantId: 'p-tie-1', totalScore: 80 }])
+    });
+    const cgMissing = cgRun(cgMissingCtx).evaluatedParticipants.find((e) => e.participant.id === 'p-tie-2');
+    const cgSnapshot = RankingService.createStageResultSnapshot({
+      tenantId: 't-1', stageId: 'stg-1', stageName: 'Penyisihan', branchName: 'Tilawah Dewasa Putra', quota: 1,
+      finalizedBy: 'Admin', evaluatedParticipants: cgEval.evaluatedParticipants
+    });
+    const cgSnapFirst = cgSnapshot.rankings[0];
+    assert(
+      '7b. Nilai Juara Gabungan: (Babak Awal×1 + Penyisihan×2) ÷ 3 dari snapshot resmi; peringkat memakai nilai gabungan; nilai gabungan sama didahulukan nilai babak ini; babak sumber belum disahkan/belum termuat memblokir',
+      cgCtx?.formula === '(Babak Awal×1 + Penyisihan×2) ÷ 3' &&
+        normalizeCombinedScoring({ self_weight: 2, sources: [{ stage_id: 'x', weight: 0 }] }) === null &&
+        eligibleCombinedSourceStages(cgStages[1], cgStages).map((s) => s.id).join() === 'stg-0' &&
+        eligibleCombinedSourceStages(cgStages[0], cgStages).length === 0 &&
+        cgFirst.participant.id === 'p-tie-2' && cgFirst.displayScore === 91.67 && cgFirst.stageScore === 90 &&
+        cgSecond.participant.id === 'p-tie-1' && cgSecond.displayScore === 86.67 &&
+        cgFirst.combinedComponents?.length === 2 && cgFirst.combinedComponents?.[0].score === 95 &&
+        cgFirst.combinedComponents?.[1].isCurrent === true &&
+        cgTieEval.evaluatedParticipants[0].participant.id === 'p-tie-1' &&
+        cgTieEval.evaluatedParticipants[0].displayScore === 88 &&
+        cgTieEval.evaluatedParticipants[1].displayScore === 88 &&
+        (cgTieEval.evaluatedParticipants[0].tieBreakResolvedBy || '').includes('nilai Penyisihan') &&
+        cgPending.canFinalize === false && cgPending.blockingReasonDetail?.code === 'COMBINED_SOURCE_NOT_RATIFIED' &&
+        cgLoading.canFinalize === false && cgLoading.blockingReasonDetail?.code === 'COMBINED_SOURCE_NOT_RATIFIED' &&
+        cgEval.blockingReasonDetail?.code !== 'COMBINED_SOURCE_NOT_RATIFIED' &&
+        cgMissing?.combinedMissing === true && cgMissing?.displayScore === 60 &&
+        cgSnapFirst.totalScore === 91.67 && cgSnapFirst.stageScore === 90 && cgSnapFirst.combinedScore === 91.67 &&
+        cgSnapshot.rankings[0].combinedComponents?.length === 2,
+      `ctx: ${cgCtx?.formula}; eval: ${JSON.stringify(cgEval.evaluatedParticipants.map((e) => [e.participant.id, e.displayScore, e.stageScore]))}; tie: ${JSON.stringify(cgTieEval.evaluatedParticipants.map((e) => [e.participant.id, e.displayScore, e.stageScore, e.tieBreakResolvedBy]))}; pending: ${cgPending.blockingReasonDetail?.code}; loading: ${cgLoading.blockingReasonDetail?.code}; base: ${cgEval.blockingReason}; missing: ${cgMissing?.displayScore}; snap: ${JSON.stringify(cgSnapFirst)}`
+    );
+  }
 
   // 8. Snapshot kelulusan resmi tersimpan lengkap dan tidak dapat berubah
   const snapshot = RankingService.createStageResultSnapshot({

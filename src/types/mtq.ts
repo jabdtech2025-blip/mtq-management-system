@@ -354,6 +354,16 @@ export interface CompetitionStage {
   isFinalized?: boolean;
   finalizedAt?: string;
   finalizedBy?: string;
+  /** Nilai juara gabungan (null/undefined = memakai nilai babak ini saja). Lihat utils/combinedScoring.ts */
+  combinedScoring?: CombinedScoringConfig | null;
+}
+
+/** Nilai juara gabungan: (jumlah nilai babak x bobot) / jumlah bobot. */
+export interface CombinedScoringConfig {
+  /** Bobot nilai babak ini sendiri */
+  selfWeight: number;
+  /** Babak sebelumnya (cabang sama) yang ikut dihitung, nilainya diambil dari hasil resmi babak itu */
+  sources: Array<{ stageId: string; weight: number }>;
 }
 
 export interface JudgeAssessment {
@@ -415,6 +425,18 @@ export interface ParticipantRankingItem {
   hasOverrideConflict?: boolean;
   reason: string;
   tieBreakResolvedBy?: string;
+  /** Nilai babak ini sendiri (sama dengan totalScore bila babak tidak memakai nilai gabungan) */
+  stageScore?: number | null;
+  /** Nilai juara gabungan (totalScore = nilai ini bila babak memakai nilai gabungan) */
+  combinedScore?: number | null;
+  combinedComponents?: Array<{
+    stageId: string;
+    stageName: string;
+    weight: number;
+    score: number | null;
+    missing?: boolean;
+    isCurrent?: boolean;
+  }>;
 }
 
 export interface StageResultSnapshot {
