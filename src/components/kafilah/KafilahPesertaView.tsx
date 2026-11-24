@@ -68,6 +68,8 @@ export const KafilahPesertaView: React.FC = () => {
   // Per Peserta Filters & Sorting
   const [filterKafilahId, setFilterKafilahId] = useState<string>('ALL');
   const [filterBranch, setFilterBranch] = useState<string>('ALL');
+  // Tampilan Grup: filter cabang (grup yang punya peserta di cabang tersebut)
+  const [filterGroupBranch, setFilterGroupBranch] = useState<string>('ALL');
   const [filterStage, setFilterStage] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterVerification, setFilterVerification] = useState<string>('ALL');
@@ -173,15 +175,27 @@ export const KafilahPesertaView: React.FC = () => {
     return Array.from(new Set(names));
   }, [activeStages, partBranchName]);
 
+  // Jumlah peserta per grup pada cabang terpilih (hanya dihitung bila filter cabang aktif)
+  const groupBranchCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (filterGroupBranch === 'ALL') return counts;
+    participants.forEach((p) => {
+      if (p.branchName !== filterGroupBranch) return;
+      counts.set(p.kafilahId, (counts.get(p.kafilahId) || 0) + 1);
+    });
+    return counts;
+  }, [participants, filterGroupBranch]);
+
   const filteredKafilahs = useMemo(() => {
     const q = searchQuery.toLowerCase();
     return kafilahs.filter(
       (k) =>
-        k.name.toLowerCase().includes(q) ||
-        k.code.toLowerCase().includes(q) ||
-        k.region.toLowerCase().includes(q)
+        (filterGroupBranch === 'ALL' || (groupBranchCounts.get(k.id) || 0) > 0) &&
+        (k.name.toLowerCase().includes(q) ||
+          k.code.toLowerCase().includes(q) ||
+          k.region.toLowerCase().includes(q))
     );
-  }, [kafilahs, searchQuery]);
+  }, [kafilahs, searchQuery, filterGroupBranch, groupBranchCounts]);
 
   const filteredParticipants = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -757,19 +771,34 @@ export const KafilahPesertaView: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* Tampilan Grup: Search Bar Only */
-          <div className="relative w-full">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
-              placeholder="Cari kode grup, nama kabupaten/kota, atau wilayah kontingen..."
-              className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 focus:bg-white text-slate-800 placeholder-slate-400 transition-all"
-            />
+          /* Tampilan Grup: Search Bar & Filter Cabang */
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <div className="relative flex-[2] min-w-0">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder="Cari kode grup, nama kabupaten/kota, atau wilayah kontingen..."
+                className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-700 focus:bg-white text-slate-800 placeholder-slate-400 transition-all"
+              />
+            </div>
+            <select
+              value={filterGroupBranch}
+              onChange={(e) => setFilterGroupBranch(e.target.value)}
+              data-testid="filter-group-branch"
+              className="flex-1 min-w-[200px] px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-700 cursor-pointer"
+            >
+              <option value="ALL">Semua Cabang</option>
+              {cabangList.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </div>
         )}
       </div>
@@ -811,7 +840,9 @@ export const KafilahPesertaView: React.FC = () => {
         <span className="text-xs text-slate-400 font-normal hidden sm:inline pb-2">
           {viewMode === 'peserta'
             ? `Menampilkan ${filteredParticipants.length} dari ${participants.length} Peserta`
-            : `${filteredKafilahs.length} Grup Terdata`}
+            : filterGroupBranch === 'ALL'
+              ? `${filteredKafilahs.length} Grup Terdata`
+              : `${filteredKafilahs.length} Grup dengan peserta di cabang ${filterGroupBranch}`}
         </span>
       </div>
 
@@ -825,13 +856,24 @@ export const KafilahPesertaView: React.FC = () => {
                   <th className="py-3.5 px-5">Kode Grup</th>
                   <th className="py-3.5 px-5">Nama Grup</th>
                   <th className="py-3.5 px-5">Wilayah</th>
-                  <th className="py-3.5 px-5 text-center">Jumlah Peserta</th>
+                  <th className="py-3.5 px-5 text-center">
+                    {filterGroupBranch === 'ALL' ? 'Jumlah Peserta' : 'Peserta di Cabang Ini'}
+                  </th>
                   <th className="py-3.5 px-5">Penanggung Jawab</th>
                   <th className="py-3.5 px-5 text-center">Status</th>
                   <th className="py-3.5 px-5 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
+                {filteredKafilahs.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="py-10 px-5 text-center text-slate-400">
+                      {filterGroupBranch === 'ALL'
+                        ? 'Tidak ada grup yang sesuai pencarian.'
+                        : `Belum ada grup dengan peserta di cabang ${filterGroupBranch}.`}
+                    </td>
+                  </tr>
+                )}
                 {filteredKafilahs.map((k, idx) => (
                   <tr key={`${k.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors">
                     <td className="py-3.5 px-5 font-bold text-emerald-800 tracking-wide font-mono">
@@ -840,7 +882,7 @@ export const KafilahPesertaView: React.FC = () => {
                     <td className="py-3.5 px-5 font-semibold text-slate-900">{k.name}</td>
                     <td className="py-3.5 px-5 text-slate-500">{k.region}</td>
                     <td className="py-3.5 px-5 text-center font-bold text-slate-800 tabular-nums font-mono">
-                      {k.participantCount}
+                      {filterGroupBranch === 'ALL' ? k.participantCount : groupBranchCounts.get(k.id) || 0}
                     </td>
                     <td className="py-3.5 px-5">
                       <p className="font-medium text-slate-800">{k.contactPerson}</p>
