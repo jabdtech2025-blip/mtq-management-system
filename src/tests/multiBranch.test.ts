@@ -25,6 +25,8 @@ import {
   FilterStorageLike
 } from '../utils/viewFilterStorage';
 import { buildJudgeAssignmentLabels, resolveRekapJudgeColumns } from '../utils/judgeAssignmentLabels';
+import { applyStageParticipationRealtimeUpdate } from '../utils/realtimeRowApply';
+import { carryOverLoadedAnnotations } from '../utils/annotationCarryOver';
 import {
   canSuperviseTenant,
   filterTenantsForManagement,
@@ -712,6 +714,55 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
       assignments, assessments, participants, users
     });
     expect(!colsB.some((c) => c.id === 'j-dicabut-nilai'), `hakim dicabut tidak boleh tampil di cabang tanpa nilainya: ${JSON.stringify(colsB)}`);
+  });
+
+  check('EG-01. Realtime status peserta diterapkan per baris; perubahan berat tetap muat ulang penuh', () => {
+    const base = {
+      tenantId: 't-1', stageName: 'Penyisihan', branchName: 'Cabang A', questionId: '', assignedMaqra: 'MQ',
+      pageNumber: 1, assignedQuestions: [{ id: 'am-1', questionId: 'q-1', title: 'MQ', pageNumber: 1 }]
+    };
+    const sps = [
+      { ...base, id: '11111111-1111-4111-8111-000000000001', participantId: 'p-1', stageId: 's-1', lotteryNumber: '3', status: 'Belum Dimulai' as const },
+      { ...base, id: '11111111-1111-4111-8111-000000000002', participantId: 'p-2', stageId: 's-1', lotteryNumber: '4', status: 'Belum Dimulai' as const }
+    ] as any[];
+    const row = {
+      id: '11111111-1111-4111-8111-000000000001', participant_id: 'p-1', stage_id: 's-1', lottery_number: '3',
+      status: 'Berlangsung', provisional_score: 88.5, rank: null, champion_rank: null, champion_title: null,
+      is_qualified: false, final_score: null, finalized_at: null
+    };
+
+    const ok = applyStageParticipationRealtimeUpdate(sps, 'UPDATE', row);
+    expect(ok.applied === true, 'perubahan status harus diterapkan per baris');
+    expect(ok.next[0].status === 'Berlangsung' && ok.next[0].provisionalScore === 88.5, `baris tidak berubah: ${JSON.stringify(ok.next[0])}`);
+    expect((ok.next[0].assignedQuestions?.length ?? 0) === 1, 'maqra peserta tidak boleh hilang');
+    expect(ok.next[1] === sps[1], 'peserta lain tidak boleh tersentuh');
+
+    const undian = applyStageParticipationRealtimeUpdate(sps, 'UPDATE', { ...row, lottery_number: '9' });
+    expect(undian.applied === false, 'perubahan nomor undian harus memicu muat ulang penuh');
+    const lolos = applyStageParticipationRealtimeUpdate(sps, 'UPDATE', { ...row, is_qualified: true, rank: 1 });
+    expect(lolos.applied === false, 'perubahan kelulusan/peringkat harus memicu muat ulang penuh');
+    const baru = applyStageParticipationRealtimeUpdate(sps, 'INSERT', row);
+    expect(baru.applied === false, 'baris baru harus memicu muat ulang penuh');
+    const asing = applyStageParticipationRealtimeUpdate(sps, 'UPDATE', { ...row, id: '11111111-1111-4111-8111-000000000099' });
+    expect(asing.applied === false, 'baris yang belum dikenal perangkat harus memicu muat ulang penuh');
+  });
+
+  check('EG-02. Coretan yang sudah diunduh tidak hilang saat data dimuat ulang tanpa coretan', () => {
+    const stroke = { id: 's-1', tool: 'pen' as const, color: '#f00', size: 2, page: 1, points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] };
+    const base: any = { tenantId: 't', stageParticipationId: 'sp', stageId: 's', stageName: 'P', participantId: 'p', judgeId: 'j', judgeName: 'J', judgeField: 'Tajwid', status: 'in_progress', errorCounts: {}, deductions: {}, totalDeductions: 0, finalScore: 100, lastUpdated: '' };
+    const prev = [{ ...base, id: 'a-1', annotations: [stroke], annotationCount: 1, annotationsLoaded: true }];
+
+    const sama = carryOverLoadedAnnotations([{ ...base, id: 'a-1', annotations: [], annotationCount: 1, annotationsLoaded: false }], prev);
+    expect(sama[0].annotationsLoaded === true && sama[0].annotations.length === 1, 'coretan dengan jumlah sama harus dibawa');
+
+    const berubah = carryOverLoadedAnnotations([{ ...base, id: 'a-1', annotations: [], annotationCount: 3, annotationsLoaded: false }], prev);
+    expect(berubah[0].annotationsLoaded === false, 'jumlah coretan berbeda (diubah di perangkat lain) harus diunduh ulang');
+
+    const tanpaJumlah = carryOverLoadedAnnotations([{ ...base, id: 'a-1', annotations: [], annotationCount: undefined, annotationsLoaded: false }], prev);
+    expect(tanpaJumlah[0].annotationsLoaded === true && tanpaJumlah[0].annotations.length === 1, 'jumlah tidak diketahui: pakai coretan di perangkat');
+
+    const baru = carryOverLoadedAnnotations([{ ...base, id: 'a-2', annotations: [], annotationCount: 2, annotationsLoaded: false }], prev);
+    expect(baru[0].annotationsLoaded === false, 'lembar yang belum pernah diunduh tetap ditandai belum termuat');
   });
 
   const passed = results.filter((r) => r.success).length;

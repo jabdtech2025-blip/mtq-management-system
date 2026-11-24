@@ -139,6 +139,36 @@ export interface AssessmentRowLookups {
  * Ubah satu baris judge_assessments (dari query atau dari event realtime) menjadi JudgeAssessment.
  * Dipakai bersama oleh pemuatan workspace penuh dan pembaruan realtime per baris.
  */
+/**
+ * Coretan mushaf (annotations) hanya diunduh saat dibutuhkan (hemat egress).
+ * - Baris memuat kolom `annotations`: coretan termuat.
+ * - Baris tanpa `annotations`: pakai `annotation_count`. Bila 0, tidak ada yang perlu diunduh (dianggap termuat).
+ */
+export function mapAnnotationFields(
+  a: Record<string, unknown>
+): Pick<JudgeAssessment, 'annotations' | 'annotationCount' | 'annotationsLoaded'> {
+  if (Object.prototype.hasOwnProperty.call(a, 'annotations')) {
+    const list = Array.isArray(a.annotations) ? (a.annotations as JudgeAssessment['annotations']) : [];
+    return { annotations: list, annotationCount: list.length, annotationsLoaded: true };
+  }
+  if (!Object.prototype.hasOwnProperty.call(a, 'annotation_count')) {
+    // Jumlah tidak diketahui (mis. payload realtime tanpa kolom coretan): anggap belum termuat
+    return { annotations: [], annotationCount: undefined, annotationsLoaded: false };
+  }
+  const count = Number(a.annotation_count || 0);
+  return { annotations: [], annotationCount: count, annotationsLoaded: count === 0 };
+}
+
+/** Kolom judge_assessments untuk muat penuh: semua kecuali `annotations` (diunduh terpisah saat lembar dibuka). */
+export const ASSESSMENT_LIST_COLUMNS =
+  'id, tenant_id, stage_participation_id, assigned_maqra_id, judge_profile_id, rubric_version_id, status, ' +
+  'total_deductions, final_score, field_scores, error_counts, is_locked, reopened_at, reopened_by, reopen_reason, ' +
+  'finalized_at, created_at, updated_at, annotation_count';
+
+/** Kolom stage_result_snapshots untuk muat penuh: tanpa `rankings_snapshot` (dimuat di halaman Hasil). */
+export const SNAPSHOT_LIST_COLUMNS =
+  'id, tenant_id, stage_id, branch_id, quota, created_at, finalized_by, rubric_version_id, tie_break_rule_used';
+
 export function mapJudgeAssessmentRow(a: Record<string, unknown>, lookups: AssessmentRowLookups): JudgeAssessment {
   const spId = String(a.stage_participation_id);
   const spObj = lookups.spById.get(spId);
@@ -164,7 +194,7 @@ export function mapJudgeAssessmentRow(a: Record<string, unknown>, lookups: Asses
     fieldScores: (a.field_scores as Record<string, number>) || {},
     totalDeductions: Number(a.total_deductions || 0),
     finalScore: Number(a.final_score || 100),
-    annotations: (a.annotations as JudgeAssessment['annotations']) || [],
+    ...mapAnnotationFields(a),
     rubricVersionId: String(a.rubric_version_id),
     isLocked: Boolean(a.is_locked),
     reopenedAt: a.reopened_at ? String(a.reopened_at) : undefined,
@@ -181,6 +211,76 @@ export interface TenantRealtimeEvent {
   eventType: string;
   newRow?: Record<string, unknown>;
   oldRow?: Record<string, unknown>;
+}
+
+/**
+ * Cache tujuan simpan lembar penilaian (partisipasi babak + baris maqra yang sudah dipastikan ada di database).
+ * Hanya hidup di memori tab ini. Kuncinya memuat semua ID yang menentukan baris, jadi bila maqra/babak
+ * berganti, kuncinya ikut berganti.
+ */
+const assessmentSaveTargetCache = new Map<string, { spId: string; amId: string }>();
+
+function buildAssessmentTargetCacheKey(
+  assessment: Pick<JudgeAssessment, 'tenantId' | 'stageParticipationId' | 'questionId' | 'judgeId' | 'rubricVersionId'>,
+  contextSpId?: string,
+  assignedMaqraRecordId?: string
+): string {
+  return [
+    assessment.tenantId,
+    contextSpId || assessment.stageParticipationId,
+    assessment.questionId || '',
+    assignedMaqraRecordId || '',
+    assessment.judgeId,
+    assessment.rubricVersionId || ''
+  ].join('|');
+}
+
+/** Penolakan database karena referensi tidak lagi valid (FK hilang / baris tidak ada). */
+function isReferenceRejection(code?: string, message?: string): boolean {
+  const m = (message || '').toLowerCase();
+  return (
+    code === '23503' ||
+    code === '23502' ||
+    m.includes('foreign key') ||
+    m.includes('violates') ||
+    m.includes('tidak ditemukan') ||
+    m.includes('does not exist')
+  );
+}
+
+/** Untuk pengujian & saat keluar sesi: kosongkan cache tujuan simpan. */
+export function clearAssessmentSaveTargetCache(): void {
+  assessmentSaveTargetCache.clear();
+}
+
+type WorkspaceClient = NonNullable<ReturnType<typeof getActiveClient>>;
+type WorkspaceQueryResult = { data: Record<string, unknown>[] | null; error: { message?: string } | null };
+
+/** Kolom baru belum ada di database (migrasi belum dijalankan): pakai cara lama agar aplikasi tetap jalan. */
+function isMissingColumnError(error: { message?: string; code?: string } | null | undefined, column: string): boolean {
+  const m = (error?.message || '').toLowerCase();
+  return Boolean(error) && (error?.code === '42703' || (m.includes(column) && (m.includes('does not exist') || m.includes('could not find'))));
+}
+
+/** Lembar penilaian untuk muat penuh, TANPA kolom coretan mushaf (hemat egress). */
+async function fetchAssessmentsForWorkspace(client: WorkspaceClient, tenantUuid: string): Promise<WorkspaceQueryResult> {
+  const slim = (await client
+    .from('judge_assessments')
+    .select(ASSESSMENT_LIST_COLUMNS)
+    .eq('tenant_id', tenantUuid)) as WorkspaceQueryResult;
+  if (!slim.error || !isMissingColumnError(slim.error, 'annotation_count')) return slim;
+  // Migrasi 20261125 belum dijalankan: unduh lengkap seperti sebelumnya
+  return (await client.from('judge_assessments').select('*').eq('tenant_id', tenantUuid)) as WorkspaceQueryResult;
+}
+
+/** Snapshot hasil babak untuk muat penuh, TANPA daftar peringkat (dimuat di halaman Hasil). */
+async function fetchSnapshotsForWorkspace(client: WorkspaceClient, tenantUuid: string): Promise<WorkspaceQueryResult> {
+  const slim = (await client
+    .from('stage_result_snapshots')
+    .select(SNAPSHOT_LIST_COLUMNS)
+    .eq('tenant_id', tenantUuid)) as WorkspaceQueryResult;
+  if (!slim.error) return slim;
+  return (await client.from('stage_result_snapshots').select('*').eq('tenant_id', tenantUuid)) as WorkspaceQueryResult;
 }
 
 export const supabaseDataService = {
@@ -500,6 +600,7 @@ export const supabaseDataService = {
   },
 
   async signOut(): Promise<{ success: boolean; message?: string }> {
+    assessmentSaveTargetCache.clear();
     const client = getActiveClient();
     if (!this.isLive() || !client) return { success: true };
     const { error } = await client.auth.signOut();
@@ -881,8 +982,8 @@ export const supabaseDataService = {
       client.from('deduction_rules').select('*'),
       client.from('competition_rule_configs').select('*').eq('tenant_id', tenantUuid),
       client.from('judge_assignments').select('*, profiles(name)').eq('tenant_id', tenantUuid),
-      client.from('judge_assessments').select('*').eq('tenant_id', tenantUuid),
-      client.from('stage_result_snapshots').select('*').eq('tenant_id', tenantUuid),
+      fetchAssessmentsForWorkspace(client, tenantUuid),
+      fetchSnapshotsForWorkspace(client, tenantUuid),
       client.from('audit_logs').select('*').eq('tenant_id', tenantUuid).order('created_at', { ascending: false }).limit(50)
     ]);
 
@@ -1539,7 +1640,8 @@ export const supabaseDataService = {
         tieBreakRuleUsed: String(s.tie_break_rule_used || ''),
         rankings: Array.isArray(s.rankings_snapshot)
           ? (s.rankings_snapshot as StageResultSnapshot['rankings'])
-          : []
+          : [],
+        rankingsLoaded: Object.prototype.hasOwnProperty.call(s, 'rankings_snapshot')
       };
     });
 
@@ -2250,7 +2352,8 @@ export const supabaseDataService = {
       stageParticipation?: StageParticipation;
       participant?: Participant;
       levelId?: string | null;
-    }
+    },
+    internal?: { skipTargetCache?: boolean }
   ): Promise<RpcServiceResult> {
     const client = getActiveClient();
     if (!this.isLive() || !client) {
@@ -2259,6 +2362,24 @@ export const supabaseDataService = {
         mode: 'local_offline_fallback',
         message: 'Mode lokal aktif: perubahan lembar penilaian disimpan di penyimpanan lokal.'
       };
+    }
+
+    // Hemat permintaan: lembar yang sama disimpan berkali-kali selama dinilai (setiap +/- dan coretan).
+    // Partisipasi babak & baris maqra cukup dipastikan sekali; simpan berikutnya langsung upsert.
+    // Bila database menolak (mis. maqra diganti/dihapus), cache dibuang dan jalur lengkap diulang sekali.
+    const targetCacheKey = buildAssessmentTargetCacheKey(
+      assessment,
+      contextRecords?.stageParticipation?.id,
+      assignedMaqraRecordId || assessment.assignedMaqraId
+    );
+    const cachedTarget = internal?.skipTargetCache ? undefined : assessmentSaveTargetCache.get(targetCacheKey);
+    if (cachedTarget) {
+      const cachedRes = await this.upsertAssessmentRow(client, assessment, cachedTarget.spId, cachedTarget.amId);
+      if (cachedRes.success || !isReferenceRejection(cachedRes.errorCode, cachedRes.message)) {
+        return cachedRes.result;
+      }
+      assessmentSaveTargetCache.delete(targetCacheKey);
+      return this.syncAssessmentToRemote(assessment, assignedMaqraRecordId, contextRecords, { skipTargetCache: true });
     }
 
     let effectiveSpId = assessment.stageParticipationId;
@@ -2334,6 +2455,62 @@ export const supabaseDataService = {
       };
     }
 
+    const fullRes = await this.upsertAssessmentRow(client, assessment, effectiveSpId, realAssignedMaqraId);
+    if (fullRes.success) {
+      assessmentSaveTargetCache.set(targetCacheKey, { spId: effectiveSpId, amId: realAssignedMaqraId });
+    }
+    return fullRes.result;
+  },
+
+  /**
+   * Hemat egress: unduh coretan mushaf hanya untuk lembar yang dibuka.
+   * Mengembalikan peta id lembar -> daftar coretan. Lembar yang tidak ditemukan tidak ada di peta.
+   */
+  async fetchAssessmentAnnotations(
+    assessmentIds: string[]
+  ): Promise<{ success: boolean; message?: string; annotationsById: Record<string, JudgeAssessment['annotations']> }> {
+    const client = getActiveClient();
+    const ids = Array.from(new Set(assessmentIds.filter((id) => isValidUuid(id))));
+    if (!this.isLive() || !client) {
+      return { success: false, message: 'Koneksi database tidak tersedia.', annotationsById: {} };
+    }
+    if (ids.length === 0) return { success: true, annotationsById: {} };
+    const { data, error } = await client.from('judge_assessments').select('id, annotations').in('id', ids);
+    if (error) return { success: false, message: error.message, annotationsById: {} };
+    const annotationsById: Record<string, JudgeAssessment['annotations']> = {};
+    ((data as Record<string, unknown>[]) || []).forEach((row) => {
+      annotationsById[String(row.id)] = Array.isArray(row.annotations)
+        ? (row.annotations as JudgeAssessment['annotations'])
+        : [];
+    });
+    return { success: true, annotationsById };
+  },
+
+  /** Hemat egress: unduh daftar peringkat snapshot hasil babak hanya saat halaman Hasil membutuhkannya. */
+  async fetchStageSnapshotRankings(
+    snapshotId: string
+  ): Promise<{ success: boolean; message?: string; rankings: StageResultSnapshot['rankings'] }> {
+    const client = getActiveClient();
+    if (!this.isLive() || !client || !isValidUuid(snapshotId)) {
+      return { success: false, message: 'Koneksi database tidak tersedia.', rankings: [] };
+    }
+    const { data, error } = await client
+      .from('stage_result_snapshots')
+      .select('id, rankings_snapshot')
+      .eq('id', snapshotId)
+      .maybeSingle();
+    if (error) return { success: false, message: error.message, rankings: [] };
+    const raw = (data as Record<string, unknown> | null)?.rankings_snapshot;
+    return { success: true, rankings: Array.isArray(raw) ? (raw as StageResultSnapshot['rankings']) : [] };
+  },
+
+  /** Upsert satu baris judge_assessments (draf). Tidak pernah mengirim status final / terkunci. */
+  async upsertAssessmentRow(
+    client: NonNullable<ReturnType<typeof getActiveClient>>,
+    assessment: JudgeAssessment,
+    effectiveSpId: string,
+    realAssignedMaqraId: string
+  ): Promise<{ success: boolean; errorCode?: string; message?: string; result: RpcServiceResult }> {
     // Pastikan tidak pernah mengirim status 'finalized' atau is_locked = true lewat Data API
     const { data: upsertedRow, error } = await client
       .from('judge_assessments')
@@ -2350,7 +2527,8 @@ export const supabaseDataService = {
           final_score: assessment.finalScore,
           field_scores: assessment.fieldScores || {},
           error_counts: assessment.errorCounts || {},
-          annotations: assessment.annotations || [],
+          // Coretan yang belum diunduh TIDAK dikirim, agar coretan di database tidak tertimpa kosong
+          ...(assessment.annotationsLoaded === false ? {} : { annotations: assessment.annotations || [] }),
           is_locked: false,
           updated_at: new Date().toISOString()
         },
@@ -2362,8 +2540,13 @@ export const supabaseDataService = {
     if (error) {
       return {
         success: false,
-        mode: 'supabase_live',
-        message: error.message
+        errorCode: (error as { code?: string }).code,
+        message: error.message,
+        result: {
+          success: false,
+          mode: 'supabase_live',
+          message: error.message
+        }
       };
     }
 
@@ -2371,12 +2554,15 @@ export const supabaseDataService = {
 
     return {
       success: true,
-      mode: 'supabase_live',
-      message: 'Lembar penilaian draf tersinkronisasi ke tabel judge_assessments.',
-      data: {
-        assessmentId: persistedAssessmentId,
-        stageParticipationId: effectiveSpId,
-        assignedMaqraId: realAssignedMaqraId
+      result: {
+        success: true,
+        mode: 'supabase_live',
+        message: 'Lembar penilaian draf tersinkronisasi ke tabel judge_assessments.',
+        data: {
+          assessmentId: persistedAssessmentId,
+          stageParticipationId: effectiveSpId,
+          assignedMaqraId: realAssignedMaqraId
+        }
       }
     };
   },

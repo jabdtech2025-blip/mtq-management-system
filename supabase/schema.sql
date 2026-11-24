@@ -438,6 +438,10 @@ CREATE TABLE IF NOT EXISTS judge_assessments (
     field_scores JSONB DEFAULT '{}'::jsonb,
     error_counts JSONB DEFAULT '{}'::jsonb,
     annotations JSONB DEFAULT '[]'::jsonb,
+    -- Jumlah coretan (dihitung otomatis). Lihat migrasi 20261125_annotation_count.sql
+    annotation_count INTEGER GENERATED ALWAYS AS (
+        CASE WHEN jsonb_typeof(annotations) = 'array' THEN jsonb_array_length(annotations) ELSE 0 END
+    ) STORED,
     is_locked BOOLEAN NOT NULL DEFAULT false,
     reopened_at TIMESTAMPTZ,
     reopened_by UUID REFERENCES profiles(id),

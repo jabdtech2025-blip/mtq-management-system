@@ -719,9 +719,6 @@ export const RekapNilaiView: React.FC = () => {
                           <p className="text-xs text-slate-500 mt-0.5">
                             {p.participantId} · {p.kafilahName}
                           </p>
-                          <p className="text-[11px] text-slate-400 mt-0.5">
-                            {p.branchName} · {p.stageName}
-                          </p>
                         </td>
                         <td className="px-3 py-3 border-r border-slate-200 text-center">
                           <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
@@ -778,9 +775,6 @@ export const RekapNilaiView: React.FC = () => {
                           <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {p.participantId} · {p.kafilahName}
-                          </p>
-                          <p className="text-[11px] text-slate-400 mt-0.5">
-                            {p.branchName} · {p.stageName}
                           </p>
                         </td>
                         <td className="px-3 py-3 border-r border-slate-200 text-center">
@@ -876,9 +870,6 @@ export const RekapNilaiView: React.FC = () => {
                               </p>
                               <p className="text-xs text-slate-500 mt-0.5">
                                 {p.participantId} · {p.kafilahName}
-                              </p>
-                              <p className="text-[11px] text-slate-400 mt-0.5">
-                                {p.branchName} · {p.stageName}
                               </p>
                             </td>
 
@@ -1184,9 +1175,9 @@ export const RekapNilaiView: React.FC = () => {
                             <td className="px-4 py-3 align-top">
                               <p className="font-bold text-slate-900">{j.name}</p>
                               <p className="text-xs text-slate-500 mt-0.5">{j.field}</p>
-                              {asm?.annotations && asm.annotations.length > 0 && (
+                              {asm && (asm.annotationCount ?? asm.annotations?.length ?? 0) > 0 && (
                                 <span className="inline-block text-xs text-slate-400 mt-1 font-mono">
-                                  {asm.annotations.length} anotasi mushaf
+                                  {asm.annotationCount ?? asm.annotations.length} anotasi mushaf
                                 </span>
                               )}
                             </td>

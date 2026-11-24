@@ -376,6 +376,13 @@ export interface JudgeAssessment {
   fieldScores?: Record<string, number>;      // { "Tajwid": 28.5, "Lagu": 24.0, ... }
   fieldDeductions?: Record<string, number>;  // { "Tajwid": 1.5, ... }
   annotations: CanvasStroke[];
+  /** Jumlah coretan menurut database (kolom annotation_count). Tersedia walau coretan belum diunduh. */
+  annotationCount?: number;
+  /**
+   * false = coretan lembar ini belum diunduh (hemat egress). Jangan menyimpan coretan pada lembar ini
+   * sebelum coretan dimuat, agar coretan di database tidak tertimpa. undefined/true = sudah termuat.
+   */
+  annotationsLoaded?: boolean;
   note?: string;
   rubricVersion?: string;
   rubricVersionId?: string;
@@ -424,6 +431,8 @@ export interface StageResultSnapshot {
   rubricVersionId: string;
   tieBreakRuleUsed: string;
   rankings: ParticipantRankingItem[];
+  /** false = daftar peringkat snapshot belum diunduh (dimuat saat halaman Hasil dibuka). */
+  rankingsLoaded?: boolean;
 }
 
 export interface ActivityLogItem {

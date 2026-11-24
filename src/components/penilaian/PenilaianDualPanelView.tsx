@@ -57,6 +57,7 @@ export const PenilaianDualPanelView: React.FC = () => {
     initializeAssessment,
     updateErrorCount,
     saveAnnotations,
+    loadAssessmentAnnotations,
     finalizeAssessment,
     getJudgeAssessment,
     getParticipantStageQuestions,
@@ -125,6 +126,34 @@ export const PenilaianDualPanelView: React.FC = () => {
     : undefined;
 
   const isFinalized = currentAssessment?.status === 'finalized';
+
+  // Hemat egress: coretan mushaf lembar ini diunduh saat lembar dibuka. Selama belum termuat, pena/penghapus
+  // dinonaktifkan agar coretan lama di database tidak tertimpa.
+  const annotationsPending = Boolean(currentAssessment && currentAssessment.annotationsLoaded === false);
+  const [annotationsLoadFailed, setAnnotationsLoadFailed] = useState(false);
+  const pendingAssessmentId = annotationsPending ? currentAssessment?.id : undefined;
+  const loadAnnotationsRef = useRef(loadAssessmentAnnotations);
+  loadAnnotationsRef.current = loadAssessmentAnnotations;
+  useEffect(() => {
+    if (!pendingAssessmentId) {
+      setAnnotationsLoadFailed(false);
+      return;
+    }
+    let cancelled = false;
+    const tryLoad = () => {
+      void loadAnnotationsRef.current([pendingAssessmentId]).then((ok) => {
+        if (!cancelled) setAnnotationsLoadFailed(!ok);
+      });
+    };
+    tryLoad();
+    // Coba lagi saat perangkat kembali online
+    const onOnline = () => tryLoad();
+    window.addEventListener('online', onOnline);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('online', onOnline);
+    };
+  }, [pendingAssessmentId]);
 
   // Canvas & Image refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -302,7 +331,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Erase stroke near point without white paint!
   const eraseStrokesNear = (point: NormalizedPoint) => {
-    if (!currentParticipant || isFinalized || isEditLocked) return;
+    if (!currentParticipant || isFinalized || isEditLocked || annotationsPending) return;
     const ERASE_RADIUS = 0.035; // Normalized radius
 
     const remainingStrokes = strokes.filter((s) => {
@@ -323,7 +352,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Pointer event handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!currentParticipant || isFinalized || isEditLocked || activeTool === 'scroll') return;
+    if (!currentParticipant || isFinalized || isEditLocked || annotationsPending || activeTool === 'scroll') return;
     const pt = getNormalizedPoint(e);
     if (!pt) return;
 
@@ -377,7 +406,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Undo stroke on current page
   const handleUndo = () => {
-    if (!currentParticipant || isFinalized || isEditLocked) return;
+    if (!currentParticipant || isFinalized || isEditLocked || annotationsPending) return;
     const pageStrokes = strokes.filter((s) => s.page === currentPage);
     if (pageStrokes.length === 0) return;
 
@@ -389,7 +418,7 @@ export const PenilaianDualPanelView: React.FC = () => {
 
   // Clear current page strokes only
   const handleConfirmClearPage = () => {
-    if (!currentParticipant || isFinalized || isEditLocked) return;
+    if (!currentParticipant || isFinalized || isEditLocked || annotationsPending) return;
     const updated = strokes.filter((s) => s.page !== currentPage);
     setStrokes(updated);
     saveAnnotations(currentParticipant.id, activeJudgeId, updated, activeStageName, activeQuestionId);
@@ -876,11 +905,18 @@ export const PenilaianDualPanelView: React.FC = () => {
                 onPointerCancel={handlePointerUp}
                 style={{ touchAction: activeTool === 'scroll' ? 'auto' : 'none' }}
                 className={`absolute inset-0 w-full h-full ${
-                  isEditLocked || isFinalized || activeTool === 'scroll'
+                  isEditLocked || isFinalized || annotationsPending || activeTool === 'scroll'
                     ? 'cursor-grab pointer-events-none'
                     : 'cursor-crosshair'
                 }`}
               />
+              {annotationsPending && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 rounded-full bg-white/95 border border-amber-200 shadow-sm px-3 py-1 text-xs font-semibold text-amber-800 whitespace-nowrap">
+                  {annotationsLoadFailed
+                    ? 'Coretan sebelumnya belum termuat (periksa koneksi). Pena dinonaktifkan sementara.'
+                    : 'Memuat coretan sebelumnya…'}
+                </div>
+              )}
             </div>
           </div>
 

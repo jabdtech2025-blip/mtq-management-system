@@ -69,6 +69,8 @@ import {
   supabase
 } from '../lib/supabaseClient';
 import { generateUuid, toDeterministicUuid, isValidUuid } from '../utils/uuid';
+import { applyStageParticipationRealtimeUpdate } from '../utils/realtimeRowApply';
+import { carryOverLoadedAnnotations, carryOverSnapshotRankings } from '../utils/annotationCarryOver';
 import {
   OFFICIAL_SENI_BACA_RUBRIC,
   INITIAL_RUBRIC_VERSIONS,
@@ -222,6 +224,10 @@ interface MtqContextType {
     stageName?: string,
     questionId?: string
   ) => void;
+  /** Hemat egress: unduh coretan mushaf untuk lembar yang dibuka. true bila berhasil (atau tidak perlu). */
+  loadAssessmentAnnotations: (assessmentIds: string[]) => Promise<boolean>;
+  /** Hemat egress: unduh daftar peringkat snapshot hasil babak yang ditampilkan. */
+  loadStageSnapshotRankings: (snapshotId: string) => Promise<boolean>;
   finalizeAssessment: (
     participantId: string,
     judgeId: string,
@@ -1529,9 +1535,93 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Pemeriksaan koneksi nyata ke Supabase, sinkronisasi profil Auth, dan hidrasi data workspace.
    * Dilindungi oleh `authRequestGenRef` agar respons lama (stale) tidak pernah menimpa sesi login/logout baru.
    */
-  const refreshSupabaseConnection = async (): Promise<SupabaseConnectionInfo> => {
+  const refreshSupabaseConnection = async (
+    options?: { lightweight?: boolean }
+  ): Promise<SupabaseConnectionInfo> => {
     if (isOfflineDemoRef.current) return connectionInfo;
     const hadAuthorizedSession = Boolean(authenticatedProfileRef.current) && hasHydratedWorkspaceRef.current;
+
+    // Terapkan hasil muat penuh workspace ke state (dipakai jalur lengkap & jalur ringan)
+    const applyHydratedWorkspace = (
+      hydrated: NonNullable<Awaited<ReturnType<typeof supabaseDataService.fetchTenantWorkspaceResult>>['payload']>,
+      authUserId: string,
+      fallbackUser?: User
+    ) => {
+      setDataSourceMode('supabase_live');
+      setWorkspaceError(null);
+
+      if (hydrated.tenants && hydrated.tenants.length > 0) {
+        setTenants(hydrated.tenants);
+      }
+      const dbUsers = hydrated.users || [];
+      const hasCurrentAuthUser = dbUsers.some((u) => u.id === authUserId);
+      const combinedUsers = hasCurrentAuthUser ? dbUsers : fallbackUser ? [fallbackUser, ...dbUsers] : dbUsers;
+      const uniqueUsers = Array.from(new Map(combinedUsers.map((u) => [u.id, u])).values());
+      setUsers(uniqueUsers);
+
+      setCabangList(hydrated.cabangList || []);
+      setJenjangList(hydrated.jenjangList || []);
+      setKafilahs(hydrated.kafilahs || []);
+      setStages(hydrated.stages || []);
+      setQuestions(hydrated.questions || []);
+      const rawParticipants = hydrated.participants || [];
+      const uniqueHydratedParticipants = Array.from(new Map(rawParticipants.map((p) => [p.id, p])).values());
+      setParticipants(uniqueHydratedParticipants);
+      setStageParticipations(hydrated.stageParticipations || []);
+      stageParticipationsRef.current = hydrated.stageParticipations || [];
+      setErrorCategories(hydrated.errorCategories || []);
+      setCompetitionRules(hydrated.competitionRules || []);
+      setJudgeAssignments(hydrated.judgeAssignments || []);
+      // Coretan mushaf tidak ikut muat penuh (hemat egress): bawa coretan yang sudah diunduh di perangkat ini
+      const mergedAssessments = carryOverLoadedAnnotations(
+        mergeUnsyncedLocalAssessments(hydrated.assessments || []),
+        assessmentsRef.current
+      );
+      setAssessments(mergedAssessments);
+      assessmentsRef.current = mergedAssessments;
+      hasHydratedWorkspaceRef.current = true;
+      setStageSnapshots((prev) => carryOverSnapshotRankings(hydrated.stageSnapshots || [], prev));
+      setAuditLogs(hydrated.auditLogs || []);
+      setLotteryDrawLogs(hydrated.lotteryDrawLogs || []);
+      const hydratedRubrics = hydrated.rubricVersions || [];
+      const deletedIds = (() => {
+        try {
+          return new Set(JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'deleted_rubrics') || '[]'));
+        } catch {
+          return new Set<string>();
+        }
+      })();
+      const filteredRubrics = hydratedRubrics.filter(
+        (r) => !deletedIds.has(r.id) && !deletedIds.has(toDeterministicUuid(r.id))
+      );
+      setRubricVersions(filteredRubrics);
+      // Sesi & data sudah pulih: kirim antrean yang tertunda (mis. koreksi saat offline)
+      setTimeout(() => {
+        void outboxSyncService.flushPendingQueue();
+      }, 0);
+    };
+
+    // Hemat egress: muat ulang rutin (realtime & berkala) pada sesi yang sudah sah cukup memuat data workspace.
+    // Pemeriksaan koneksi dan profil akun hanya dijalankan saat masuk, F5, atau koneksi pulih (jalur lengkap).
+    const lightweightProfile = authenticatedProfileRef.current;
+    if (options?.lightweight && hadAuthorizedSession && lightweightProfile && isValidUuid(currentTenantId)) {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setSyncStatus('Offline — perubahan disimpan di perangkat dan dikirim saat tersambung');
+        return connectionInfo;
+      }
+      const lightGen = ++authRequestGenRef.current;
+      const lightHydration = await supabaseDataService.fetchTenantWorkspaceResult(currentTenantId);
+      if (lightGen !== authRequestGenRef.current || isOfflineDemoRef.current) return connectionInfo;
+      if (lightHydration.success && lightHydration.payload) {
+        const existingSelf = usersRef.current.find((u) => u.id === lightweightProfile.authUserId);
+        applyHydratedWorkspace(lightHydration.payload, lightweightProfile.authUserId, existingSelf);
+        setSyncStatus(connectionInfo.statusLabel);
+        setLastSyncTime(getWibTime());
+      } else {
+        setSyncStatus('Gagal memuat ulang data dari server — menampilkan data terakhir');
+      }
+      return connectionInfo;
+    }
 
     // Saat perangkat offline, jangan memeriksa ulang sesi: pemeriksaan pasti gagal dan akan
     // mengeluarkan hakim dari aplikasi. Data tetap di layar, perubahan masuk antrean.
@@ -1687,54 +1777,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (hydration.success && hydration.payload) {
         const hydrated = hydration.payload;
-        setDataSourceMode('supabase_live');
-        setWorkspaceError(null);
-
-        if (hydrated.tenants && hydrated.tenants.length > 0) {
-          setTenants(hydrated.tenants);
-        }
-        const dbUsers = hydrated.users || [];
-        const hasCurrentAuthUser = dbUsers.some((u) => u.id === profile.authUserId);
-        const combinedUsers = hasCurrentAuthUser ? dbUsers : [mappedUser, ...dbUsers];
-        const uniqueUsers = Array.from(new Map(combinedUsers.map((u) => [u.id, u])).values());
-        setUsers(uniqueUsers);
-
-        setCabangList(hydrated.cabangList || []);
-        setJenjangList(hydrated.jenjangList || []);
-        setKafilahs(hydrated.kafilahs || []);
-        setStages(hydrated.stages || []);
-        setQuestions(hydrated.questions || []);
-        const rawParticipants = hydrated.participants || [];
-        const uniqueHydratedParticipants = Array.from(new Map(rawParticipants.map((p) => [p.id, p])).values());
-        setParticipants(uniqueHydratedParticipants);
-        setStageParticipations(hydrated.stageParticipations || []);
-        stageParticipationsRef.current = hydrated.stageParticipations || [];
-        setErrorCategories(hydrated.errorCategories || []);
-        setCompetitionRules(hydrated.competitionRules || []);
-        setJudgeAssignments(hydrated.judgeAssignments || []);
-        const mergedAssessments = mergeUnsyncedLocalAssessments(hydrated.assessments || []);
-        setAssessments(mergedAssessments);
-        assessmentsRef.current = mergedAssessments;
-        hasHydratedWorkspaceRef.current = true;
-        setStageSnapshots(hydrated.stageSnapshots || []);
-        setAuditLogs(hydrated.auditLogs || []);
-        setLotteryDrawLogs(hydrated.lotteryDrawLogs || []);
-        const hydratedRubrics = hydrated.rubricVersions || [];
-        const deletedIds = (() => {
-          try {
-            return new Set(JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'deleted_rubrics') || '[]'));
-          } catch {
-            return new Set<string>();
-          }
-        })();
-        const filteredRubrics = hydratedRubrics.filter(
-          (r) => !deletedIds.has(r.id) && !deletedIds.has(toDeterministicUuid(r.id))
-        );
-        setRubricVersions(filteredRubrics);
-        // Sesi & data sudah pulih: kirim antrean yang tertunda (mis. koreksi saat offline)
-        setTimeout(() => {
-          void outboxSyncService.flushPendingQueue();
-        }, 0);
+        applyHydratedWorkspace(hydrated, profile.authUserId, mappedUser);
       } else if (hadAuthorizedSession) {
         // Workspace sudah pernah termuat: gagal muat ulang (mis. jaringan) tidak boleh mengosongkan layar.
         setSyncStatus('Gagal memuat ulang data dari server — menampilkan data terakhir');
@@ -1962,7 +2005,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   judgeAssignmentsRef.current = judgeAssignments;
   const usersRef = useRef<User[]>(users);
   usersRef.current = users;
-  const refreshFnRef = useRef<() => Promise<SupabaseConnectionInfo>>(async () => connectionInfo);
+  const refreshFnRef = useRef<(options?: { lightweight?: boolean }) => Promise<SupabaseConnectionInfo>>(
+    async () => connectionInfo
+  );
   refreshFnRef.current = refreshSupabaseConnection;
 
   /**
@@ -2006,7 +2051,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!judgeInfoById.has(u.id)) judgeInfoById.set(u.id, { name: u.name, field: u.judgeField || 'Dewan Hakim' });
     });
 
-    const mapped = mapJudgeAssessmentRow(row, { spById, questionIdByAssignedMaqraId, judgeInfoById });
+    // Payload realtime bisa tanpa kolom coretan (mis. coretan tidak berubah): bawa coretan yang sudah termuat
+    const mapped = carryOverLoadedAnnotations(
+      [mapJudgeAssessmentRow(row, { spById, questionIdByAssignedMaqraId, judgeInfoById })],
+      assessmentsRef.current
+    )[0];
     // Lembar yang masih di antrean / sedang dikirim dari perangkat ini: versi lokal tetap menang
     const merged = mergeUnsyncedLocalAssessments([mapped]);
     const incoming = merged.find((a) => toDeterministicUuid(a.id) === mapped.id) || mapped;
@@ -2025,16 +2074,19 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Realtime Supabase + sinyal antar-tab.
   // - judge_assessments: baris yang berubah diterapkan langsung (tanpa memuat ulang ±25 tabel).
-  // - stage_participations / stages (jarang berubah: undian, finalisasi, pengesahan): muat ulang penuh,
+  // - stage_participations: perubahan status / nilai sementara diterapkan per baris (hemat egress).
+  //   Perubahan berat (undian, pindah babak, peringkat, kelulusan, juara) dan stages: muat ulang data,
   //   digabung dalam jeda 2 detik agar banyak event beruntun hanya memicu satu kali muat ulang.
   // - Koneksi realtime pulih setelah terputus: muat ulang penuh sekali untuk menutup celah.
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    const scheduleFullRefresh = (label: string, delayMs = 2000) => {
+    // lightweight = hanya memuat data workspace (tanpa cek koneksi & profil akun) untuk menghemat egress.
+    // Koneksi realtime yang pulih tetap memakai jalur lengkap.
+    const scheduleFullRefresh = (label: string, delayMs = 2000, lightweight = true) => {
       setSyncStatus(label);
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
-        void refreshFnRef.current();
+        void refreshFnRef.current({ lightweight });
       }, delayMs);
     };
 
@@ -2063,20 +2115,31 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return;
         }
         if (event.table === 'connection') {
-          scheduleFullRefresh('Koneksi realtime pulih — menyelaraskan data...', 500);
+          scheduleFullRefresh('Koneksi realtime pulih — menyelaraskan data...', 500, false);
           return;
+        }
+        if (event.table === 'stage_participations') {
+          // Perubahan status/nilai sementara peserta diterapkan per baris; perubahan berat tetap muat ulang penuh.
+          const res = applyStageParticipationRealtimeUpdate(stageParticipationsRef.current, event.eventType, event.newRow);
+          if (res.applied) {
+            stageParticipationsRef.current = res.next;
+            setStageParticipations(res.next);
+            setLastSyncTime(getWibTime());
+            return;
+          }
         }
         scheduleFullRefresh(`Sinkronisasi Realtime (${event.table})...`);
       });
     }
 
-    // Pengaman: muat ulang penuh sesekali (tiap 5 menit, hanya saat tab terlihat) bila ada event yang terlewat
+    // Pengaman: muat ulang data sesekali (tiap 30 menit, hanya saat tab terlihat) bila ada event yang terlewat.
+    // Sebelumnya tiap 5 menit: ini penyumbang egress terbesar karena setiap layar terbuka mengunduh ulang seluruh data.
     const safetyTimer = realtimeActive
       ? setInterval(() => {
           if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-            void refreshFnRef.current();
+            void refreshFnRef.current({ lightweight: true });
           }
-        }, 5 * 60 * 1000)
+        }, 30 * 60 * 1000)
       : null;
 
     return () => {
@@ -3551,6 +3614,40 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   /**
+   * Hemat egress: coretan mushaf diunduh hanya untuk lembar yang dibuka.
+   * Hanya lembar yang masih "belum termuat" yang diisi, supaya coretan yang sedang dibuat di perangkat ini
+   * tidak tertimpa.
+   */
+  const loadAssessmentAnnotations = async (assessmentIds: string[]): Promise<boolean> => {
+    const pending = assessmentsRef.current.filter(
+      (a) => assessmentIds.includes(a.id) && a.annotationsLoaded === false
+    );
+    if (pending.length === 0) return true;
+    const res = await supabaseDataService.fetchAssessmentAnnotations(pending.map((a) => toDeterministicUuid(a.id)));
+    if (!res.success) return false;
+    setAssessments((prev) => {
+      const next = prev.map((a) => {
+        if (a.annotationsLoaded !== false) return a;
+        const list = res.annotationsById[toDeterministicUuid(a.id)] ?? res.annotationsById[a.id];
+        if (!list) return a;
+        return { ...a, annotations: list, annotationCount: list.length, annotationsLoaded: true };
+      });
+      assessmentsRef.current = next;
+      return next;
+    });
+    return true;
+  };
+
+  const loadStageSnapshotRankings = async (snapshotId: string): Promise<boolean> => {
+    const res = await supabaseDataService.fetchStageSnapshotRankings(snapshotId);
+    if (!res.success) return false;
+    setStageSnapshots((prev) =>
+      prev.map((s) => (s.id === snapshotId ? { ...s, rankings: res.rankings, rankingsLoaded: true } : s))
+    );
+    return true;
+  };
+
+  /**
    * Save annotations independently without needing error counts first
    * Strictly scoped by participantId, judgeId, targetStage, and targetQuestionId
    */
@@ -3630,6 +3727,11 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (existing?.status === 'finalized' || existing?.isLocked) {
       return;
     }
+    // Pengaman: coretan lama lembar ini belum diunduh. Menyimpan sekarang akan menimpa coretan di database.
+    if (existing && existing.annotationsLoaded === false) {
+      setSyncStatus('Coretan sebelumnya belum termuat — tunggu sebentar lalu coba lagi');
+      return;
+    }
 
     const nowTime = getWibTime();
     setSyncStatus('Menyimpan anotasi mushaf...');
@@ -3644,6 +3746,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           stageName: targetStage,
           questionId: targetQuestionId,
           annotations,
+          annotationCount: annotations.length,
+          annotationsLoaded: true,
           lastUpdated: nowTime
         }
       : {
@@ -8503,6 +8607,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         initializeAssessment,
         updateErrorCount,
         saveAnnotations,
+        loadAssessmentAnnotations,
+        loadStageSnapshotRankings,
         finalizeAssessment,
         reopenAssessment,
         stageSnapshots,

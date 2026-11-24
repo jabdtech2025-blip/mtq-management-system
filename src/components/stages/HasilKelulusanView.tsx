@@ -37,6 +37,7 @@ export const HasilKelulusanView: React.FC = () => {
     assessments,
     stages,
     stageSnapshots,
+    loadStageSnapshotRankings,
     judgeAssignments,
     competitionRules,
     rubricVersions,
@@ -303,6 +304,15 @@ export const HasilKelulusanView: React.FC = () => {
       branchName: effectiveBranchName
     });
   }, [stageSnapshots, currentTenant.id, currentStage, effectiveBranchName]);
+
+  // Hemat egress: daftar peringkat snapshot resmi diunduh hanya saat halaman ini menampilkannya
+  const pendingSnapshotId =
+    currentStageSnapshot && currentStageSnapshot.rankingsLoaded === false ? currentStageSnapshot.id : undefined;
+  const loadSnapshotRef = useRef(loadStageSnapshotRankings);
+  loadSnapshotRef.current = loadStageSnapshotRankings;
+  useEffect(() => {
+    if (pendingSnapshotId) void loadSnapshotRef.current(pendingSnapshotId);
+  }, [pendingSnapshotId]);
 
   // Manual overrides state: { [participantId]: boolean } and reasons { [participantId]: string }
   const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});

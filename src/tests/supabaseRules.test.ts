@@ -60,9 +60,18 @@ function createPgliteSupabaseAdapter(
     let limitClause = '';
     let singleRow = false;
     let maybeSingleRow = false;
+    // Daftar kolom sederhana (tanpa relasi) dihormati agar tes bisa memastikan kolom berat tidak ikut terunduh
+    let selectColumns: string | null = null;
 
     const builder: any = {
-      select(_cols?: string) {
+      select(cols?: string) {
+        if (op === 'select' && cols && !cols.includes('*') && !cols.includes('(')) {
+          selectColumns = cols
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean)
+            .join(', ');
+        }
         return builder;
       },
       insert(data: Record<string, unknown> | Array<Record<string, unknown>>) {
@@ -141,7 +150,7 @@ function createPgliteSupabaseAdapter(
             const whereSql = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
 
             if (op === 'select') {
-              const sql = `SELECT * FROM ${table} ${whereSql} ${orderClause} ${limitClause};`;
+              const sql = `SELECT ${selectColumns || '*'} FROM ${table} ${whereSql} ${orderClause} ${limitClause};`;
               const qRes = await pg.query(sql);
               let rows: any[] = qRes.rows || [];
 
@@ -551,6 +560,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261124_completion_per_field.sql'),
     'utf-8'
   );
+  const annotationCount20261125Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261125_annotation_count.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -675,6 +688,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(moveMember20261122Sql);
       await pg.exec(questionStage20261123Sql);
       await pg.exec(completionPerField20261124Sql);
+      await pg.exec(annotationCount20261125Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -970,6 +984,54 @@ export async function runSupabaseTests(): Promise<{
         lastUpdated: '10:00 WIB'
       },
       realAssignedMaqraId
+    );
+
+    // 43h. HEMAT EGRESS: simpan berikutnya pada lembar yang sama cukup 1 permintaan (upsert),
+    // tanpa memastikan ulang partisipasi babak, maqra, dan referensi lain.
+    const countedTables: string[] = [];
+    const countingClient = {
+      ...adapter,
+      from(table: string) {
+        countedTables.push(table);
+        return (adapter as any).from(table);
+      }
+    };
+    supabaseDataService.setTestDatabaseClient(countingClient as any);
+    const draft1Second = await supabaseDataService.syncAssessmentToRemote(
+      {
+        id: judge1AssessmentId,
+        tenantId: tenantJabarId,
+        stageParticipationId: penyisihanSpUuid,
+        stageId: stagePenyisihanId,
+        stageName: 'Penyisihan',
+        participantId: participantUuid,
+        judgeId: judge1UserId,
+        judgeName: 'KH. Ahmad Syahid',
+        judgeField: 'Bidang Tajwid',
+        questionId: questionPenyisihanId,
+        assignedMaqraId: realAssignedMaqraId,
+        rubricVersion: 'RUBRIC-SENI-BACA-2025',
+        rubricVersionId: rubricSeniBacaId,
+        status: 'in_progress',
+        isLocked: false,
+        errorCounts: { MKH: 1 },
+        deductions: { MKH: 1.0 },
+        fieldScores: { TJW: 29, FSH: 28, SUR: 15, LGU: 25 },
+        totalDeductions: 3.0,
+        finalScore: 97.0,
+        annotations: [],
+        lastUpdated: '10:00 WIB'
+      },
+      realAssignedMaqraId
+    );
+    const secondSaveTables = [...countedTables];
+    supabaseDataService.setTestDatabaseClient(adapter);
+    assert(
+      '43h. Hemat egress: simpan kedua lembar yang sama hanya 1 permintaan ke judge_assessments',
+      draft1Second.success === true &&
+        secondSaveTables.length === 1 &&
+        secondSaveTables[0] === 'judge_assessments',
+      `success: ${draft1Second.success} (${draft1Second.message}), permintaan: ${JSON.stringify(secondSaveTables)}`
     );
 
     // Attempt direct Data API UPDATE to set status = 'finalized' without RPC
@@ -1497,6 +1559,51 @@ export async function runSupabaseTests(): Promise<{
 
     const dbAnnotationQuery = await pg.query<{ annotations: any[] }>(
       `SELECT annotations FROM judge_assessments WHERE id = '${semiAssessmentId}';`
+    );
+
+    // 50e. HEMAT EGRESS TAHAP 2: muat penuh tanpa coretan; coretan diunduh saat dibutuhkan; simpan tanpa
+    // coretan yang belum termuat TIDAK menghapus coretan di database.
+    const egWorkspace = await supabaseDataService.fetchTenantWorkspaceResult(tenantJabarId);
+    const egSheet = egWorkspace.payload?.assessments.find((a) => a.id === semiAssessmentId);
+    const egLoadedFromWorkspace = Boolean(
+      egSheet && egSheet.annotationsLoaded === false && egSheet.annotations.length === 0 && egSheet.annotationCount === 1
+    );
+    const egSaveWithoutAnnotations = await supabaseDataService.syncAssessmentToRemote(
+      { ...(egSheet as any), errorCounts: { MKH: 2 }, totalDeductions: 4.0, finalScore: 96.0, judgeName: 'KH. Ahmad Syahid' },
+      semiAssignedMaqraId
+    );
+    const egAfterSave = await pg.query<{ annotation_count: number; error_counts: any }>(
+      `SELECT annotation_count, error_counts FROM judge_assessments WHERE id = '${semiAssessmentId}';`
+    );
+    const egFetched = await supabaseDataService.fetchAssessmentAnnotations([semiAssessmentId]);
+    assert(
+      '50e. Hemat egress tahap 2: muat penuh tanpa coretan, simpan tidak menghapus coretan, coretan diunduh sesuai kebutuhan',
+      egWorkspace.success === true &&
+        egLoadedFromWorkspace &&
+        egSaveWithoutAnnotations.success === true &&
+        Number(egAfterSave.rows[0]?.annotation_count) === 1 &&
+        Number(egAfterSave.rows[0]?.error_counts?.MKH) === 2 &&
+        egFetched.success === true &&
+        (egFetched.annotationsById[semiAssessmentId] || []).length === 1 &&
+        egFetched.annotationsById[semiAssessmentId]?.[0]?.id === 'ann-01',
+      `workspace: ${egWorkspace.success}, sheet: ${JSON.stringify({ loaded: egSheet?.annotationsLoaded, n: egSheet?.annotations?.length, count: egSheet?.annotationCount })}, save: ${egSaveWithoutAnnotations.success} (${egSaveWithoutAnnotations.message}), dbCount: ${egAfterSave.rows[0]?.annotation_count}, fetched: ${JSON.stringify(egFetched)}`
+    );
+
+    // Kembalikan lembar ke keadaan semula agar tes berikutnya (55) tidak terpengaruh
+    await pg.exec(
+      `UPDATE judge_assessments SET error_counts = '{"MKH": 1}'::jsonb, total_deductions = 3.00, final_score = 97.00 WHERE id = '${semiAssessmentId}';`
+    );
+
+    const egSnapshot = (egWorkspace.payload?.stageSnapshots || [])[0];
+    const egSnapRankings = egSnapshot ? await supabaseDataService.fetchStageSnapshotRankings(egSnapshot.id) : null;
+    assert(
+      '50f. Hemat egress tahap 2: snapshot hasil babak dimuat tanpa daftar peringkat, lalu diunduh saat dibutuhkan',
+      Boolean(egSnapshot) &&
+        egSnapshot!.rankingsLoaded === false &&
+        egSnapshot!.rankings.length === 0 &&
+        egSnapRankings?.success === true &&
+        (egSnapRankings?.rankings || []).length > 0,
+      `snapshot: ${JSON.stringify(egSnapshot ? { loaded: egSnapshot.rankingsLoaded, n: egSnapshot.rankings.length } : null)}, fetched: ${egSnapRankings?.success} (${egSnapRankings?.rankings?.length})`
     );
 
     // Test Admin CRUD operations (Level, ErrorCategory, User Provisioning RPC)
@@ -3825,6 +3932,7 @@ export async function runSupabaseTests(): Promise<{
       await asSuper(moveMember20261122Sql);
       await asSuper(questionStage20261123Sql);
       await asSuper(completionPerField20261124Sql);
+      await asSuper(annotationCount20261125Sql);
     } catch (e: any) {
       t7RerunOk = false;
       t7RerunError = String(e?.message || e);
