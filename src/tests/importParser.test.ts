@@ -124,6 +124,23 @@ export async function runImportParserTests(): Promise<{ passed: number; failed: 
     expect(err.includes('Babak Musabaqah') && err.includes('Tilawah Dewasa Putri'), `galat: ${err}`);
   });
 
+  await check('IMP-08. Peserta tanpa nomor undian tetap bisa diimpor; nomor yang terisi tetap dicek ganda', () => {
+    const res = validateParticipantImportRows(
+      [
+        { id_peserta: 'TLW-501', nama_peserta: 'Tanpa Undian A', jenis_kelamin: 'Putra', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', babak: 'Penyisihan' },
+        { id_peserta: 'TLW-502', nama_peserta: 'Tanpa Undian B', jenis_kelamin: 'Putra', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', babak: 'Penyisihan', nomor_undian: '' },
+        { id_peserta: 'TLW-503', nama_peserta: 'Undian 07', jenis_kelamin: 'Putra', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', babak: 'Penyisihan', nomor_undian: '07' },
+        { id_peserta: 'TLW-504', nama_peserta: 'Undian 07 Ganda', jenis_kelamin: 'Putra', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', babak: 'Penyisihan', nomor_undian: '07' }
+      ],
+      { kafilahs, cabangList, stages, existingParticipants: [], tenantId: 't-1' }
+    );
+    const codes = res.validRows.map((r) => r.participantId).join(',');
+    expect(codes === 'TLW-501,TLW-502,TLW-503', `valid: ${codes}; ${res.rows.map((r) => r.errors.join('/')).join(' | ')}`);
+    expect(res.validRows[0].lotteryNumber === '', 'nomor undian kosong tetap kosong');
+    expect((res.rows[0].warnings || []).some((w) => w.includes('Nomor undian kosong')), 'ada peringatan nomor undian kosong');
+    expect((res.rows[3].errors || []).some((e) => e.includes('Duplikasi Nomor Undian')), 'nomor terisi ganda tetap ditolak');
+  });
+
   await check('IMP-07. Kolom Jenjang lama di berkas diabaikan; peserta dan soal tidak membawa levelId', () => {
     const part = validateParticipantImportRows(
       [{ id_peserta: 'TLW-401', nama_peserta: 'A', jenis_kelamin: 'Putra', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', jenjang: 'Ulya', babak: 'Penyisihan', nomor_undian: '02' }],

@@ -345,7 +345,8 @@ export const KafilahPesertaView: React.FC = () => {
     const res = addParticipant({
       adminSequenceNumber: partAdminSeq.trim() || `ADM-${String(participants.length + 1).padStart(3, '0')}`,
       participantId: partIdCode.trim() || `PST-${String(participants.length + 1).padStart(3, '0')}`,
-      lotteryNumber: partLottery.trim() || String(participants.length + 1).padStart(2, '0'),
+      // Boleh kosong: nomor undian resmi diberikan saat undian babak di Bank Soal & Maqra
+      lotteryNumber: partLottery.trim(),
       name: partName.trim(),
       fatherName: partFatherName.trim(),
       gender: partGender,
@@ -1253,7 +1254,7 @@ export const KafilahPesertaView: React.FC = () => {
                         <td className="py-2.5 px-3 font-mono">
                           <span className="font-bold text-slate-900">{p.adminSequenceNumber || '-'}</span>
                           <span className="text-slate-400 mx-1">/</span>
-                          <span className="font-bold text-amber-700">#{p.lotteryNumber}</span>
+                          <span className="font-bold text-amber-700">{p.lotteryNumber ? `#${p.lotteryNumber}` : 'Belum diundi'}</span>
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
                           {p.participantId}
@@ -1518,13 +1519,13 @@ export const KafilahPesertaView: React.FC = () => {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  14. Nomor Undian Tampil
+                  14. Nomor Undian Tampil <span className="font-normal text-slate-400">(opsional)</span>
                 </label>
                 <input
                   type="text"
                   value={partLottery}
                   onChange={(e) => setPartLottery(e.target.value)}
-                  placeholder="Misal: 01"
+                  placeholder="Kosongkan bila belum diundi"
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg font-mono outline-none focus:ring-1 focus:ring-emerald-700"
                 />
               </div>

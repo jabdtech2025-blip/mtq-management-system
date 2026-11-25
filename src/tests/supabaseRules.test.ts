@@ -572,6 +572,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261127_live_scoring.sql'),
     'utf-8'
   );
+  const optionalLottery20261128Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261128_optional_lottery_number.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -699,6 +703,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(annotationCount20261125Sql);
       await pg.exec(combinedScore20261126Sql);
       await pg.exec(liveScoring20261127Sql);
+      await pg.exec(optionalLottery20261128Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -3945,6 +3950,7 @@ export async function runSupabaseTests(): Promise<{
       await asSuper(annotationCount20261125Sql);
       await asSuper(combinedScore20261126Sql);
       await asSuper(liveScoring20261127Sql);
+      await asSuper(optionalLottery20261128Sql);
     } catch (e: any) {
       t7RerunOk = false;
       t7RerunError = String(e?.message || e);
@@ -4508,6 +4514,26 @@ export async function runSupabaseTests(): Promise<{
         lvB.spId !== lvC.spId,
       `maqra: show1 ${lvShow1.error} ${JSON.stringify(lvD(lvShow1)?.participant)}; shownPublic ${lvPublicShown.includes(lvSurah)}; show2 ${lvShow2.error}; prev ${JSON.stringify(lvD(lvPrevReset)?.participant)}; again ${JSON.stringify(lvD(lvShowAgain)?.participant?.maqra)}; hide ${JSON.stringify(lvD(lvHideMaqra)?.participant?.maqra)} | ` +
       `before: ${JSON.stringify(lvBefore.rows[0]?.r)} ${lvBefore.error}; nbs: ${lvNextBeforeStart.error}; start: ${lvStart.error} ${JSON.stringify(lvBaseDisplay)}; next: ${JSON.stringify(lvD(lvNext)?.participant?.name)}; prev: ${lvD(lvPrev)?.participant?.name}; setA: ${lvD(lvSetA)?.participant?.name}; end: ${lvD(lvNextAtEnd)?.participant?.name}; hide: ${JSON.stringify(lvD(lvHide)?.participant)}; public: ${lvPublicJson}; other: ${lvOtherStage.error}; judge: ${lvJudge.error}; anonCtl: ${lvAnonCtl.error}; anonUpd: ${lvAnonUpdate.ok} ${lvAnonUpdate.error}; anonSel: ${lvAnonSelect.error}; stop: ${lvStop.error} ${JSON.stringify(lvStop.rows[0]?.r)}; after: ${JSON.stringify(lvAfterStop.rows[0]?.r)}; nas: ${lvNextAfterStop.error}; audit: ${JSON.stringify(lvAudit.rows)}`
+    );
+
+    // ---------- 97i. Nomor undian boleh kosong saat pendaftaran/impor ----------
+    const olIns = async (code: string, lot: string) => {
+      try {
+        await asSuper(`INSERT INTO participants (id, tenant_id, kafilah_id, branch_id, participant_code, name, gender, lottery_number, status)
+          VALUES ('${generateUuid()}', '${tenantJabarId}', '${kafilahBandungId}', '${igBranchId}', '${code}', 'Peserta ${code}', 'Putra', '${lot}', 'Menunggu')`);
+        return '';
+      } catch (e: any) {
+        return String(e?.message || e);
+      }
+    };
+    const olEmpty1 = await olIns('OL-001', '');
+    const olEmpty2 = await olIns('OL-002', '');
+    const olFilled = await olIns('OL-003', '97');
+    const olDup = await olIns('OL-004', '97');
+    assert(
+      '97i. Nomor Undian Opsional: beberapa peserta di cabang yang sama boleh tanpa nomor undian; nomor yang terisi tetap unik per cabang',
+      olEmpty1 === '' && olEmpty2 === '' && olFilled === '' && /unique|duplicate|uq_participants_branch_lottery_filled/i.test(olDup),
+      `empty1: ${olEmpty1}; empty2: ${olEmpty2}; filled: ${olFilled}; dup: ${olDup}`
     );
 
     // ---------- 98. J6: tidak ada lagi tebakan bidang berdasarkan nama ----------

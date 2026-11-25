@@ -4632,8 +4632,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    // P1-01: Prevent duplicate lottery number within the same branch
-    const duplicateLottery = participants.find(
+    // P1-01: Prevent duplicate lottery number within the same branch (nomor kosong boleh lebih dari satu)
+    const duplicateLottery = nextLotteryNumber && participants.find(
       (p) =>
         p.tenantId === currentTenantId &&
         p.id !== id &&
@@ -5069,14 +5069,17 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     for (const row of rows) {
       const normalizedCode = row.participantId.trim().toUpperCase();
-      const normalizedLotteryKey = `${row.branchName.trim().toLowerCase()}::${row.lotteryNumber.trim().toLowerCase()}`;
+      // Nomor undian kosong tidak dicek duplikat (akan diberikan saat undian babak)
+      const normalizedLotteryKey = row.lotteryNumber.trim()
+        ? `${row.branchName.trim().toLowerCase()}::${row.lotteryNumber.trim().toLowerCase()}`
+        : '';
 
       if (seenCodesInBatch.has(normalizedCode)) {
         failed += 1;
         errors.push(`${row.participantId} (${row.name}): Nomor peserta duplikat di dalam file import yang sama.`);
         continue;
       }
-      if (seenLotteryByBranchInBatch.has(normalizedLotteryKey)) {
+      if (normalizedLotteryKey && seenLotteryByBranchInBatch.has(normalizedLotteryKey)) {
         failed += 1;
         errors.push(`${row.participantId} (${row.name}): Nomor undian ${row.lotteryNumber} duplikat pada cabang ${row.branchName} di dalam file import.`);
         continue;
@@ -5091,7 +5094,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const updRes = updateParticipant(existingByCode.id, {
           adminSequenceNumber: row.adminSequenceNumber,
           participantId: row.participantId,
-          lotteryNumber: row.lotteryNumber,
+          // Kolom undian kosong di file tidak menghapus nomor undian yang sudah ada
+          lotteryNumber: row.lotteryNumber.trim() || existingByCode.lotteryNumber,
           name: row.name,
           fatherName: row.fatherName,
           gender: row.gender,
@@ -5112,7 +5116,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           continue;
         }
         seenCodesInBatch.add(normalizedCode);
-        seenLotteryByBranchInBatch.add(normalizedLotteryKey);
+        if (normalizedLotteryKey) seenLotteryByBranchInBatch.add(normalizedLotteryKey);
         track(`${row.participantId} (${row.name})`, updRes.persisted);
       } else {
         const res = addParticipant({
@@ -5138,7 +5142,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
         if (res.success) {
           seenCodesInBatch.add(normalizedCode);
-          seenLotteryByBranchInBatch.add(normalizedLotteryKey);
+          if (normalizedLotteryKey) seenLotteryByBranchInBatch.add(normalizedLotteryKey);
           track(`${row.participantId} (${row.name})`, res.persisted);
         } else {
           failed += 1;

@@ -615,7 +615,8 @@ export function validateParticipantImportRows(
 
     if (!name) errors.push('Nama lengkap peserta wajib diisi.');
     if (!participantId) errors.push('ID/Kode peserta wajib diisi.');
-    if (!lotteryNumber) errors.push('Nomor undian wajib diisi.');
+    // Nomor undian boleh kosong: nomor resmi per babak diberikan saat undian di Bank Soal & Maqra
+    if (!lotteryNumber) warnings.push('Nomor undian kosong; nomor akan diberikan saat undian babak.');
 
     const normalizedGender = genderRaw.toLowerCase();
     let gender: 'Putra' | 'Putri' = 'Putra';
