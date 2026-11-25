@@ -74,3 +74,26 @@ export function buildStageOrderLookup(
     return generic?.order;
   };
 }
+
+/**
+ * Nomor undian resmi hasil undian babak (disimpan per babak di stage_participations).
+ * Untuk setiap peserta diambil babak dengan urutan tertinggi yang sudah punya nomor.
+ */
+export function resolveDrawnLotteryNumbers(
+  stageParticipations: Array<{ tenantId: string; participantId: string; stageId?: string; stageName: string; lotteryNumber?: string }>,
+  stages: Array<{ id: string; name: string; order?: number }>,
+  tenantId: string
+): Map<string, { number: string; stageName: string; order: number }> {
+  const orderOf = (stageId?: string, stageName?: string) =>
+    stages.find((st) => (stageId && st.id === stageId) || (!stageId && st.name === stageName))?.order ?? 0;
+  const map = new Map<string, { number: string; stageName: string; order: number }>();
+  stageParticipations.forEach((sp) => {
+    if (sp.tenantId !== tenantId) return;
+    const num = (sp.lotteryNumber || '').trim();
+    if (!num) return;
+    const order = orderOf(sp.stageId, sp.stageName);
+    const prev = map.get(sp.participantId);
+    if (!prev || order >= prev.order) map.set(sp.participantId, { number: num, stageName: sp.stageName, order });
+  });
+  return map;
+}

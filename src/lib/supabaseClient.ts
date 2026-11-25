@@ -265,6 +265,25 @@ export function evaluateWorkspaceAccessGate(params: {
   return { isAuthorized: true, reason: null };
 }
 
+/**
+ * Layar "memuat" saat sesi tersimpan dipulihkan setelah refresh/F5, agar halaman login tidak berkedip.
+ * true selama koneksi masih diperiksa, atau sesi ada tetapi profil pengguna belum selesai dimuat.
+ * Tidak membuka akses apa pun: hanya mengganti tampilan gerbang masuk sementara.
+ */
+export function shouldShowSessionRestore(params: {
+  isOfflineDemoSimulation: boolean;
+  isAuthorized: boolean;
+  connectionInfo: Pick<SupabaseConnectionInfo, 'isConfigured' | 'state' | 'isAuthenticated'>;
+  hasProfile: boolean;
+  profileResolved: boolean;
+  timedOut: boolean;
+}): boolean {
+  const { isOfflineDemoSimulation, isAuthorized, connectionInfo, hasProfile, profileResolved, timedOut } = params;
+  if (isOfflineDemoSimulation || isAuthorized || timedOut || !connectionInfo.isConfigured) return false;
+  if (connectionInfo.state === 'checking') return true;
+  return Boolean(connectionInfo.isAuthenticated) && !hasProfile && !profileResolved;
+}
+
 // Inisialisasi client hanya jika konfigurasi nyata tersedia; jika tidak, bernilai null
 export const supabase: SupabaseClient | null = isSupabaseConfigured()
   ? createClient(rawUrl, rawAnonKey, {

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Kafilah, Participant } from '../../types/mtq';
+import { resolveDrawnLotteryNumbers } from '../../utils/participantSort';
 import { AppModal } from '../common/AppModal';
 import {
   downloadParticipantExcelTemplate,
@@ -42,6 +43,7 @@ export const KafilahPesertaView: React.FC = () => {
     currentUser,
     kafilahs,
     participants,
+    stageParticipations,
     cabangList,
     stages,
     addKafilah,
@@ -56,6 +58,20 @@ export const KafilahPesertaView: React.FC = () => {
   } = useMtq();
 
   const groupLabel = currentTenant?.groupLabel || 'Kafilah / Utusan';
+
+  // Nomor undian resmi hasil undian babak (disimpan per babak). Diambil dari babak terakhir
+  // (urutan babak tertinggi) yang sudah punya nomor; bila belum ada, pakai nomor pendaftaran.
+  const drawnLotteryByParticipant = useMemo(
+    () => resolveDrawnLotteryNumbers(stageParticipations, stages, currentTenant?.id || ''),
+    [stageParticipations, stages, currentTenant?.id]
+  );
+
+  /** Nomor undian yang ditampilkan: hasil undian babak terakhir, atau nomor pendaftaran. */
+  const lotteryOf = (p: Participant): { number: string; stageName?: string } => {
+    const drawn = drawnLotteryByParticipant.get(p.id);
+    if (drawn) return { number: drawn.number, stageName: drawn.stageName };
+    return { number: (p.lotteryNumber || '').trim() };
+  };
   const canVerifyParticipants = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
 
   // Dual View Mode: 'peserta' (Per Peserta - 1st option) | 'grup' (Per Grup / Kafilah - 2nd option)
@@ -229,14 +245,14 @@ export const KafilahPesertaView: React.FC = () => {
           );
         }
         if (sortBy === 'lottery') {
-          return (a.lotteryNumber || '').localeCompare(b.lotteryNumber || '', undefined, { numeric: true });
+          return lotteryOf(a).number.localeCompare(lotteryOf(b).number, undefined, { numeric: true });
         }
         if (sortBy === 'kafilah') {
           return a.kafilahName.localeCompare(b.kafilahName);
         }
         return a.name.localeCompare(b.name);
       });
-  }, [participants, searchQuery, filterKafilahId, filterBranch, filterStage, filterStatus, filterVerification, sortBy]);
+  }, [participants, searchQuery, filterKafilahId, filterBranch, filterStage, filterStatus, filterVerification, sortBy, drawnLotteryByParticipant]);
 
   const totalPages = Math.max(1, Math.ceil(filteredParticipants.length / pageSize));
   const paginatedParticipants = useMemo(() => {
@@ -961,12 +977,13 @@ export const KafilahPesertaView: React.FC = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-bold text-xs text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
-                            {p.adminSequenceNumber || p.lotteryNumber || p.participantId}
+                            {p.adminSequenceNumber || lotteryOf(p).number || p.participantId}
                           </span>
                           <span className="font-bold text-slate-900 text-sm">{p.name}</span>
                         </div>
                         <p className="text-xs text-slate-500 font-mono mt-0.5">
-                          {p.participantId} · {p.branchName}
+                          {p.participantId} · {p.branchName} ·{' '}
+                          {lotteryOf(p).number ? `Undian #${lotteryOf(p).number}` : 'Belum diundi'}
                         </p>
                       </div>
                       <span
@@ -1074,11 +1091,20 @@ export const KafilahPesertaView: React.FC = () => {
                     return (
                       <tr key={`${p.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors">
                         <td className="py-3 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
-                          {p.adminSequenceNumber || p.lotteryNumber || p.participantId || '-'}
+                          {p.adminSequenceNumber || lotteryOf(p).number || p.participantId || '-'}
                         </td>
                         <td className="py-3 px-4">
                           <div className="font-bold text-slate-900">{p.name}</div>
-                          <div className="text-xs text-slate-400 font-mono">{p.participantId}</div>
+                          <div className="text-xs text-slate-400 font-mono">
+                            {p.participantId} ·{' '}
+                            {lotteryOf(p).number ? (
+                              <span className="text-amber-700 font-semibold" data-testid="participant-lottery">
+                                Undian #{lotteryOf(p).number}
+                              </span>
+                            ) : (
+                              <span>Belum diundi</span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-slate-700 font-medium">
                           {p.fatherName || '-'}
@@ -1254,7 +1280,7 @@ export const KafilahPesertaView: React.FC = () => {
                         <td className="py-2.5 px-3 font-mono">
                           <span className="font-bold text-slate-900">{p.adminSequenceNumber || '-'}</span>
                           <span className="text-slate-400 mx-1">/</span>
-                          <span className="font-bold text-amber-700">{p.lotteryNumber ? `#${p.lotteryNumber}` : 'Belum diundi'}</span>
+                          <span className="font-bold text-amber-700">{lotteryOf(p).number ? `#${lotteryOf(p).number}` : 'Belum diundi'}</span>
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
                           {p.participantId}
@@ -1435,7 +1461,12 @@ export const KafilahPesertaView: React.FC = () => {
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
               <span className="text-xs font-bold uppercase text-slate-400 block">14. Nomor Tampil / Undian</span>
               <span className="font-mono font-bold text-slate-900 mt-0.5 block">
-                {detailParticipant.lotteryNumber || '-'}
+                {lotteryOf(detailParticipant).number || 'Belum diundi'}
+                {lotteryOf(detailParticipant).stageName && (
+                  <span className="ml-1 font-sans font-medium text-slate-500">
+                    (hasil undian babak {lotteryOf(detailParticipant).stageName})
+                  </span>
+                )}
               </span>
             </div>
             <div className="sm:col-span-2 p-3 rounded-xl bg-emerald-50/60 border border-emerald-200">

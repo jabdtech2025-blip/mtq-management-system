@@ -28,6 +28,7 @@ const SuperadminSettingsView = React.lazy(() => import('./components/superadmin/
 const LiveScoringControlView = React.lazy(() => import('./components/live/LiveScoringControlView').then((m) => ({ default: m.LiveScoringControlView })));
 const ActivityLogView = React.lazy(() => import('./components/activityLog/ActivityLogView').then((m) => ({ default: m.ActivityLogView })));
 import { useDocumentMeta } from './hooks/useDocumentMeta';
+import { LogoTile } from './components/brand/Logo';
 import { AuthenticationGateView } from './components/auth/AuthenticationGateView';
 
 const MainLayout: React.FC = () => {
@@ -40,11 +41,32 @@ const MainLayout: React.FC = () => {
     isOfflineDemoSimulation,
     exitOfflineDemoSimulation,
     isSuperadminWorkspaceMode,
-    exitTenantWorkspace
+    exitTenantWorkspace,
+    isRestoringSession
   } = useMtq();
 
   const showAuthGate = !isLiveAccessAuthorized || isPasswordRecoveryMode;
-  useDocumentMeta(currentView, siteSettings, showAuthGate ? 'Masuk' : undefined);
+  const showRestoring = showAuthGate && isRestoringSession && !isPasswordRecoveryMode;
+  useDocumentMeta(currentView, siteSettings, showRestoring ? 'Memuat' : showAuthGate ? 'Masuk' : undefined);
+
+  // Sesi tersimpan sedang dipulihkan (setelah refresh/F5): layar memuat, bukan halaman login.
+  // Aplikasi tetap tertutup sampai sesi & hak akses terverifikasi (fail-closed).
+  if (showRestoring) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        data-testid="session-restoring"
+        className="min-h-screen flex flex-col items-center justify-center gap-4 bg-slate-50 text-slate-600"
+      >
+        <LogoTile size={56} />
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <span className="w-4 h-4 rounded-full border-2 border-emerald-700 border-t-transparent animate-spin" />
+          Memuat Manajemen MTQ…
+        </div>
+      </div>
+    );
+  }
 
   // P0 Mandatory Fail-Closed Authentication Gate:
   if (showAuthGate) {

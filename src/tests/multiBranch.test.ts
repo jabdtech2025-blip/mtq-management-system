@@ -15,9 +15,11 @@ import {
 } from '../services/stageResolver';
 import {
   buildStageOrderLookup,
+  resolveDrawnLotteryNumbers,
   sortParticipantsByName,
   sortParticipantsForDisplay
 } from '../utils/participantSort';
+import { shouldShowSessionRestore } from '../lib/supabaseClient';
 import {
   buildViewFilterKey,
   readViewFilters,
@@ -876,6 +878,46 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
     const stopped = applyLiveSessionChange(withNew, { id: 's-1', stage_id: 'st-1', is_active: false, display: {} });
     expect(stopped.length === 1 && stopped[0].id === 's-2', 'sesi yang dihentikan dihapus dari layar');
     expect(normalizeLivePublicState({ found: false }).sessions.length === 0, 'kode tidak dikenal');
+  });
+
+  check('RF-01. Refresh/F5: layar memuat (bukan halaman login) selama sesi tersimpan dipulihkan', () => {
+    const base = {
+      isOfflineDemoSimulation: false,
+      isAuthorized: false,
+      connectionInfo: { isConfigured: true, state: 'connected_authenticated' as const, isAuthenticated: true },
+      hasProfile: false,
+      profileResolved: false,
+      timedOut: false
+    };
+    expect(shouldShowSessionRestore({ ...base, connectionInfo: { ...base.connectionInfo, state: 'checking' as const, isAuthenticated: false } }), 'koneksi sedang diperiksa');
+    expect(shouldShowSessionRestore(base), 'sesi ada, profil belum dimuat (penyebab kedipan login)');
+    expect(!shouldShowSessionRestore({ ...base, profileResolved: true }), 'profil sudah dicek: tampilkan gerbang sebenarnya');
+    expect(!shouldShowSessionRestore({ ...base, hasProfile: true }), 'profil sudah ada');
+    expect(!shouldShowSessionRestore({ ...base, connectionInfo: { ...base.connectionInfo, isAuthenticated: false } }), 'tanpa sesi: langsung halaman login');
+    expect(!shouldShowSessionRestore({ ...base, isAuthorized: true }), 'sudah masuk');
+    expect(!shouldShowSessionRestore({ ...base, isOfflineDemoSimulation: true }), 'mode demo');
+    expect(!shouldShowSessionRestore({ ...base, timedOut: true }), 'pengaman batas waktu');
+    expect(!shouldShowSessionRestore({ ...base, connectionInfo: { ...base.connectionInfo, isConfigured: false } }), 'tanpa konfigurasi Supabase');
+  });
+
+  check('UN-01. Grup & Peserta: nomor undian dari hasil undian babak terakhir', () => {
+    const stagesList = [
+      { id: 's-pen', name: 'Penyisihan', order: 1 },
+      { id: 's-fin', name: 'Final', order: 2 }
+    ];
+    const sps = [
+      { tenantId: 't-1', participantId: 'p-1', stageId: 's-pen', stageName: 'Penyisihan', lotteryNumber: '07' },
+      { tenantId: 't-1', participantId: 'p-1', stageId: 's-fin', stageName: 'Final', lotteryNumber: '02' },
+      { tenantId: 't-1', participantId: 'p-2', stageId: 's-pen', stageName: 'Penyisihan', lotteryNumber: '11' },
+      { tenantId: 't-1', participantId: 'p-2', stageId: 's-fin', stageName: 'Final', lotteryNumber: '' },
+      { tenantId: 't-1', participantId: 'p-3', stageId: 's-pen', stageName: 'Penyisihan', lotteryNumber: '' },
+      { tenantId: 't-2', participantId: 'p-4', stageId: 's-pen', stageName: 'Penyisihan', lotteryNumber: '05' }
+    ];
+    const map = resolveDrawnLotteryNumbers(sps, stagesList, 't-1');
+    expect(map.get('p-1')?.number === '02' && map.get('p-1')?.stageName === 'Final', `p-1: ${JSON.stringify(map.get('p-1'))}`);
+    expect(map.get('p-2')?.number === '11' && map.get('p-2')?.stageName === 'Penyisihan', 'babak tanpa nomor dilewati');
+    expect(!map.has('p-3'), 'belum diundi');
+    expect(!map.has('p-4'), 'penyelenggara lain tidak ikut');
   });
 
   const passed = results.filter((r) => r.success).length;

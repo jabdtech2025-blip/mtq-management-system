@@ -72,6 +72,7 @@ import {
   SupabaseConnectionInfo,
   AccessGateReason,
   evaluateWorkspaceAccessGate,
+  shouldShowSessionRestore,
   supabase
 } from '../lib/supabaseClient';
 import { generateUuid, toDeterministicUuid, isValidUuid } from '../utils/uuid';
@@ -446,6 +447,8 @@ interface MtqContextType {
   isLiveAccessAuthorized: boolean;
   accessGateReason: AccessGateReason;
   isPasswordRecoveryMode: boolean;
+  /** true selama sesi login yang tersimpan sedang dipulihkan (setelah refresh/F5): tampilkan layar memuat, bukan halaman login */
+  isRestoringSession: boolean;
   setIsPasswordRecoveryMode: (active: boolean) => void;
   enterOfflineDemoSimulation: () => void;
   exitOfflineDemoSimulation: () => Promise<void>;
@@ -870,6 +873,10 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     supabaseDataService.getConnectionStatus()
   );
   const [authenticatedProfile, setAuthenticatedProfile] = useState<AuthenticatedSupabaseProfile | null>(null);
+  // Profil pengguna untuk sesi saat ini sudah dicek (ada atau tidak). Sebelum itu, gerbang masuk tidak
+  // boleh menampilkan halaman login, karena sesi tersimpan mungkin masih dipulihkan.
+  const [profileResolved, setProfileResolved] = useState<boolean>(false);
+  const [restoreTimedOut, setRestoreTimedOut] = useState<boolean>(false);
   const [isOfflineDemoSimulation, setIsOfflineDemoSimulation] = useState<boolean>(() => {
     try {
       return localStorage.getItem('mtq_offline_demo_simulation_v4') === 'true';
@@ -1315,6 +1322,24 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const accessGateReason: AccessGateReason = accessGateDecision.reason;
   const isLiveAccessAuthorized: boolean = accessGateDecision.isAuthorized;
 
+  // Setelah refresh/F5: koneksi masih diperiksa, atau sesi tersimpan ada tetapi profil belum selesai dimuat.
+  // Selama itu tampilkan layar memuat agar halaman login tidak berkedip sesaat.
+  const isRestoringSession = shouldShowSessionRestore({
+    isOfflineDemoSimulation,
+    isAuthorized: isLiveAccessAuthorized,
+    connectionInfo,
+    hasProfile: Boolean(authenticatedProfile),
+    profileResolved,
+    timedOut: restoreTimedOut
+  });
+
+  // Pengaman: jangan pernah tertahan di layar memuat lebih dari 15 detik
+  useEffect(() => {
+    if (!isRestoringSession) return;
+    const t = window.setTimeout(() => setRestoreTimedOut(true), 15000);
+    return () => window.clearTimeout(t);
+  }, [isRestoringSession]);
+
   const currentTenant = tenants.find((t) => t.id === currentTenantId) || tenants[0];
 
   // Dalam mode live Supabase, currentUser wajib berasal dari profil terautentikasi & membership aktif,
@@ -1650,6 +1675,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setConnectionInfo(info);
     setSyncStatus(info.statusLabel);
+    // Tidak ada sesi tersimpan atau database tidak siap: tidak ada yang perlu dipulihkan
+    if (!info.isDatabaseReady || !info.isAuthenticated) setProfileResolved(true);
 
     if (info.isDatabaseReady) {
       const profile = await supabaseDataService.fetchAuthenticatedUserProfile();
@@ -1658,6 +1685,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return info;
       }
       setAuthenticatedProfile(profile);
+      setProfileResolved(true);
 
       if (!profile) {
         hasHydratedWorkspaceRef.current = false;
@@ -8712,6 +8740,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isLiveAccessAuthorized,
         accessGateReason,
         isPasswordRecoveryMode,
+        isRestoringSession,
         setIsPasswordRecoveryMode,
         enterOfflineDemoSimulation,
         exitOfflineDemoSimulation,
