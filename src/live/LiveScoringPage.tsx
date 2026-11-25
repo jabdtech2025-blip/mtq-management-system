@@ -9,6 +9,7 @@ import {
   subscribeLiveSessions
 } from '../services/liveScoring';
 import { LiveDisplayCard } from './LiveDisplayCard';
+import { LiveFrame } from './LiveFrame';
 
 /** Muat ulang cadangan bila realtime tidak tersedia, dan pemeriksaan berkala bila tersedia. */
 const FALLBACK_POLL_MS = 20_000;
@@ -116,52 +117,53 @@ const LiveScoringPage: React.FC<{ tenantCode: string }> = ({ tenantCode }) => {
     }
   };
 
-  const hasMushaf = Boolean(selected?.display?.participant?.maqra);
+  const sessionNav =
+    sessions.length > 1 ? (
+      <nav className="flex flex-wrap justify-end gap-2" aria-label="Pilih sesi">
+        {sessions.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => chooseSession(s.stageId)}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${
+              selected?.id === s.id
+                ? 'bg-emerald-200 border-emerald-200 text-emerald-950'
+                : 'border-emerald-200/40 text-emerald-50 hover:bg-white/10'
+            }`}
+          >
+            {liveSessionLabel(s.display)}
+          </button>
+        ))}
+      </nav>
+    ) : null;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans flex flex-col items-center justify-center px-4 py-6 sm:px-6 sm:py-10">
-      <div className={`w-full space-y-4 ${hasMushaf ? 'max-w-6xl' : 'max-w-2xl'}`}>
-        {sessions.length > 1 && (
-          <nav className="flex flex-wrap justify-center gap-2" aria-label="Pilih sesi">
-            {sessions.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => chooseSession(s.stageId)}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${
-                  selected?.id === s.id
-                    ? 'bg-emerald-600 border-emerald-500 text-white'
-                    : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                {liveSessionLabel(s.display)}
-              </button>
-            ))}
-          </nav>
-        )}
-
-        <main>
-          {!isLiveScoringConfigured() ? (
-            <Notice text="Live scoring belum tersedia." />
-          ) : loading ? (
-            <div role="status" className="py-24 text-center text-slate-400">Memuat…</div>
-          ) : failed && !state ? (
-            <Notice text="Tidak dapat terhubung. Halaman akan mencoba lagi secara otomatis." />
-          ) : !state?.found || !selected?.display ? (
-            <Notice text="Belum ada sesi live yang berjalan. Halaman ini akan tampil otomatis begitu panitia memulai sesi." />
-          ) : (
-            <LiveDisplayCard display={selected.display} organizerName={state.tenantName} />
-          )}
-        </main>
-      </div>
-    </div>
+    <LiveFrame organizerName={state?.tenantName} organizerLogoUrl={state?.tenantLogoUrl} headerExtra={sessionNav}>
+      {!isLiveScoringConfigured() ? (
+        <Notice text="Live scoring belum tersedia." />
+      ) : loading ? (
+        <Notice text="Memuat…" status />
+      ) : failed && !state ? (
+        <Notice text="Tidak dapat terhubung. Halaman akan mencoba lagi secara otomatis." />
+      ) : !state?.found || !selected?.display ? (
+        <Notice text="Belum ada sesi live yang berjalan. Halaman ini akan tampil otomatis begitu panitia memulai sesi." />
+      ) : (
+        <LiveDisplayCard display={selected.display} />
+      )}
+    </LiveFrame>
   );
 };
 
-const Notice: React.FC<{ text: string }> = ({ text }) => (
-  <div className="rounded-2xl border border-emerald-800/60 bg-emerald-950/60 py-16 px-6 text-center text-sm text-emerald-100">
-    {text}
-  </div>
+const Notice: React.FC<{ text: string; status?: boolean }> = ({ text, status }) => (
+  <main className="flex-1 flex items-center justify-center px-6 py-16">
+    <p
+      role={status ? 'status' : undefined}
+      className="max-w-xl text-center text-base sm:text-lg lg:text-xl font-semibold text-emerald-100"
+      data-testid="live-notice"
+    >
+      {text}
+    </p>
+  </main>
 );
 
 export default LiveScoringPage;

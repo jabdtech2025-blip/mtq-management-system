@@ -46,12 +46,20 @@ const liveCode = liveCodeFromPath(window.location.pathname);
 const publicSlug = liveCode ? null : slugFromPath(window.location.pathname);
 const landing = !liveCode && !publicSlug && isLandingRoute();
 if (!landing && !publicSlug && !liveCode) prepareAppDocument();
+if (liveCode) {
+  // Layar Live: hanya huruf latin aplikasi (tanpa huruf Arab) agar ringan
+  const liveFonts = document.createElement('link');
+  liveFonts.rel = 'stylesheet';
+  liveFonts.href =
+    'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap';
+  document.head.appendChild(liveFonts);
+}
 
 const Fallback = () => (
   <div
     role="status"
     aria-label="Memuat"
-    style={{ minHeight: '100vh', background: liveCode ? '#020617' : landing ? '#06201F' : publicSlug ? '#FFFFFF' : '#F8FAFC' }}
+    style={{ minHeight: '100vh', background: liveCode ? '#022c22' : landing ? '#06201F' : publicSlug ? '#FFFFFF' : '#F8FAFC' }}
   />
 );
 

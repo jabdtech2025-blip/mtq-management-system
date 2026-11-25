@@ -8,6 +8,8 @@ export interface Tenant {
   period?: string;
   primaryAdminId?: string;
   groupLabel?: string;
+  /** Logo penyelenggara: tautan https:// atau data URI gambar (kolom tenants.logo_url) */
+  logoUrl?: string;
   status: 'Aktif' | 'Nonaktif';
   userCount?: number;
 }

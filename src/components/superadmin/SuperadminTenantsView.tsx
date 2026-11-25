@@ -22,6 +22,7 @@ import {
   TenantStatusFilter
 } from '../../utils/superadminGuard';
 import { SupervisionModal } from './SupervisionModal';
+import { TenantLogoField } from './TenantLogoField';
 
 export const SuperadminTenantsView: React.FC = () => {
   const {
@@ -56,6 +57,8 @@ export const SuperadminTenantsView: React.FC = () => {
   const [formRegion, setFormRegion] = useState('');
   const [formEdition, setFormEdition] = useState('');
   const [formPeriod, setFormPeriod] = useState('2025 - 2026');
+  const [formLogoUrl, setFormLogoUrl] = useState('');
+  const [logoLinkError, setLogoLinkError] = useState<string | null>(null);
 
   const activeTenantsCount = tenants.filter((t) => t.status === 'Aktif').length;
   const inactiveTenantsCount = tenants.length - activeTenantsCount;
@@ -74,6 +77,8 @@ export const SuperadminTenantsView: React.FC = () => {
     setFormRegion('Provinsi Jawa Timur');
     setFormEdition('Edisi XXXI - 2025');
     setFormPeriod('2025 - 2026');
+    setFormLogoUrl('');
+    setLogoLinkError(null);
     setIsModalOpen(true);
   };
 
@@ -86,12 +91,18 @@ export const SuperadminTenantsView: React.FC = () => {
     setFormRegion(t.region);
     setFormEdition(t.edition || '');
     setFormPeriod(t.period || '2025 - 2026');
+    setFormLogoUrl(t.logoUrl || '');
+    setLogoLinkError(null);
     setIsModalOpen(true);
   };
 
   const handleSaveTenant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || !formCode.trim()) return;
+    if (logoLinkError) {
+      setModalError(logoLinkError);
+      return;
+    }
     setModalError(null);
     setIsSaving(true);
 
@@ -104,7 +115,8 @@ export const SuperadminTenantsView: React.FC = () => {
           eventName: formEventName.trim(),
           region: formRegion.trim(),
           edition: formEdition.trim(),
-          period: formPeriod.trim()
+          period: formPeriod.trim(),
+          logoUrl: formLogoUrl.trim()
         });
       } else {
         res = await addTenant({
@@ -114,6 +126,7 @@ export const SuperadminTenantsView: React.FC = () => {
           region: formRegion.trim(),
           edition: formEdition.trim(),
           period: formPeriod.trim(),
+          logoUrl: formLogoUrl.trim(),
           status: 'Aktif',
           userCount: 1
         });
@@ -334,7 +347,7 @@ export const SuperadminTenantsView: React.FC = () => {
       {/* Add / Edit Tenant Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-lg w-full shadow-lg border border-slate-200 p-6">
+          <div className="bg-white rounded-xl max-w-lg w-full max-h-[92vh] overflow-y-auto shadow-lg border border-slate-200 p-6">
             <div className="flex items-center justify-between pb-3 border-b mb-4">
               <h3 className="font-extrabold text-base text-slate-900">
                 {editingTenant ? 'Edit Data Penyelenggara MTQ' : 'Tambah Penyelenggara Baru'}
@@ -428,6 +441,14 @@ export const SuperadminTenantsView: React.FC = () => {
                   />
                 </div>
               </div>
+
+              <TenantLogoField
+                key={editingTenant?.id || 'new'}
+                value={formLogoUrl}
+                onChange={setFormLogoUrl}
+                onLinkError={setLogoLinkError}
+                disabled={isSaving}
+              />
 
               <div className="flex justify-end gap-2 pt-3 border-t">
                 <button

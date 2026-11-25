@@ -24,6 +24,7 @@ import {
   stepLiveEntry
 } from '../../services/liveScoring';
 import { LiveDisplayCard } from '../../live/LiveDisplayCard';
+import { LiveFrame } from '../../live/LiveFrame';
 import { toDeterministicUuid } from '../../utils/uuid';
 import { Badge, Button, Card, PageHeader, Select } from '../ui';
 
@@ -456,7 +457,9 @@ export const LiveScoringControlView: React.FC = () => {
         <div className="space-y-2">
           <div className="text-xs font-bold text-slate-700">Pratinjau layar publik</div>
           {display ? (
-            <LiveDisplayCard display={display} organizerName={currentTenant.name} compact />
+            <LiveFrame organizerName={currentTenant.name} organizerLogoUrl={currentTenant.logoUrl} compact>
+              <LiveDisplayCard display={display} compact />
+            </LiveFrame>
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm text-slate-500">
               {isActive ? 'Memuat pratinjau…' : 'Layar publik kosong. Mulai sesi untuk menampilkan peserta.'}

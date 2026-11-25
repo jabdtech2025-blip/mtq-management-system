@@ -576,6 +576,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261128_optional_lottery_number.sql'),
     'utf-8'
   );
+  const tenantLogo20261129Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261129_tenant_logo.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -704,6 +708,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(combinedScore20261126Sql);
       await pg.exec(liveScoring20261127Sql);
       await pg.exec(optionalLottery20261128Sql);
+      await pg.exec(tenantLogo20261129Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -3951,6 +3956,7 @@ export async function runSupabaseTests(): Promise<{
       await asSuper(combinedScore20261126Sql);
       await asSuper(liveScoring20261127Sql);
       await asSuper(optionalLottery20261128Sql);
+      await asSuper(tenantLogo20261129Sql);
     } catch (e: any) {
       t7RerunOk = false;
       t7RerunError = String(e?.message || e);
@@ -4534,6 +4540,45 @@ export async function runSupabaseTests(): Promise<{
       '97i. Nomor Undian Opsional: beberapa peserta di cabang yang sama boleh tanpa nomor undian; nomor yang terisi tetap unik per cabang',
       olEmpty1 === '' && olEmpty2 === '' && olFilled === '' && /unique|duplicate|uq_participants_branch_lottery_filled/i.test(olDup),
       `empty1: ${olEmpty1}; empty2: ${olEmpty2}; filled: ${olFilled}; dup: ${olDup}`
+    );
+
+    // ---------- 97j. Logo penyelenggara untuk layar Live ----------
+    const lgPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==';
+    const lgSet = (who: string, value: string | null) =>
+      runAs(who, `UPDATE tenants SET logo_url = ${value === null ? 'NULL' : `'${value}'`} WHERE id = '${tenantJabarId}' RETURNING logo_url`);
+    const lgLink = await lgSet(mvSuperId, 'https://contoh.id/logo.png');
+    const lgSessLink = await pg.query<{ u: string }>(`SELECT tenant_logo_url AS u FROM live_sessions WHERE stage_id = '${lvStage}'`);
+    const lgPublicLink = await lvGet();
+    const lgData = await lgSet(mvSuperId, lgPng);
+    const lgPublicData = await lvGet();
+    const lgBadJs = await lgSet(mvSuperId, 'javascript:alert(1)');
+    const lgBadHttp = await lgSet(mvSuperId, 'http://contoh.id/logo.png');
+    const lgBadSvg = await lgSet(mvSuperId, 'data:image/svg+xml;base64,PHN2Zz4=');
+    const lgBadBig = await lgSet(mvSuperId, 'data:image/png;base64,' + 'A'.repeat(200001));
+    const lgAfterBad = await pg.query<{ u: string }>(`SELECT logo_url AS u FROM tenants WHERE id = '${tenantJabarId}'`);
+    const lgAnonUpdate = await lvAnon(`UPDATE tenants SET logo_url = NULL WHERE id = '${tenantJabarId}'`);
+    const lgAfterAnon = await pg.query<{ u: string }>(`SELECT logo_url AS u FROM tenants WHERE id = '${tenantJabarId}'`);
+    // Sesi baru (insert) langsung membawa logo penyelenggara
+    const lgStage2 = await makeStage('IG Live Logo', 1, 2);
+    await makeEntrant(lgStage2, '5', 'Live Logo Peserta');
+    await runAs(igAdminId, `SELECT live_session_control('${lgStage2}'::uuid, 'start', NULL, NULL, NULL) AS r`);
+    const lgSessNew = await pg.query<{ u: string }>(`SELECT tenant_logo_url AS u FROM live_sessions WHERE stage_id = '${lgStage2}'`);
+    await runAs(igAdminId, `SELECT live_session_control('${lgStage2}'::uuid, 'stop', NULL, NULL, NULL) AS r`);
+    const lgClear = await lgSet(mvSuperId, null);
+    const lgPublicCleared = await lvGet();
+    assert(
+      '97j. Logo Penyelenggara: superadmin menyimpan tautan https:// atau data URI gambar; logo tersalin ke sesi Live dan terbaca publik lewat get_live_sessions; javascript:, http://, SVG, dan logo terlalu besar ditolak; anon tidak bisa mengubah',
+      lgLink.ok && lgLink.rows[0]?.logo_url === 'https://contoh.id/logo.png' &&
+        lgSessLink.rows[0]?.u === 'https://contoh.id/logo.png' &&
+        lgPublicLink.rows[0]?.r?.tenant_logo_url === 'https://contoh.id/logo.png' &&
+        lgData.ok && lgPublicData.rows[0]?.r?.tenant_logo_url === lgPng &&
+        !lgBadJs.ok && /tenants_logo_url_check/.test(lgBadJs.error) &&
+        !lgBadHttp.ok && !lgBadSvg.ok && !lgBadBig.ok &&
+        lgAfterBad.rows[0]?.u === lgPng &&
+        lgAfterAnon.rows[0]?.u === lgPng &&
+        lgSessNew.rows[0]?.u === lgPng &&
+        lgClear.ok && lgPublicCleared.rows[0]?.r?.tenant_logo_url === null,
+      `link: ${lgLink.error} ${JSON.stringify(lgLink.rows)}; sess: ${JSON.stringify(lgSessLink.rows)}; pub: ${JSON.stringify(lgPublicLink.rows[0]?.r?.tenant_logo_url)} ${lgPublicLink.error}; data: ${lgData.error}; js: ${lgBadJs.error}; http: ${lgBadHttp.ok}; svg: ${lgBadSvg.ok}; big: ${lgBadBig.ok}; after: ${lgAfterBad.rows[0]?.u?.slice(0, 30)}; anon: ${lgAnonUpdate.ok} ${lgAnonUpdate.error} ${lgAfterAnon.rows[0]?.u?.slice(0, 30)}; new: ${JSON.stringify(lgSessNew.rows)}; clear: ${lgClear.error} ${JSON.stringify(lgPublicCleared.rows[0]?.r?.tenant_logo_url)}`
     );
 
     // ---------- 98. J6: tidak ada lagi tebakan bidang berdasarkan nama ----------

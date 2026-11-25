@@ -6,6 +6,8 @@
  * Data yang tampil dibuat server (RPC live_session_control, migrasi 20261127), bukan oleh browser.
  */
 
+import { safeTenantLogoUrl } from '../utils/tenantLogo';
+
 const env = (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}) as Record<string, string | undefined>;
 const SUPABASE_URL = (env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = (env.VITE_SUPABASE_ANON_KEY || '').trim();
@@ -74,10 +76,13 @@ export interface LivePublicState {
   tenantName?: string;
   eventName?: string;
   tenantCode?: string;
+  /** Logo penyelenggara (https:// atau data URI gambar); kosong = tanpa logo */
+  tenantLogoUrl?: string;
   sessions: LiveSessionRow[];
 }
 
 /* ------------------------------ Pembaca & format ----------------------------- */
+
 
 const str = (v: unknown, fallback = ''): string => (v === null || v === undefined ? fallback : String(v));
 const num = (v: unknown): number | undefined => {
@@ -156,6 +161,7 @@ export function normalizeLivePublicState(raw: unknown): LivePublicState {
     tenantName: str(r.tenant_name),
     eventName: str(r.event_name),
     tenantCode: str(r.tenant_code),
+    tenantLogoUrl: safeTenantLogoUrl(r.tenant_logo_url),
     sessions: sortLiveSessions(sessions)
   };
 }

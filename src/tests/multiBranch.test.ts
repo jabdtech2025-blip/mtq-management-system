@@ -20,6 +20,7 @@ import {
   sortParticipantsForDisplay
 } from '../utils/participantSort';
 import { shouldShowSessionRestore } from '../lib/supabaseClient';
+import { safeTenantLogoUrl, validateTenantLogoLink } from '../utils/tenantLogo';
 import {
   buildViewFilterKey,
   readViewFilters,
@@ -878,6 +879,22 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
     const stopped = applyLiveSessionChange(withNew, { id: 's-1', stage_id: 'st-1', is_active: false, display: {} });
     expect(stopped.length === 1 && stopped[0].id === 's-2', 'sesi yang dihentikan dihapus dari layar');
     expect(normalizeLivePublicState({ found: false }).sessions.length === 0, 'kode tidak dikenal');
+  });
+
+  check('LG-01. Logo penyelenggara: hanya tautan https:// atau data URI gambar yang dipakai, dan ikut terbaca di state Live publik', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(safeTenantLogoUrl('https://contoh.id/logo.png') === 'https://contoh.id/logo.png', 'tautan https diterima');
+    expect(safeTenantLogoUrl(png) === png, 'data URI PNG diterima');
+    expect(safeTenantLogoUrl('http://contoh.id/logo.png') === '', 'http ditolak');
+    expect(safeTenantLogoUrl('javascript:alert(1)') === '', 'javascript: ditolak');
+    expect(safeTenantLogoUrl('data:image/svg+xml;base64,PHN2Zz4=') === '', 'data URI SVG ditolak');
+    expect(safeTenantLogoUrl('https://contoh.id/a"onerror=x') === '', 'tanda kutip ditolak');
+    expect(safeTenantLogoUrl(null) === '' && safeTenantLogoUrl('   ') === '', 'kosong');
+    expect(validateTenantLogoLink('') === null && validateTenantLogoLink('https://a.id/l.png') === null, 'validasi isian: kosong & https valid');
+    expect(Boolean(validateTenantLogoLink('ftp://a.id/l.png')) && Boolean(validateTenantLogoLink('https://a.id/l l.png')), 'validasi isian: bukan https / berspasi ditolak');
+    const withLogo = normalizeLivePublicState({ found: true, tenant_id: 't', tenant_name: 'X', tenant_logo_url: 'https://a.id/l.png', sessions: [] });
+    const badLogo = normalizeLivePublicState({ found: true, tenant_id: 't', tenant_name: 'X', tenant_logo_url: 'javascript:alert(1)', sessions: [] });
+    expect(withLogo.tenantLogoUrl === 'https://a.id/l.png' && badLogo.tenantLogoUrl === '', 'logo di state publik disaring');
   });
 
   check('RF-01. Refresh/F5: layar memuat (bukan halaman login) selama sesi tersimpan dipulihkan', () => {

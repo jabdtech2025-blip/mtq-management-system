@@ -213,6 +213,8 @@ Semua aksi di-ekspos lewat objek value provider (cari `loadStageSnapshotRankings
 - Tabel `live_sessions` (satu baris per babak). Kolom `display` = salinan data layar publik **yang dibuat server**, dikosongkan saat sesi berhenti.
 - **Maqra rahasia:** tersembunyi bawaan (`shown_maqra_index = NULL`); admin menampilkan satu maqra (Maqra 1, 2, ...), maqra baru menggantikan yang lama. Pindah peserta / mulai / berhenti menyembunyikan lagi. Maqra yang belum ditampilkan tidak pernah ada di `display` (hanya `maqra_count`). Layar publik menampilkan halaman mushaf maqra itu dalam satu kolom (halaman kedua di bawahnya).
 - Publik: `/live/<KODE>` (`src/live/LiveScoringPage.tsx` + `LiveDisplayCard.tsx`) membaca RPC `get_live_sessions(kode)` (SECURITY INVOKER) lalu berlangganan realtime `live_sessions`. **Tidak ada nilai.**
+- Tampilan (preset "Kaca Bermotif"): `LiveFrame.tsx` = latar + header (logo & nama penyelenggara) + atribusi Manajemen MTQ; `LiveDisplayCard.tsx` = isi (mushaf kiri/identitas kanan, atau identitas di tengah bila maqra tersembunyi). Pratinjau admin memakai keduanya dengan `compact`.
+- Logo penyelenggara: kolom `tenants.logo_url` (migrasi 20261129, tautan https:// atau data URI gambar ≤200.000 karakter), diisi di Superadmin → Manajemen Penyelenggara → Edit (`TenantLogoField.tsx`, util `src/utils/tenantLogo.ts`). Disalin otomatis lewat trigger ke `live_sessions.tenant_logo_url` dan dikembalikan `get_live_sessions` sebagai `tenant_logo_url`.
 - Mode Demo: admin hanya melihat pratinjau lokal (`buildLiveDisplay`).
 
 ---

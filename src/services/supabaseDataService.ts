@@ -1071,6 +1071,7 @@ export const supabaseDataService = {
         period: String(t.period || '2025 - 2026'),
         primaryAdminId: '',
         groupLabel: t.group_label ? String(t.group_label) : 'Kafilah / Utusan',
+        logoUrl: 'logo_url' in t ? String(t.logo_url || '') : undefined,
         status: (t.status as 'Aktif' | 'Nonaktif') || 'Aktif',
         userCount: userCountByTenant.get(tId) || 0
       };
@@ -3550,6 +3551,7 @@ export const supabaseDataService = {
       edition: tenant.edition?.trim() || null,
       period: tenant.period?.trim() || null,
       group_label: (tenant.groupLabel || 'Kafilah / Utusan').trim(),
+      ...(tenant.logoUrl !== undefined ? { logo_url: tenant.logoUrl.trim() || null } : {}),
       status: tenant.status,
       updated_at: new Date().toISOString()
     };
@@ -3592,7 +3594,16 @@ export const supabaseDataService = {
       }
 
       if (saveError) {
-        return { success: false, mode: 'supabase_live', message: saveError.message };
+        const msg = String(saveError.message || '');
+        return {
+          success: false,
+          mode: 'supabase_live',
+          message: /logo_url/i.test(msg)
+            ? /check constraint/i.test(msg)
+              ? 'Logo tidak valid. Gunakan tautan https:// atau unggah gambar yang lebih kecil.'
+              : 'Kolom logo belum tersedia di database. Jalankan migrasi 20261129_tenant_logo.sql di SQL Editor Supabase.'
+            : msg
+        };
       }
 
       // Pastikan sesi superadmin aktif ditautkan ke tenant_memberships agar memiliki hak akses langsung
