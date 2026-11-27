@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { applyStageLotteryNumbers } from '../../utils/participantSort';
 import {
   Users,
   Building,
@@ -15,7 +16,7 @@ import { StatCard, Card, Button, Badge } from '../ui';
 export const DashboardView: React.FC = () => {
   const {
     currentTenant,
-    participants,
+    participants: rawParticipants,
     stageParticipations,
     kafilahs,
     users,
@@ -27,6 +28,11 @@ export const DashboardView: React.FC = () => {
     getParticipantProgress,
     questions
   } = useMtq();
+  // Nomor undian yang tampil = hasil undian babak (bila sudah diundi)
+  const participants = useMemo(
+    () => applyStageLotteryNumbers(rawParticipants, stageParticipations),
+    [rawParticipants, stageParticipations]
+  );
 
   // Statistics dynamically derived and strictly scoped to currentTenant
   const tenantParticipants = participants.filter((p) => p.tenantId === currentTenant.id);

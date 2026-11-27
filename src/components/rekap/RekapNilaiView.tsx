@@ -11,7 +11,7 @@ import {
   Clock
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
-import { buildStageOrderLookup, sortParticipantsForDisplay } from '../../utils/participantSort';
+import { buildStageOrderLookup, sortParticipantsForDisplay, applyStageLotteryNumbers } from '../../utils/participantSort';
 import { buildViewFilterKey, readViewFilters, writeViewFilters } from '../../utils/viewFilterStorage';
 import { Participant, JudgeAssessment, AssignedMaqraItem } from '../../types/mtq';
 import { aggregateParticipantScores, getActiveRubricFields } from '../../services/scoringEngine';
@@ -36,7 +36,8 @@ const DEFAULT_REKAP_FILTERS = {
 export const RekapNilaiView: React.FC = () => {
   const {
     currentTenant,
-    participants,
+    participants: rawParticipants,
+    stageParticipations,
     assessments,
     users,
     stages,
@@ -55,6 +56,11 @@ export const RekapNilaiView: React.FC = () => {
     getStageParticipation,
     rubricVersions
   } = useMtq();
+  // Nomor undian yang tampil = hasil undian babak (bila sudah diundi)
+  const participants = useMemo(
+    () => applyStageLotteryNumbers(rawParticipants, stageParticipations),
+    [rawParticipants, stageParticipations]
+  );
 
   /**
    * Nilai peserta dihitung sama dengan Hasil & Kelulusan dan server (compute_stage_rankings):

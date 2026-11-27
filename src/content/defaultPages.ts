@@ -103,7 +103,7 @@ Butuh bantuan? Hubungi ${CONTACT_EMAIL}.`
 **Manajemen MTQ** (mtqsystem.web.id) adalah platform penilaian digital dan manajemen musabaqah yang digunakan oleh **penyelenggara** MTQ/STQ (misalnya LPTQ atau panitia). Penyelenggara menentukan data peserta apa yang dikumpulkan dan untuk apa; pengelola platform memproses data tersebut atas nama penyelenggara.
 
 ## 2. Data yang diolah
-- **Peserta:** nama, nama ayah/wali, jenis kelamin, asal daerah/lembaga, kafilah/utusan, cabang lomba, nomor undian, maqra, nilai, dan status kelulusan.
+- **Peserta:** nama, nama ayah/wali, tanggal lahir, jenis kelamin, asal daerah/lembaga, kafilah/utusan, cabang lomba, nomor undian, maqra, nilai, dan status kelulusan.
 - **Panitia, admin, dan dewan hakim:** nama, email, peran, penugasan, serta catatan aktivitas di aplikasi (log audit).
 - **Data teknis:** alamat IP, jenis perangkat/browser, dan catatan akses yang dicatat otomatis oleh penyedia layanan hosting dan database.
 
@@ -122,7 +122,7 @@ Data **tidak dijual** dan **tidak dipakai untuk iklan**.
 
 Hasil yang telah disahkan dapat diumumkan oleh penyelenggara sesuai ketentuan lomba.
 
-**Layar Live Scoring.** Penyelenggara dapat menayangkan peserta yang sedang tampil di halaman publik (alamat /live/kode-penyelenggara) yang bisa dibuka siapa pun tanpa login. Data yang tampil hanya nama penyelenggara, cabang/marhalah, babak, nomor undian, nama lengkap, nama ayah, dan asal (kafilah/instansi). Maqra (surat, ayat, halaman mushaf) dirahasiakan dan baru tampil bila panitia menampilkannya saat peserta membaca. **Nilai tidak pernah ditampilkan.** Data ini tampil hanya selama sesi berlangsung dan langsung dihapus dari halaman publik ketika sesi dihentikan. Penyelenggara dapat menyembunyikan nama peserta. Banyak peserta MTQ masih anak-anak, sehingga penyelenggara bertanggung jawab memberi tahu peserta dan orang tua/wali bahwa nama akan ditayangkan, dan wajib menyembunyikan nama bila ada keberatan.
+**Layar Live Scoring.** Penyelenggara dapat menayangkan peserta yang sedang tampil di halaman publik (alamat /live/kode-penyelenggara) yang bisa dibuka siapa pun tanpa login. Data yang tampil hanya nama penyelenggara, cabang/marhalah, babak, nomor undian, nama lengkap, nama ayah, usia (dalam tahun; tanggal lahir tidak ditampilkan), dan asal (kafilah/instansi). Maqra (surat, ayat, halaman mushaf) dirahasiakan dan baru tampil bila panitia menampilkannya saat peserta membaca. **Nilai tidak pernah ditampilkan.** Data ini tampil hanya selama sesi berlangsung dan langsung dihapus dari halaman publik ketika sesi dihentikan. Penyelenggara dapat menyembunyikan nama peserta. Banyak peserta MTQ masih anak-anak, sehingga penyelenggara bertanggung jawab memberi tahu peserta dan orang tua/wali bahwa nama akan ditayangkan, dan wajib menyembunyikan nama bila ada keberatan.
 
 ## 5. Penyimpanan dan keamanan
 - Akses dibatasi per peran dan per penyelenggara di tingkat database.

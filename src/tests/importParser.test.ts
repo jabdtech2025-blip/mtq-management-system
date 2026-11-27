@@ -7,8 +7,10 @@ import {
   parseWorkbookToRows,
   validateKafilahImportRows,
   validateParticipantImportRows,
-  validateQuestionImportRows
+  validateQuestionImportRows,
+  summarizeParticipantImport
 } from '../utils/excelHelper';
+import { ageFromBirthDate, parseBirthDate, validateBirthDate } from '../utils/birthDate';
 
 type TestResult = { name: string; success: boolean; details?: string };
 
@@ -174,6 +176,92 @@ export async function runImportParserTests(): Promise<{ passed: number; failed: 
     expect(valid.find((v) => v.code === 'GRP-BDG')?.existingId === 'k-bdg', 'GRP-BDG harus memperbarui grup lama');
     expect(!valid.find((v) => v.code === 'GRP-BGR')?.existingId, 'GRP-BGR harus grup baru');
     expect(res.rows.filter((r) => !r.isValid).length === 3, 'tiga baris harus ditolak');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Impor untuk memperbarui peserta + tanggal lahir
+  // ---------------------------------------------------------------------------
+  const existingParticipants = [
+    {
+      id: 'p-1', tenantId: 't-1', participantId: 'TLW-901', adminSequenceNumber: '001', lotteryNumber: '', name: 'Ahmad Lama',
+      fatherName: 'Ayah Lama', gender: 'Putra' as const, originCity: 'Bandung', originRegion: 'Jawa Barat', originInstitution: 'PP Lama',
+      kafilahId: 'k-bdg', kafilahName: 'Grup Kota Bandung', branchId: 'c-pa', branchName: 'Tilawah Dewasa Putra',
+      stageId: 's-pa-1', stageName: 'Penyisihan', questionId: '', assignedMaqra: '', pageNumber: 1, status: 'Berlangsung' as const
+    },
+    {
+      id: 'p-2', tenantId: 't-1', participantId: 'TLW-902', lotteryNumber: '', name: 'Budi Sama', fatherName: 'Ayah Budi',
+      gender: 'Putra' as const, kafilahId: 'k-bdg', kafilahName: 'Grup Kota Bandung', branchId: 'c-pa', branchName: 'Tilawah Dewasa Putra',
+      stageId: 's-pa-1', stageName: 'Penyisihan', questionId: '', assignedMaqra: '', pageNumber: 1, status: 'Menunggu' as const, birthDate: '2011-05-04'
+    },
+    {
+      id: 'p-3', tenantId: 't-1', participantId: 'TLW-903', lotteryNumber: '', name: 'Nama Kembar', gender: 'Putra' as const,
+      kafilahId: 'k-bdg', kafilahName: 'Grup Kota Bandung', branchId: 'c-pa', branchName: 'Tilawah Dewasa Putra',
+      stageId: 's-pa-1', stageName: 'Penyisihan', questionId: '', assignedMaqra: '', pageNumber: 1, status: 'Menunggu' as const
+    },
+    {
+      id: 'p-4', tenantId: 't-1', participantId: 'TLW-904', lotteryNumber: '', name: 'Nama Kembar', gender: 'Putra' as const,
+      kafilahId: 'k-bdg', kafilahName: 'Grup Kota Bandung', branchId: 'c-pa', branchName: 'Tilawah Dewasa Putra',
+      stageId: 's-pa-1', stageName: 'Penyisihan', questionId: '', assignedMaqra: '', pageNumber: 1, status: 'Menunggu' as const
+    }
+  ];
+
+  await check('IMP-10. Impor memperbarui peserta lama: cocok lewat kode, sel kosong tidak menghapus, tanggal lahir terisi, babak & status tetap', () => {
+    const res = validateParticipantImportRows(
+      [
+        // Hanya kode + tanggal lahir (format Indonesia): data lain tetap
+        { id_peserta: 'TLW-901', tanggal_lahir: '31/12/2012' },
+        // Sama persis dengan data lama
+        { id_peserta: 'TLW-902', nama_peserta: 'Budi Sama', tanggal_lahir: '2011-05-04' },
+        // Peserta baru dengan tanggal dari sel tanggal Excel (dibaca sebagai YYYY-MM-DD)
+        { id_peserta: 'TLW-905', nama_peserta: 'Baru', jenis_kelamin: 'Putra', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', tanggal_lahir: '2013-01-02' },
+        // Tanggal lahir di masa depan ditolak
+        { id_peserta: 'TLW-906', nama_peserta: 'Masa Depan', jenis_kelamin: 'Putra', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', tanggal_lahir: '01/01/2099' },
+        // Tanpa kode, nama kembar → harus dicek
+        { nama_peserta: 'Nama Kembar', tanggal_lahir: '2012-01-01' },
+        // Tanpa kode, nama unik → cocok lewat nama + grup + cabang
+        { nama_peserta: 'Ahmad Lama', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', nama_ayah: 'Ayah Baru' }
+      ],
+      { kafilahs, cabangList, stages, existingParticipants, tenantId: 't-1' }
+    );
+    const [r1, r2, r3, r4, r5, r6] = res.rows;
+    expect(r1.isValid && r1.data?.existingId === 'p-1', `r1 cocok: ${r1.errors.join('/')}`);
+    expect(
+      r1.data?.birthDate === '2012-12-31' && r1.data?.name === 'Ahmad Lama' && r1.data?.fatherName === 'Ayah Lama' &&
+        r1.data?.adminSequenceNumber === '001' && r1.data?.status === 'Berlangsung' && r1.data?.stageName === 'Penyisihan' &&
+        r1.data?.originInstitution === 'PP Lama',
+      `r1 data lama harus tetap: ${JSON.stringify(r1.data)}`
+    );
+    expect((r1.data?.changedFields || []).join(',') === 'Tanggal Lahir', `r1 perubahan: ${r1.data?.changedFields}`);
+    expect(r2.isValid && r2.data?.existingId === 'p-2' && (r2.data?.changedFields || []).length === 0, 'r2 tanpa perubahan');
+    expect(r3.isValid && !r3.data?.existingId && r3.data?.birthDate === '2013-01-02' && r3.data?.stageName === 'Penyisihan', 'r3 baru');
+    expect(!r4.isValid && r4.errors.join(' ').includes('masa depan'), `r4: ${r4.errors.join('/')}`);
+    expect(!r5.isValid && r5.errors.join(' ').includes('Isi Kode Peserta'), `r5: ${r5.errors.join('/')}`);
+    // r6 cocok ke p-1 lewat nama, padahal p-1 sudah diperbarui di r1 → ditolak agar tidak dobel
+    expect(!r6.isValid && r6.errors.join(' ').includes('lebih dari sekali'), `r6: ${r6.errors.join('/')}`);
+    const sum = summarizeParticipantImport(res.validRows);
+    expect(sum.created === 1 && sum.updated === 1 && sum.unchanged === 1, `ringkasan: ${JSON.stringify(sum)}`);
+
+    const byName = validateParticipantImportRows(
+      [{ nama_peserta: 'Ahmad Lama', kafilah: 'Grup Kota Bandung', cabang: 'Tilawah Dewasa Putra', nama_ayah: 'Ayah Baru' }],
+      { kafilahs, cabangList, stages, existingParticipants, tenantId: 't-1' }
+    );
+    const n = byName.rows[0];
+    expect(
+      n.isValid && n.data?.existingId === 'p-1' && n.data?.participantId === 'TLW-901' && n.data?.fatherName === 'Ayah Baru' &&
+        (n.data?.changedFields || []).join(',') === 'Nama Ayah',
+      `cocok lewat nama: ${n.errors.join('/')} ${JSON.stringify(n.data)}`
+    );
+  });
+
+  await check('IMP-11. Tanggal lahir: format sel Excel, angka seri, dd/mm/yyyy; usia dihitung tahun penuh', () => {
+    expect(parseBirthDate('31/12/2012') === '2012-12-31' && parseBirthDate('2012-12-31') === '2012-12-31', 'format teks');
+    expect(parseBirthDate('31-12-2012') === '2012-12-31' && parseBirthDate('31.12.2012') === '2012-12-31', 'pemisah - dan .');
+    expect(parseBirthDate(new Date(Date.UTC(2012, 11, 31))) === '2012-12-31', 'sel tanggal Excel');
+    expect(parseBirthDate(41274) === '2012-12-31', `angka seri Excel: ${parseBirthDate(41274)}`);
+    expect(parseBirthDate('31/02/2012') === null && parseBirthDate('kemarin') === null && parseBirthDate('') === '', 'tidak valid/kosong');
+    expect(validateBirthDate('1899-12-31') !== null && validateBirthDate('2999-01-01', '2026-11-26') !== null, 'batas tanggal');
+    expect(ageFromBirthDate('2012-11-26', '2026-11-26') === 14 && ageFromBirthDate('2012-11-27', '2026-11-26') === 13, 'usia tahun penuh');
+    expect(ageFromBirthDate(undefined) === undefined && ageFromBirthDate('2999-01-01', '2026-11-26') === undefined, 'usia kosong');
   });
 
   const passed = results.filter((r) => r.success).length;

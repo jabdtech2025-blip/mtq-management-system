@@ -192,6 +192,11 @@ export const LiveDisplayCard: React.FC<{
                 Nama Ayah: <b className="font-bold text-white">{p.fatherName}</b>
               </div>
             )}
+            {p.age !== null && p.age !== undefined && (
+              <div className={`mt-1 font-semibold text-emerald-200 ${s.father}`} data-testid="live-age">
+                Usia: <b className="font-bold text-white">{p.age} tahun</b>
+              </div>
+            )}
           </div>
           <div className={`font-bold ${s.origin}`} data-testid="live-origin">
             {p.origin}

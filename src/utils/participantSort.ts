@@ -97,3 +97,32 @@ export function resolveDrawnLotteryNumbers(
   });
   return map;
 }
+
+/**
+ * Salinan peserta untuk tampilan dengan `lotteryNumber` = nomor hasil undian babak peserta saat ini
+ * (stage_participations), atau nomor pendaftaran bila babaknya belum diundi.
+ *
+ * Hanya untuk tampilan baca (Rekap, Monitoring, Penilaian). Jangan dipakai untuk menyimpan peserta:
+ * nomor pendaftaran dan nomor hasil undian disimpan di tempat berbeda.
+ */
+export function applyStageLotteryNumbers<
+  P extends { id: string; tenantId: string; lotteryNumber: string; stageId?: string; stageName: string }
+>(
+  participants: readonly P[],
+  stageParticipations: ReadonlyArray<{ tenantId: string; participantId: string; stageId?: string; stageName: string; lotteryNumber?: string }>
+): P[] {
+  const byKey = new Map<string, string>();
+  stageParticipations.forEach((sp) => {
+    const num = (sp.lotteryNumber || '').trim();
+    if (!num) return;
+    if (sp.stageId) byKey.set(`${sp.tenantId}::${sp.participantId}::id::${sp.stageId}`, num);
+    byKey.set(`${sp.tenantId}::${sp.participantId}::name::${sp.stageName}`, num);
+  });
+  if (byKey.size === 0) return participants as P[];
+  return participants.map((p) => {
+    const drawn =
+      (p.stageId && byKey.get(`${p.tenantId}::${p.id}::id::${p.stageId}`)) ||
+      byKey.get(`${p.tenantId}::${p.id}::name::${p.stageName}`);
+    return drawn && drawn !== p.lotteryNumber ? { ...p, lotteryNumber: drawn } : p;
+  });
+}

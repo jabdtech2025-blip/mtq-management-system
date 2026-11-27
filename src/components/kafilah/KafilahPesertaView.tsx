@@ -21,10 +21,13 @@ import {
 } from 'lucide-react';
 import { useMtq } from '../../context/MtqContext';
 import { Kafilah, Participant } from '../../types/mtq';
+import { ageFromBirthDate, formatBirthDate, validateBirthDate } from '../../utils/birthDate';
 import { resolveDrawnLotteryNumbers } from '../../utils/participantSort';
 import { AppModal } from '../common/AppModal';
 import {
   downloadParticipantExcelTemplate,
+  exportParticipantsExcel,
+  summarizeParticipantImport,
   downloadKafilahExcelTemplate,
   parseWorkbookToRows,
   validateParticipantImportRows,
@@ -166,6 +169,7 @@ export const KafilahPesertaView: React.FC = () => {
   const [partIdCode, setPartIdCode] = useState<string>('');
   const [partName, setPartName] = useState<string>('');
   const [partFatherName, setPartFatherName] = useState<string>('');
+  const [partBirthDate, setPartBirthDate] = useState<string>('');
   const [partGender, setPartGender] = useState<'Putra' | 'Putri'>('Putra');
   const [partOriginCity, setPartOriginCity] = useState<string>('');
   const [partOriginRegion, setPartOriginRegion] = useState<string>('');
@@ -272,6 +276,7 @@ export const KafilahPesertaView: React.FC = () => {
     setPartIdCode(`PST-${nextSeq}`);
     setPartName('');
     setPartFatherName('');
+    setPartBirthDate('');
     setPartGender(defaultCabang.toLowerCase().includes('putri') ? 'Putri' : 'Putra');
     setPartOriginCity(defaultKafilah?.name.replace(/^Grup\s+/i, '') || '');
     setPartOriginRegion(defaultKafilah?.region || 'Jawa Barat');
@@ -291,6 +296,7 @@ export const KafilahPesertaView: React.FC = () => {
     setPartIdCode(p.participantId);
     setPartName(p.name);
     setPartFatherName(p.fatherName || '');
+    setPartBirthDate(p.birthDate || '');
     setPartGender(p.gender);
     setPartOriginCity(p.originCity || '');
     setPartOriginRegion(p.originRegion || '');
@@ -317,6 +323,11 @@ export const KafilahPesertaView: React.FC = () => {
       setPartFormError('Nama lengkap peserta wajib diisi.');
       return;
     }
+    const birthDateError = validateBirthDate(partBirthDate);
+    if (birthDateError) {
+      setPartFormError(birthDateError);
+      return;
+    }
 
     const matchedBranch = cabangList.find((c) => c.name === partBranchName);
     // Babak dicari per cabang: nama babak yang sama ada di setiap cabang.
@@ -333,6 +344,7 @@ export const KafilahPesertaView: React.FC = () => {
         participantId: partIdCode.trim(),
         name: partName.trim(),
         fatherName: partFatherName.trim(),
+        birthDate: partBirthDate,
         gender: partGender,
         originCity: partOriginCity.trim(),
         originRegion: partOriginRegion.trim(),
@@ -365,6 +377,7 @@ export const KafilahPesertaView: React.FC = () => {
       lotteryNumber: partLottery.trim(),
       name: partName.trim(),
       fatherName: partFatherName.trim(),
+      birthDate: partBirthDate || undefined,
       gender: partGender,
       originCity: partOriginCity.trim(),
       originRegion: partOriginRegion.trim(),
@@ -450,6 +463,31 @@ export const KafilahPesertaView: React.FC = () => {
     setFeedbackMessage({ type: 'success', text: `Grup "${newName}" berhasil ditambahkan.` });
   };
 
+  const [isExporting, setIsExporting] = useState(false);
+  const handleExportExcel = async () => {
+    setIsExporting(true);
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      const count = await exportParticipantsExcel({
+        participants: filteredParticipants,
+        kafilahs,
+        lotteryOf: (p) => lotteryOf(p).number,
+        ageOf: (p) => ageFromBirthDate(p.birthDate),
+        formatDate: formatBirthDate,
+        groupLabel,
+        filename: `Peserta_${(currentTenant?.code || 'MTQ').replace(/[^A-Za-z0-9_-]/g, '')}_${stamp}.xlsx`
+      });
+      setFeedbackMessage({
+        type: 'success',
+        text: `${count} peserta diekspor ke Excel (sesuai filter). Lengkapi datanya lalu impor kembali untuk memperbarui peserta.`
+      });
+    } catch (err) {
+      setFeedbackMessage({ type: 'error', text: err instanceof Error ? err.message : 'Gagal mengekspor Excel.' });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleExcelFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -486,7 +524,7 @@ export const KafilahPesertaView: React.FC = () => {
       const errDetail = res.errors.length > 0 ? ` (${res.errors.slice(0, 2).join('; ')})` : '';
       setFeedbackMessage({
         type: res.succeeded > 0 && res.failed === 0 ? 'success' : 'error',
-        text: `Berhasil mengimpor ${res.succeeded} dari ${res.total} peserta.${res.failed > 0 ? ` Gagal: ${res.failed}${errDetail}` : ''}`
+        text: `Impor peserta: ${res.created} ditambahkan, ${res.updated} diperbarui, ${res.unchanged} tanpa perubahan.${res.failed > 0 ? ` Gagal: ${res.failed}${errDetail}` : ''}`
       });
       if (res.succeeded > 0 && res.failed === 0) {
         setIsImportModalOpen(false);
@@ -559,6 +597,17 @@ export const KafilahPesertaView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => void handleExportExcel()}
+            disabled={isExporting}
+            data-testid="export-participants-btn"
+            title="Ekspor peserta sesuai filter ke Excel. File ini bisa dilengkapi lalu diimpor kembali untuk memperbarui data."
+            className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 border border-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-700" />
+            <span>{isExporting ? 'Mengekspor…' : 'Ekspor Excel'}</span>
+          </button>
           {/* Unified Single Import Button with Dropdown */}
           <div className="relative" ref={importDropdownRef}>
             <button
@@ -1415,6 +1464,14 @@ export const KafilahPesertaView: React.FC = () => {
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+              <span className="text-xs font-bold uppercase text-slate-400 block">Tanggal Lahir / Usia</span>
+              <span className="font-semibold text-slate-800 mt-0.5 block" data-testid="detail-birth-date">
+                {detailParticipant.birthDate
+                  ? `${formatBirthDate(detailParticipant.birthDate)} (${ageFromBirthDate(detailParticipant.birthDate) ?? '-'} tahun)`
+                  : '-'}
+              </span>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
               <span className="text-xs font-bold uppercase text-slate-400 block">5. Jenis Kelamin</span>
               <span className="font-semibold text-slate-800 mt-0.5 block">{detailParticipant.gender}</span>
             </div>
@@ -1601,6 +1658,22 @@ export const KafilahPesertaView: React.FC = () => {
                   value={partFatherName}
                   onChange={(e) => setPartFatherName(e.target.value)}
                   placeholder="Misal: H. Abdullah"
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-emerald-700"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Tanggal Lahir{' '}
+                  {ageFromBirthDate(partBirthDate) !== undefined && (
+                    <span className="font-normal text-slate-500">(usia {ageFromBirthDate(partBirthDate)} tahun)</span>
+                  )}
+                </label>
+                <input
+                  type="date"
+                  value={partBirthDate}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setPartBirthDate(e.target.value)}
+                  aria-label="Tanggal Lahir"
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-emerald-700"
                 />
               </div>
@@ -1793,7 +1866,7 @@ export const KafilahPesertaView: React.FC = () => {
                 >
                   {isImporting
                     ? 'Mengimpor...'
-                    : `Impor ${importValidation?.validRows.length || 0} Peserta Valid`}
+                    : `Simpan ${importValidation?.validRows.length || 0} Baris Valid`}
                 </button>
               </div>
             </div>
@@ -1831,6 +1904,21 @@ export const KafilahPesertaView: React.FC = () => {
 
             {importValidation && (
               <div className="space-y-3">
+                {(() => {
+                  const sum = summarizeParticipantImport(importValidation.validRows);
+                  return (
+                    <div
+                      className="p-3 rounded-xl bg-sky-50 border border-sky-200 text-xs text-sky-900"
+                      data-testid="participant-import-summary"
+                    >
+                      <b>{sum.created}</b> peserta baru, <b>{sum.updated}</b> diperbarui, <b>{sum.unchanged}</b> tanpa perubahan.
+                      <span className="block text-sky-800/80 mt-0.5">
+                        Peserta lama dicocokkan lewat Kode Peserta (atau Nama + Grup + Cabang). Sel kosong tidak menghapus data lama,
+                        dan nomor hasil undian babak tidak diubah.
+                      </span>
+                    </div>
+                  );
+                })()}
                 <div className="grid grid-cols-3 gap-3 text-xs">
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-slate-500 block">Total Baris Dibaca</span>
@@ -1884,10 +1972,12 @@ export const KafilahPesertaView: React.FC = () => {
                             <th className="py-1.5 px-3">Grup</th>
                             <th className="py-1.5 px-3">Cabang</th>
                             <th className="py-1.5 px-3">Babak</th>
+                            <th className="py-1.5 px-3">Tgl Lahir</th>
+                            <th className="py-1.5 px-3">Keterangan</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {importValidation.validRows.slice(0, 20).map((r, i) => (
+                          {importValidation.validRows.slice(0, 50).map((r, i) => (
                             <tr key={i}>
                               <td className="py-1.5 px-3 font-mono font-bold text-emerald-700">
                                 {r.participantId}
@@ -1896,6 +1986,18 @@ export const KafilahPesertaView: React.FC = () => {
                               <td className="py-1.5 px-3">{r.kafilahName}</td>
                               <td className="py-1.5 px-3">{r.branchName}</td>
                               <td className="py-1.5 px-3 font-mono">{r.stageName}</td>
+                              <td className="py-1.5 px-3 font-mono">{formatBirthDate(r.birthDate) || '-'}</td>
+                              <td className="py-1.5 px-3">
+                                {!r.existingId ? (
+                                  <span className="font-bold text-emerald-700">Baru</span>
+                                ) : (r.changedFields || []).length > 0 ? (
+                                  <span className="text-amber-800">
+                                    <b>Diperbarui:</b> {(r.changedFields || []).join(', ')}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500">Tanpa perubahan</span>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

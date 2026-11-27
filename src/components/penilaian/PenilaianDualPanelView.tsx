@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { applyStageLotteryNumbers } from '../../utils/participantSort';
 import {
   ArrowLeft,
   ChevronLeft,
@@ -44,7 +45,8 @@ import {
 export const PenilaianDualPanelView: React.FC = () => {
   const {
     currentTenant,
-    participants,
+    participants: rawParticipants,
+    stageParticipations,
     selectedParticipantId,
     setSelectedParticipantId,
     setCurrentView,
@@ -68,6 +70,11 @@ export const PenilaianDualPanelView: React.FC = () => {
     getActiveRubricForBranch,
     stages
   } = useMtq();
+  // Nomor undian yang tampil = hasil undian babak (bila sudah diundi)
+  const participants = useMemo(
+    () => applyStageLotteryNumbers(rawParticipants, stageParticipations),
+    [rawParticipants, stageParticipations]
+  );
 
   // Find current participant (handle empty state gracefully)
   const currentParticipant =

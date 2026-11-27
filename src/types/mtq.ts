@@ -108,6 +108,8 @@ export interface Participant {
   participantId: string; // ID Peserta permanen, misal "TLW-004"
   name: string;
   fatherName?: string; // Nama Ayah / Bin / Binti
+  /** Tanggal lahir, format YYYY-MM-DD (boleh kosong) */
+  birthDate?: string;
   gender: 'Putra' | 'Putri';
   originCity?: string; // Asal Kota / Kabupaten
   originRegion?: string; // Asal Wilayah / Provinsi

@@ -14,6 +14,7 @@ import {
 } from '../types/mtq';
 import { resolveStageForBranch } from '../services/stageResolver';
 import { validateMaqraRange } from '../services/quranIndex';
+import { parseBirthDate, validateBirthDate } from './birthDate';
 
 export const MAX_EXCEL_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
 export const MAX_EXCEL_ROWS = 5000;
@@ -93,6 +94,12 @@ export interface ParsedParticipantImportRow {
   stageId?: string;
   stageName: string;
   status: 'Menunggu' | 'Berlangsung' | 'Lolos' | 'Gugur' | 'Final';
+  /** Tanggal lahir YYYY-MM-DD; kosong = tidak diisi */
+  birthDate?: string;
+  /** id peserta yang sudah ada (cocok lewat Kode Peserta, atau Nama + Grup + Cabang) → diperbarui */
+  existingId?: string;
+  /** Label kolom yang berubah untuk peserta yang sudah ada (kosong = tidak ada perubahan) */
+  changedFields?: string[];
 }
 
 export interface ParsedQuestionImportRow {
@@ -253,6 +260,7 @@ export const PARTICIPANT_IMPORT_HEADERS = [
   'nomor_undian', 'no_undian', 'undian', 'lottery_number',
   'nama_lengkap', 'nama_peserta', 'nama', 'name',
   'nama_ayah', 'bin_binti', 'ayah', 'father_name',
+  'tanggal_lahir', 'tgl_lahir', 'tanggal_kelahiran', 'birth_date',
   'jenis_kelamin', 'gender', 'jk', 'putra_putri',
   'asal_kota', 'kota_asal', 'kota_kabupaten', 'asal_kota_kabupaten', 'origin_city',
   'asal_wilayah', 'daerah_asal', 'asal_daerah', 'asal_wilayah_provinsi', 'provinsi', 'asal_provinsi', 'origin_region',
@@ -513,6 +521,11 @@ export async function parseWorkbookToRows(
 /**
  * Validasi baris import Peserta terhadap Master Data aktif (Kafilah, Cabang, Babak milik cabang itu)
  * tanpa pernah membuat master data liar secara diam-diam.
+ *
+ * Impor juga dipakai untuk MEMPERBARUI peserta yang sudah ada:
+ * - dicocokkan lewat Kode Peserta; bila kode kosong, lewat Nama + Grup + Cabang (harus tepat satu);
+ * - sel yang terisi menggantikan data lama, sel KOSONG tidak menghapus apa pun;
+ * - nomor hasil undian babak tidak pernah disentuh (kolom "Nomor Undian Babak" diabaikan).
  */
 export function validateParticipantImportRows(
   rawRows: Record<string, unknown>[],
@@ -526,55 +539,56 @@ export function validateParticipantImportRows(
   }
 ): ImportBatchValidationSummary<ParsedParticipantImportRow> {
   const seenParticipantCodes = new Set<string>();
+  const seenExistingIds = new Set<string>();
   const seenBranchLottery = new Set<string>();
+  const lower = (v?: string) => (v || '').trim().toLowerCase();
 
-  const existingCodes = new Set(
-    context.existingParticipants.map((p) => p.participantId.trim().toUpperCase())
+  const existingByCode = new Map(
+    context.existingParticipants.map((p) => [p.participantId.trim().toUpperCase(), p] as const)
   );
+
+  const findKafilah = (ref: string) =>
+    context.kafilahs.find(
+      (k) =>
+        k.status === 'Aktif' &&
+        (lower(k.name) === lower(ref) || lower(k.code) === lower(ref) || k.id === ref)
+    );
+  const findBranch = (ref: string) =>
+    context.cabangList.find(
+      (c) =>
+        c.status === 'Aktif' &&
+        (lower(c.name) === lower(ref) || lower(c.code) === lower(ref) || c.id === ref)
+    );
 
   const results: ImportRowValidationResult<ParsedParticipantImportRow>[] = rawRows.map((raw, idx) => {
     const rowNumber = getImportRowNumber(raw, idx);
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    const adminSequenceNumber =
-      findCellValue(raw, [
-        'no_urut',
-        'nomor_urut',
-        'nomor_urut_administratif',
-        'no_urut_administratif',
-        'no_urut_administrasi',
-        'nomor_urut_administrasi',
-        'no',
-        'admin_sequence_number',
-      ]) || String(idx + 1);
-
-    const participantId = findCellValue(raw, [
+    const adminSequenceRaw = findCellValue(raw, [
+      'no_urut',
+      'nomor_urut',
+      'nomor_urut_administratif',
+      'no_urut_administratif',
+      'no_urut_administrasi',
+      'nomor_urut_administrasi',
+      'no',
+      'admin_sequence_number',
+    ]);
+    const codeRaw = findCellValue(raw, [
       'id_peserta',
       'kode_peserta',
       'participant_id',
       'participant_code',
       'nomor_peserta',
     ]).toUpperCase();
-
-    const lotteryNumber = findCellValue(raw, [
-      'nomor_undian',
-      'no_undian',
-      'undian',
-      'lottery_number',
-    ]);
-
-    const name = findCellValue(raw, ['nama_lengkap', 'nama_peserta', 'nama', 'name']);
-    const fatherName = findCellValue(raw, ['nama_ayah', 'bin_binti', 'ayah', 'father_name']);
+    const lotteryRaw = findCellValue(raw, ['nomor_undian', 'no_undian', 'undian', 'lottery_number']);
+    const nameRaw = findCellValue(raw, ['nama_lengkap', 'nama_peserta', 'nama', 'name']);
+    const fatherRaw = findCellValue(raw, ['nama_ayah', 'bin_binti', 'ayah', 'father_name']);
+    const birthRaw = findCellValue(raw, ['tanggal_lahir', 'tgl_lahir', 'tanggal_kelahiran', 'birth_date']);
     const genderRaw = findCellValue(raw, ['jenis_kelamin', 'gender', 'jk', 'putra_putri']);
-    const originCity = findCellValue(raw, [
-      'asal_kota',
-      'kota_asal',
-      'kota_kabupaten',
-      'asal_kota_kabupaten',
-      'origin_city',
-    ]);
-    const originRegion = findCellValue(raw, [
+    const cityRaw = findCellValue(raw, ['asal_kota', 'kota_asal', 'kota_kabupaten', 'asal_kota_kabupaten', 'origin_city']);
+    const regionRaw = findCellValue(raw, [
       'asal_wilayah',
       'daerah_asal',
       'asal_daerah',
@@ -583,7 +597,7 @@ export function validateParticipantImportRows(
       'asal_provinsi',
       'origin_region',
     ]);
-    const originInstitution = findCellValue(raw, [
+    const institutionRaw = findCellValue(raw, [
       'lembaga_asal',
       'asal_lembaga',
       'asal_pesantren_sekolah',
@@ -602,70 +616,99 @@ export function validateParticipantImportRows(
       'nama_grup',
       'kode_grup',
     ]);
-    const branchRef = findCellValue(raw, [
-      'cabang',
-      'cabang_lomba',
-      'nama_cabang',
-      'kode_cabang',
-      'branch',
-    ]);
-    const stageRef =
-      findCellValue(raw, ['babak', 'babak_aktif', 'babak_musabaqah', 'stage']) || 'Penyisihan';
-    const statusRaw = findCellValue(raw, ['status']) || 'Menunggu';
+    const branchRef = findCellValue(raw, ['cabang', 'cabang_lomba', 'nama_cabang', 'kode_cabang', 'branch']);
+    const stageRaw = findCellValue(raw, ['babak', 'babak_aktif', 'babak_musabaqah', 'stage']);
+    const statusRaw = findCellValue(raw, ['status']);
+
+    // --- Cocokkan dengan peserta yang sudah ada ---
+    let existing: Participant | undefined = codeRaw ? existingByCode.get(codeRaw) : undefined;
+    if (!existing && !codeRaw && nameRaw) {
+      const refKafilah = kafilahRef ? findKafilah(kafilahRef) : undefined;
+      const refBranch = branchRef ? findBranch(branchRef) : undefined;
+      const candidates = context.existingParticipants.filter(
+        (p) =>
+          lower(p.name) === lower(nameRaw) &&
+          (!kafilahRef || p.kafilahId === refKafilah?.id || lower(p.kafilahName) === lower(kafilahRef)) &&
+          (!branchRef || p.branchId === refBranch?.id || lower(p.branchName) === lower(branchRef))
+      );
+      if (candidates.length === 1) {
+        existing = candidates[0];
+      } else if (candidates.length > 1) {
+        errors.push(
+          `Ada ${candidates.length} peserta bernama "${nameRaw}"${kafilahRef ? '' : ' (grup tidak diisi)'}. Isi Kode Peserta agar tidak salah peserta.`
+        );
+      }
+    }
+    if (existing) {
+      if (seenExistingIds.has(existing.id)) {
+        errors.push(`Peserta "${existing.name}" (${existing.participantId}) muncul lebih dari sekali di file.`);
+      }
+      seenExistingIds.add(existing.id);
+    }
+
+    // --- Nilai akhir: sel kosong memakai data lama (peserta lama) atau bawaan (peserta baru) ---
+    const participantId = codeRaw || existing?.participantId || '';
+    const name = nameRaw || existing?.name || '';
+    const fatherName = fatherRaw || existing?.fatherName || '';
+    const adminSequenceNumber = adminSequenceRaw || existing?.adminSequenceNumber || (existing ? '' : String(idx + 1));
+    const lotteryNumber = lotteryRaw || existing?.lotteryNumber || '';
+    const originInstitution = institutionRaw || existing?.originInstitution || '';
+
+    let birthDate = existing?.birthDate || '';
+    if (birthRaw) {
+      const parsed = parseBirthDate(birthRaw);
+      const problem = parsed === null ? 'Format tanggal lahir tidak dikenali.' : validateBirthDate(parsed);
+      if (problem) errors.push(`Tanggal lahir "${birthRaw}": ${problem} Gunakan 31/12/2012 atau 2012-12-31.`);
+      else if (parsed) birthDate = parsed;
+    }
 
     if (!name) errors.push('Nama lengkap peserta wajib diisi.');
     if (!participantId) errors.push('ID/Kode peserta wajib diisi.');
-    // Nomor undian boleh kosong: nomor resmi per babak diberikan saat undian di Bank Soal & Maqra
-    if (!lotteryNumber) warnings.push('Nomor undian kosong; nomor akan diberikan saat undian babak.');
+    if (!existing && !lotteryNumber) warnings.push('Nomor undian kosong; nomor akan diberikan saat undian babak.');
 
-    const normalizedGender = genderRaw.toLowerCase();
-    let gender: 'Putra' | 'Putri' = 'Putra';
-    if (
-      normalizedGender === 'putra' ||
-      normalizedGender === 'l' ||
-      normalizedGender === 'laki-laki'
-    ) {
-      gender = 'Putra';
-    } else if (
-      normalizedGender === 'putri' ||
-      normalizedGender === 'p' ||
-      normalizedGender === 'perempuan'
-    ) {
-      gender = 'Putri';
-    } else {
-      errors.push(`Jenis kelamin "${genderRaw || '-'}" tidak valid (gunakan Putra atau Putri).`);
+    let gender: 'Putra' | 'Putri' = existing?.gender || 'Putra';
+    if (genderRaw || !existing) {
+      const g = genderRaw.toLowerCase();
+      if (g === 'putra' || g === 'l' || g === 'laki-laki') gender = 'Putra';
+      else if (g === 'putri' || g === 'p' || g === 'perempuan') gender = 'Putri';
+      else errors.push(`Jenis kelamin "${genderRaw || '-'}" tidak valid (gunakan Putra atau Putri).`);
     }
 
-    const matchedKafilah = context.kafilahs.find(
-      (k) =>
-        k.status === 'Aktif' &&
-        (k.name.toLowerCase() === kafilahRef.toLowerCase() ||
-          (k.code || '').toLowerCase() === kafilahRef.toLowerCase() ||
-          k.id === kafilahRef)
-    );
+    const matchedKafilah = kafilahRef
+      ? findKafilah(kafilahRef)
+      : existing
+      ? context.kafilahs.find((k) => k.id === existing!.kafilahId)
+      : undefined;
     if (!matchedKafilah) {
-      errors.push(
-        `Kafilah/Grup "${kafilahRef || '-'}" tidak ditemukan pada Master Data Kafilah Aktif.`
-      );
+      errors.push(`Kafilah/Grup "${kafilahRef || '-'}" tidak ditemukan pada Master Data Kafilah Aktif.`);
     }
 
-    const matchedBranch = context.cabangList.find(
-      (c) =>
-        c.status === 'Aktif' &&
-        (c.name.toLowerCase() === branchRef.toLowerCase() ||
-          (c.code || '').toLowerCase() === branchRef.toLowerCase() ||
-          c.id === branchRef)
-    );
+    const matchedBranch = branchRef
+      ? findBranch(branchRef)
+      : existing
+      ? context.cabangList.find((c) => c.id === existing!.branchId || c.name === existing!.branchName)
+      : undefined;
     if (!matchedBranch) {
-      errors.push(
-        `Cabang lomba "${branchRef || '-'}" tidak ditemukan pada Master Data Cabang Aktif.`
-      );
+      errors.push(`Cabang lomba "${branchRef || '-'}" tidak ditemukan pada Master Data Cabang Aktif.`);
     }
 
-    // Babak dicari per cabang: nama babak yang sama ada di setiap cabang dan tidak boleh tertukar.
+    // Babak: kosong pada peserta lama = babak tetap; peserta baru bawaan "Penyisihan"
+    const branchChanged = Boolean(
+      existing &&
+        matchedBranch &&
+        matchedBranch.id !== existing.branchId &&
+        lower(matchedBranch.name) !== lower(existing.branchName)
+    );
+    // Babak sama dengan yang tersimpan (atau kosong) dan cabang tetap → babak tidak disentuh
+    const keepStage = Boolean(
+      existing && !branchChanged && (!stageRaw || lower(stageRaw) === lower(existing.stageName))
+    );
+    const stageRef = stageRaw || existing?.stageName || 'Penyisihan';
     const stageNameExact =
-      context.stages.find((s) => s.name.trim().toLowerCase() === stageRef.trim().toLowerCase())?.name || stageRef;
-    const matchedStage = matchedBranch
+      context.stages.find((st) => lower(st.name) === lower(stageRef))?.name || stageRef;
+    const matchedStage = keepStage
+      ? { id: existing!.stageId || '', name: existing!.stageName }
+      : matchedBranch
       ? resolveStageForBranch(context.stages, {
           tenantId: context.tenantId || '',
           stageName: stageNameExact,
@@ -673,7 +716,6 @@ export function validateParticipantImportRows(
           branchName: matchedBranch.name
         })
       : undefined;
-
     if (matchedBranch && !matchedStage) {
       errors.push(
         `Cabang "${matchedBranch.name}" belum memiliki babak "${stageRef}". Buat babaknya di Master Data & Rubrik > Babak Musabaqah.`
@@ -685,26 +727,24 @@ export function validateParticipantImportRows(
         errors.push(`Duplikasi ID Peserta "${participantId}" di dalam file Excel.`);
       }
       seenParticipantCodes.add(participantId);
-      if (existingCodes.has(participantId)) {
-        warnings.push(
-          `ID Peserta "${participantId}" sudah ada dan akan diperbarui (idempotent upsert).`
-        );
+      const owner = existingByCode.get(participantId);
+      if (owner && existing && owner.id !== existing.id) {
+        errors.push(`Kode Peserta "${participantId}" sudah dipakai ${owner.name}.`);
       }
     }
 
-    if (matchedBranch && lotteryNumber) {
-      const branchLotteryKey = `${matchedBranch.id}::${lotteryNumber}`;
+    if (matchedBranch && lotteryRaw) {
+      const branchLotteryKey = `${matchedBranch.id}::${lotteryRaw}`;
       if (seenBranchLottery.has(branchLotteryKey)) {
-        errors.push(
-          `Duplikasi Nomor Undian "${lotteryNumber}" pada cabang "${matchedBranch.name}" di dalam file.`
-        );
+        errors.push(`Duplikasi Nomor Undian "${lotteryRaw}" pada cabang "${matchedBranch.name}" di dalam file.`);
       }
       seenBranchLottery.add(branchLotteryKey);
     }
 
     const validStatuses = ['Menunggu', 'Berlangsung', 'Lolos', 'Gugur', 'Final'] as const;
     const matchedStatus =
-      validStatuses.find((s) => s.toLowerCase() === statusRaw.toLowerCase()) || 'Menunggu';
+      validStatuses.find((st) => st.toLowerCase() === statusRaw.toLowerCase()) ||
+      (existing && !statusRaw ? existing.status : 'Menunggu');
 
     const rawRowStringified: Record<string, string> = {};
     Object.entries(raw).forEach(([k, v]) => {
@@ -714,35 +754,60 @@ export function validateParticipantImportRows(
     });
 
     const isValid = errors.length === 0 && Boolean(matchedKafilah && matchedBranch && matchedStage);
+    if (!isValid || !matchedKafilah || !matchedBranch || !matchedStage) {
+      return { rowNumber, rawRow: rawRowStringified, isValid: false, errors, warnings, data: undefined };
+    }
 
-    return {
-      rowNumber,
-      rawRow: rawRowStringified,
-      isValid,
-      errors,
-      warnings,
-      data:
-        isValid && matchedKafilah && matchedBranch && matchedStage
-          ? {
-              adminSequenceNumber,
-              participantId,
-              lotteryNumber,
-              name,
-              fatherName,
-              gender,
-              originCity: originCity || matchedKafilah.region,
-              originRegion: originRegion || matchedKafilah.region,
-              originInstitution,
-              kafilahId: matchedKafilah.id,
-              kafilahName: matchedKafilah.name,
-              branchId: matchedBranch.id,
-              branchName: matchedBranch.name,
-              stageId: matchedStage.id,
-              stageName: matchedStage.name,
-              status: matchedStatus,
-            }
-          : undefined,
+    const data: ParsedParticipantImportRow = {
+      adminSequenceNumber,
+      participantId,
+      lotteryNumber,
+      name,
+      fatherName,
+      gender,
+      originCity: cityRaw || (existing ? existing.originCity || '' : matchedKafilah.region),
+      originRegion: regionRaw || (existing ? existing.originRegion || '' : matchedKafilah.region),
+      originInstitution,
+      kafilahId: matchedKafilah.id,
+      kafilahName: matchedKafilah.name,
+      // Cabang tidak berubah: pertahankan id cabang yang tersimpan (agar babak tidak dianggap pindah)
+      branchId: existing && !branchChanged ? existing.branchId || matchedBranch.id : matchedBranch.id,
+      branchName: existing && !branchChanged ? existing.branchName : matchedBranch.name,
+      stageId: matchedStage.id || undefined,
+      stageName: matchedStage.name,
+      status: matchedStatus,
+      birthDate: birthDate || undefined
     };
+
+    if (existing) {
+      const changes: string[] = [];
+      const diff = (label: string, before: unknown, after: unknown) => {
+        if (String(before ?? '').trim() !== String(after ?? '').trim()) changes.push(label);
+      };
+      diff('Kode Peserta', existing.participantId, data.participantId);
+      diff('No Urut', existing.adminSequenceNumber, data.adminSequenceNumber);
+      diff('Nomor Undian Pendaftaran', existing.lotteryNumber, data.lotteryNumber);
+      diff('Nama', existing.name, data.name);
+      diff('Nama Ayah', existing.fatherName, data.fatherName);
+      diff('Tanggal Lahir', existing.birthDate, data.birthDate);
+      diff('Jenis Kelamin', existing.gender, data.gender);
+      diff('Kota Asal', existing.originCity, data.originCity);
+      diff('Provinsi Asal', existing.originRegion, data.originRegion);
+      diff('Lembaga Asal', existing.originInstitution, data.originInstitution);
+      if (existing.kafilahId !== data.kafilahId && lower(existing.kafilahName) !== lower(data.kafilahName)) changes.push('Grup');
+      if (branchChanged) changes.push('Cabang');
+      diff('Babak', existing.stageName, data.stageName);
+      diff('Status', existing.status, data.status);
+      data.existingId = existing.id;
+      data.changedFields = changes;
+      warnings.push(
+        changes.length > 0
+          ? `Peserta "${existing.name}" (${existing.participantId}) diperbarui: ${changes.join(', ')}.`
+          : `Peserta "${existing.name}" (${existing.participantId}) sudah sama, tidak ada perubahan.`
+      );
+    }
+
+    return { rowNumber, rawRow: rawRowStringified, isValid: true, errors, warnings, data };
   });
 
   const validRows = results.filter((r) => r.isValid && r.data).map((r) => r.data!);
@@ -753,8 +818,10 @@ export function validateParticipantImportRows(
       identifier:
         r.rawRow['ID Peserta'] ||
         r.rawRow['ID_Peserta'] ||
+        r.rawRow['Kode Peserta'] ||
         r.rawRow['Nama Peserta'] ||
         r.rawRow['Nama_Lengkap'] ||
+        r.rawRow['Nama'] ||
         `Baris ${r.rowNumber}`,
       reasons: r.errors,
       rawRow: r.rawRow,
@@ -768,6 +835,23 @@ export function validateParticipantImportRows(
     validRows,
     errors: errorSummaries,
   };
+}
+
+/** Ringkasan impor peserta: baru, diperbarui, sama (tanpa perubahan). */
+export function summarizeParticipantImport(rows: ParsedParticipantImportRow[]): {
+  created: number;
+  updated: number;
+  unchanged: number;
+} {
+  let created = 0;
+  let updated = 0;
+  let unchanged = 0;
+  rows.forEach((r) => {
+    if (!r.existingId) created += 1;
+    else if ((r.changedFields || []).length > 0) updated += 1;
+    else unchanged += 1;
+  });
+  return { created, updated, unchanged };
 }
 
 /**
@@ -1124,6 +1208,7 @@ export async function downloadParticipantExcelTemplate(context: {
       Nomor_Undian: '15',
       Nama_Lengkap: 'Ahmad Zaki Mubarak',
       Nama_Ayah: 'H. Abdullah Mubarak',
+      Tanggal_Lahir: '31/12/2012',
       Jenis_Kelamin: 'Putra',
       Asal_Kota_Kabupaten: 'Kota Surabaya',
       Asal_Wilayah_Provinsi: 'Jawa Timur',
@@ -1157,6 +1242,92 @@ export async function downloadParticipantExcelTemplate(context: {
   }
 
   void triggerWorkbookDownload(wb, 'Template_Import_Peserta_MTQ.xlsx');
+}
+
+/**
+ * Ekspor peserta (Grup & Peserta) ke Excel.
+ *
+ * Sheet "Peserta" memakai judul kolom yang sama dengan template impor, sehingga file ini bisa
+ * langsung dilengkapi (mis. Tanggal Lahir) lalu diimpor kembali untuk memperbarui data.
+ * Kolom yang hanya untuk dibaca (Nomor_Undian_Babak, Usia, Verifikasi) diabaikan saat impor.
+ */
+export async function exportParticipantsExcel(params: {
+  participants: Participant[];
+  kafilahs: Kafilah[];
+  /** Nomor hasil undian babak per peserta (kosong = belum diundi) */
+  lotteryOf: (p: Participant) => string;
+  ageOf: (p: Participant) => number | undefined;
+  formatDate: (iso?: string) => string;
+  groupLabel?: string;
+  filename?: string;
+}): Promise<number> {
+  const rows = params.participants.map((p) => ({
+    No_Urut_Administratif: p.adminSequenceNumber || '',
+    ID_Peserta: p.participantId,
+    Nomor_Undian_Babak: params.lotteryOf(p) || '',
+    Nama_Lengkap: p.name,
+    Nama_Ayah: p.fatherName || '',
+    Tanggal_Lahir: params.formatDate(p.birthDate),
+    Usia: params.ageOf(p) ?? '',
+    Jenis_Kelamin: p.gender,
+    Asal_Kota_Kabupaten: p.originCity || '',
+    Asal_Wilayah_Provinsi: p.originRegion || '',
+    Lembaga_Asal: p.originInstitution || '',
+    Kafilah: p.kafilahName,
+    Cabang: p.branchName,
+    Babak: p.stageName,
+    Status: p.status,
+    Verifikasi: p.verificationStatus || 'Diverifikasi',
+  }));
+
+  const ExcelLib = await loadExcelJS();
+  const wb = new ExcelLib.Workbook();
+  appendObjectsToWorksheet(
+    wb,
+    'Peserta',
+    rows.length > 0 ? rows : [{ Keterangan: 'Tidak ada peserta pada filter ini' }]
+  );
+  const pesertaSheet = wb.getWorksheet('Peserta');
+  if (pesertaSheet && rows.length > 0) {
+    pesertaSheet.getRow(1).font = { bold: true };
+    pesertaSheet.views = [{ state: 'frozen', ySplit: 1 }];
+    // Teks agar Excel tidak mengubah format (mis. "007" menjadi 7)
+    ['A', 'B', 'C', 'F'].forEach((col) => {
+      pesertaSheet.getColumn(col).numFmt = '@';
+    });
+  }
+
+  // Sheet grup: jumlah peserta per grup dan per cabang (sesuai filter)
+  const branches = Array.from(new Set(params.participants.map((p) => p.branchName))).sort((a, b) =>
+    a.localeCompare(b, 'id')
+  );
+  const byKafilah = new Map<string, Participant[]>();
+  params.participants.forEach((p) => {
+    const list = byKafilah.get(p.kafilahId) || [];
+    list.push(p);
+    byKafilah.set(p.kafilahId, list);
+  });
+  const groupRows = Array.from(byKafilah.entries())
+    .map(([kafilahId, list]) => {
+      const k = params.kafilahs.find((item) => item.id === kafilahId);
+      const row: Record<string, unknown> = {
+        Kode_Grup: k?.code || '',
+        Nama_Grup: k?.name || list[0]?.kafilahName || '',
+        Wilayah: k?.region || '',
+        Jumlah_Peserta: list.length,
+      };
+      branches.forEach((b) => {
+        row[b] = list.filter((p) => p.branchName === b).length;
+      });
+      return row;
+    })
+    .sort((a, b) => String(a.Nama_Grup).localeCompare(String(b.Nama_Grup), 'id'));
+  if (groupRows.length > 0) {
+    appendObjectsToWorksheet(wb, (params.groupLabel || 'Grup').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31), groupRows);
+  }
+
+  await triggerWorkbookDownload(wb, params.filename || 'Data_Peserta_MTQ.xlsx');
+  return rows.length;
 }
 
 /**

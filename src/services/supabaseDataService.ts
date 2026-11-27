@@ -1417,6 +1417,7 @@ export const supabaseDataService = {
         lotteryNumber: String(p.lottery_number || ''),
         name: String(p.name || ''),
         fatherName: p.father_name ? String(p.father_name) : undefined,
+        birthDate: p.birth_date ? String(p.birth_date).slice(0, 10) : undefined,
         gender: (p.gender as 'Putra' | 'Putri') || 'Putra',
         originCity: p.origin_city ? String(p.origin_city) : kafilahRegion || undefined,
         originRegion: p.origin_region ? String(p.origin_region) : kafilahRegion || undefined,
@@ -2754,6 +2755,7 @@ export const supabaseDataService = {
       ...baseParticipantPayload,
       admin_sequence_number: participant.adminSequenceNumber || null,
       father_name: participant.fatherName || null,
+      ...(participant.birthDate !== undefined ? { birth_date: participant.birthDate || null } : {}),
       origin_city: participant.originCity || null,
       origin_region: participant.originRegion || null,
       origin_institution: participant.originInstitution || null,
@@ -2763,6 +2765,11 @@ export const supabaseDataService = {
     };
 
     let { error: partErr } = await client.from('participants').upsert(extendedParticipantPayload);
+    if (partErr && /birth_date/.test(partErr.message || '')) {
+      // Migrasi 20261130 belum dijalankan: simpan tanpa tanggal lahir
+      const { birth_date: _omitBirth, ...withoutBirth } = extendedParticipantPayload as Record<string, unknown>;
+      partErr = (await client.from('participants').upsert(withoutBirth)).error;
+    }
     if (partErr && (partErr.message?.includes('column') || partErr.code === 'PGRST204')) {
       const retryRes = await client.from('participants').upsert(baseParticipantPayload);
       partErr = retryRes.error;
@@ -3379,6 +3386,7 @@ export const supabaseDataService = {
       ...baseUpdatePayload,
       admin_sequence_number: participant.adminSequenceNumber || null,
       father_name: participant.fatherName || null,
+      ...(participant.birthDate !== undefined ? { birth_date: participant.birthDate || null } : {}),
       origin_city: participant.originCity || null,
       origin_region: participant.originRegion || null,
       origin_institution: participant.originInstitution || null,
@@ -3393,6 +3401,14 @@ export const supabaseDataService = {
       .eq('id', participant.id)
       .eq('tenant_id', participant.tenantId);
 
+    if (error && /birth_date/.test(error.message || '')) {
+      // Migrasi 20261130 belum dijalankan: simpan tanpa tanggal lahir
+      const { birth_date: _omitBirth, ...withoutBirth } = extendedUpdatePayload as Record<string, unknown>;
+      error = (
+        await client.from('participants').update(withoutBirth).eq('id', participant.id).eq('tenant_id', participant.tenantId)
+      ).error;
+    }
+
     if (error && (error.message?.includes('column') || error.code === 'PGRST204')) {
       const retryRes = await client
         .from('participants')
@@ -3404,14 +3420,19 @@ export const supabaseDataService = {
 
     if (error) return { success: false, mode: 'supabase_live', message: error.message };
 
-    await client
-      .from('stage_participations')
-      .update({
-        lottery_number: participant.lotteryNumber,
-        updated_at: new Date().toISOString()
-      })
-      .eq('participant_id', participant.id)
-      .eq('tenant_id', participant.tenantId);
+    // Nomor undian pendaftaran hanya mengisi babak yang BELUM punya nomor undian.
+    // Nomor hasil undian babak (draw_lottery_server) tidak boleh tertimpa saat data peserta diedit/diimpor.
+    if (participant.lotteryNumber?.trim()) {
+      await client
+        .from('stage_participations')
+        .update({
+          lottery_number: participant.lotteryNumber.trim(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('participant_id', participant.id)
+        .eq('tenant_id', participant.tenantId)
+        .or('lottery_number.is.null,lottery_number.eq.');
+    }
 
     return { success: true, mode: 'supabase_live', message: 'Data peserta berhasil diperbarui di database.' };
   },

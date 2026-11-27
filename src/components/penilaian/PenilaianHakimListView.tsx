@@ -1,5 +1,5 @@
 import { stageBelongsToBranch } from '../../services/stageResolver';
-import { buildStageOrderLookup, sortParticipantsForDisplay } from '../../utils/participantSort';
+import { buildStageOrderLookup, sortParticipantsForDisplay, applyStageLotteryNumbers } from '../../utils/participantSort';
 import { buildViewFilterKey, readViewFilters, writeViewFilters } from '../../utils/viewFilterStorage';
 import { resolveRequiredJudgeIdsForStage } from '../../services/completion';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
@@ -35,7 +35,8 @@ export const PenilaianHakimListView: React.FC = () => {
     currentTenant,
     currentUser,
     users,
-    participants,
+    participants: rawParticipants,
+    stageParticipations,
     judgeAssignments,
     assessments,
     getParticipantStageQuestions,
@@ -46,6 +47,11 @@ export const PenilaianHakimListView: React.FC = () => {
     stages,
     getFieldCoverageForStage
   } = useMtq();
+  // Nomor undian yang tampil = hasil undian babak (bila sudah diundi)
+  const participants = useMemo(
+    () => applyStageLotteryNumbers(rawParticipants, stageParticipations),
+    [rawParticipants, stageParticipations]
+  );
 
   const filterKey = buildViewFilterKey('penilaian_hakim', currentTenant.id, currentUser.id);
   const loadedFilterKeyRef = useRef(filterKey);

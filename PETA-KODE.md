@@ -316,3 +316,10 @@ Baca PETA-KODE.md sebelum mengubah kode.
 - Layar /live tidak menampilkan nilai; src/live/ tidak mengimpor MtqContext/supabaseDataService.
 - Teks antarmuka berbahasa Indonesia.
 ```
+
+## Nomor undian, tanggal lahir, ekspor/impor peserta (20261130)
+- Dua nomor undian: `participants.lottery_number` = nomor pendaftaran (boleh kosong); `stage_participations.lottery_number` = hasil undian babak (draw_lottery_server). Tampilan Rekap, Monitoring, Penilaian, Dasbor memakai `applyStageLotteryNumbers` (src/utils/participantSort.ts) — hanya untuk tampilan, jangan dipakai untuk menyimpan peserta.
+- Menyimpan peserta tidak boleh menimpa nomor hasil undian: `updateParticipantRecord` hanya mengisi babak yang nomornya kosong, dan trigger `trg_sp_keep_lottery` menolak pengosongan nomor.
+- Tanggal lahir: `participants.birth_date` (YYYY-MM-DD), util `src/utils/birthDate.ts`. Layar Live hanya menerima `age` (dihitung server di `live_session_build_display`), tanggal lahir tidak dikirim ke publik.
+- Ekspor Excel peserta: `exportParticipantsExcel` (excelHelper). Judul kolom sama dengan template impor sehingga bisa diimpor kembali; `Nomor_Undian_Babak`, `Usia`, `Verifikasi` diabaikan saat impor.
+- Impor peserta memperbarui peserta lama: cocok lewat Kode Peserta, atau Nama + Grup + Cabang (harus tepat satu). Sel kosong tidak menghapus data; pratinjau menandai Baru / Diperbarui (kolom) / Tanpa perubahan.

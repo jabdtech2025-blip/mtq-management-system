@@ -38,6 +38,8 @@ export interface LiveParticipantDisplay {
   nameHidden: boolean;
   /** Nama ayah (bin/binti); null bila kosong atau nama disembunyikan */
   fatherName: string | null;
+  /** Usia (tahun) dari tanggal lahir; null bila tidak ada */
+  age: number | null;
   origin: string;
   branchName: string;
   /** Jumlah maqra peserta (isinya tidak dikirim sampai ditampilkan admin) */
@@ -109,6 +111,7 @@ export function normalizeLiveDisplay(raw: unknown): LiveDisplay | null {
           lotteryNumber: str(p.lottery_number ?? p.lotteryNumber, '-'),
           name: p.name === null || p.name === undefined || p.name === '' ? null : str(p.name),
           fatherName: String(p.father_name ?? p.fatherName ?? '').trim() || null,
+          age: num(p.age) ?? null,
           nameHidden: Boolean(p.name_hidden ?? p.nameHidden),
           origin: str(p.origin, '-'),
           branchName: str(p.branch_name ?? p.branchName),
@@ -342,6 +345,7 @@ export interface LiveEntry {
   lotteryNumber: string;
   name: string;
   fatherName?: string;
+  age?: number;
   origin: string;
   maqras: LiveMaqra[];
 }
@@ -386,6 +390,7 @@ export function buildLiveDisplay(params: {
           lotteryNumber: current.lotteryNumber || '-',
           name: params.hideNames ? null : current.name,
           fatherName: params.hideNames || !current.fatherName?.trim() ? null : current.fatherName.trim(),
+          age: current.age ?? null,
           nameHidden: params.hideNames,
           origin: current.origin || '-',
           branchName: params.branchName,

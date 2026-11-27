@@ -300,7 +300,7 @@ interface MtqContextType {
   ) => Promise<{ success: boolean; message: string }>;
   importParticipantsBatch: (
     rows: ParsedParticipantImportRow[]
-  ) => Promise<{ total: number; succeeded: number; failed: number; errors: string[] }>;
+  ) => Promise<{ total: number; succeeded: number; failed: number; errors: string[]; created: number; updated: number; unchanged: number }>;
   addQuestion: (q: Omit<Question, 'id' | 'tenantId'>) => PersistPromise | undefined;
   updateQuestion: (id: string, updated: Partial<Question>) => PersistPromise | undefined;
   deleteQuestion: (id: string) => { success: boolean; message: string };
@@ -4745,7 +4745,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stageName: nextStageName,
             branchId: resolvedBranchId,
             branchName: nextBranchName,
-            lotteryNumber: merged.lotteryNumber,
+            // Nomor hasil undian babak dipertahankan; nomor pendaftaran hanya mengisi babak yang belum diundi
+            lotteryNumber: sp.lotteryNumber?.trim() ? sp.lotteryNumber : merged.lotteryNumber,
             assignedMaqra: updated.assignedMaqra !== undefined ? updated.assignedMaqra : sp.assignedMaqra,
             pageNumber: updated.pageNumber !== undefined ? updated.pageNumber : sp.pageNumber
           };
@@ -5061,9 +5062,12 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const importParticipantsBatch = async (
     rows: ParsedParticipantImportRow[]
-  ): Promise<{ total: number; succeeded: number; failed: number; errors: string[] }> => {
+  ): Promise<{ total: number; succeeded: number; failed: number; errors: string[]; created: number; updated: number; unchanged: number }> => {
     let succeeded = 0;
     let failed = 0;
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
     const errors: string[] = [];
     const seenCodesInBatch = new Set<string>();
     const seenLotteryByBranchInBatch = new Set<string>();
@@ -5113,12 +5117,22 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         continue;
       }
 
-      const existingByCode = participants.find(
-        (p) =>
-          p.tenantId === currentTenantId &&
-          p.participantId.trim().toUpperCase() === normalizedCode
-      );
+      const existingByCode =
+        (row.existingId && participants.find((p) => p.id === row.existingId && p.tenantId === currentTenantId)) ||
+        participants.find(
+          (p) =>
+            p.tenantId === currentTenantId &&
+            p.participantId.trim().toUpperCase() === normalizedCode
+        );
+      if (existingByCode && row.changedFields && row.changedFields.length === 0) {
+        // Data sama persis: tidak perlu disimpan ulang
+        seenCodesInBatch.add(normalizedCode);
+        unchanged += 1;
+        succeeded += 1;
+        continue;
+      }
       if (existingByCode) {
+        updated += 1;
         const updRes = updateParticipant(existingByCode.id, {
           adminSequenceNumber: row.adminSequenceNumber,
           participantId: row.participantId,
@@ -5126,6 +5140,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           lotteryNumber: row.lotteryNumber.trim() || existingByCode.lotteryNumber,
           name: row.name,
           fatherName: row.fatherName,
+          // Sel kosong tidak menghapus tanggal lahir yang sudah ada
+          birthDate: row.birthDate || existingByCode.birthDate,
           gender: row.gender,
           originCity: row.originCity,
           originRegion: row.originRegion,
@@ -5139,6 +5155,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           status: row.status
         });
         if (!updRes.success) {
+          updated -= 1;
           failed += 1;
           errors.push(`${row.participantId} (${row.name}): ${updRes.message}`);
           continue;
@@ -5147,12 +5164,14 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (normalizedLotteryKey) seenLotteryByBranchInBatch.add(normalizedLotteryKey);
         track(`${row.participantId} (${row.name})`, updRes.persisted);
       } else {
+        created += 1;
         const res = addParticipant({
           adminSequenceNumber: row.adminSequenceNumber,
           participantId: row.participantId,
           lotteryNumber: row.lotteryNumber,
           name: row.name,
           fatherName: row.fatherName,
+          birthDate: row.birthDate,
           gender: row.gender,
           originCity: row.originCity,
           originRegion: row.originRegion,
@@ -5173,6 +5192,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (normalizedLotteryKey) seenLotteryByBranchInBatch.add(normalizedLotteryKey);
           track(`${row.participantId} (${row.name})`, res.persisted);
         } else {
+          created -= 1;
           failed += 1;
           errors.push(`${row.participantId} (${row.name}): ${res.message}`);
         }
@@ -5181,7 +5201,7 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     await flush(true);
 
-    return { total: rows.length, succeeded, failed, errors };
+    return { total: rows.length, succeeded, failed, errors, created, updated, unchanged };
   };
 
   // Impor Grup / Kafilah: kode yang sudah ada diperbarui, kode baru ditambahkan.
@@ -6364,13 +6384,9 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const r = resultMap.get(toDeterministicUuid(p.id)) || resultMap.get(p.id);
           if (p.tenantId !== currentTenantId || !r) return p;
 
-          const nextLottery =
-            (drawMode === 'lottery_number' || drawMode === 'both') && r.lotteryNumber
-              ? r.lotteryNumber
-              : p.lotteryNumber;
-
+          // Nomor hasil undian disimpan per babak (stageParticipations), bukan di nomor pendaftaran peserta
           if (drawMode === 'lottery_number') {
-            return { ...p, lotteryNumber: nextLottery };
+            return p;
           }
 
           const newMaqraItems: AssignedMaqraItem[] = (r.assignedQuestionIds || [])
@@ -6409,7 +6425,6 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
           return {
             ...p,
-            lotteryNumber: nextLottery,
             questionId: lastItem ? lastItem.questionId : p.questionId,
             assignedMaqra:
               newMaqraItems.length === 1
@@ -6506,6 +6521,8 @@ export const MtqProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
 
       setLotteryDrawLogs((prev) => [newDrawLog, ...prev]);
+      // Muat ulang agar partisipasi babak yang baru dibuat server (beserta nomor undiannya) ikut tampil
+      setTimeout(() => void refreshFnRef.current({ lightweight: true }), 300);
 
       const formattedResults = serverResults.map((r) => {
         const qTitles = (r.assignedQuestionIds || []).map((qid) => {

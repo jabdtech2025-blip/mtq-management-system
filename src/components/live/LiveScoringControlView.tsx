@@ -25,6 +25,7 @@ import {
 } from '../../services/liveScoring';
 import { LiveDisplayCard } from '../../live/LiveDisplayCard';
 import { LiveFrame } from '../../live/LiveFrame';
+import { ageFromBirthDate } from '../../utils/birthDate';
 import { toDeterministicUuid } from '../../utils/uuid';
 import { Badge, Button, Card, PageHeader, Select } from '../ui';
 
@@ -95,6 +96,7 @@ export const LiveScoringControlView: React.FC = () => {
           lotteryNumber: sp.lotteryNumber || p.lotteryNumber || '-',
           name: p.name,
           fatherName: p.fatherName,
+          age: ageFromBirthDate(p.birthDate),
           origin: p.kafilahName || '-',
           maqras
         });

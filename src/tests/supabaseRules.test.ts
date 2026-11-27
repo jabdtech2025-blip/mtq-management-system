@@ -580,6 +580,10 @@ export async function runSupabaseTests(): Promise<{
     path.resolve(process.cwd(), 'supabase/migrations/20261129_tenant_logo.sql'),
     'utf-8'
   );
+  const birthDate20261130Sql = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/migrations/20261130_birth_date_lottery_guard.sql'),
+    'utf-8'
+  );
   const seedSql = fs.readFileSync(path.resolve(process.cwd(), 'supabase/seed.sql'), 'utf-8');
 
   // 36. Honest connection state & schema_missing detection
@@ -709,6 +713,7 @@ export async function runSupabaseTests(): Promise<{
       await pg.exec(liveScoring20261127Sql);
       await pg.exec(optionalLottery20261128Sql);
       await pg.exec(tenantLogo20261129Sql);
+      await pg.exec(birthDate20261130Sql);
       // Data uji lama menyisipkan stage_participations langsung (sebagai superuser) ke babak-babak acak.
       // Flag sesi ini mengizinkan setup tersebut; tes K1 mematikannya secara eksplisit.
       await pg.exec(`SELECT set_config('mtq.rpc_participation_setup', 'true', false);`);
@@ -3957,6 +3962,7 @@ export async function runSupabaseTests(): Promise<{
       await asSuper(liveScoring20261127Sql);
       await asSuper(optionalLottery20261128Sql);
       await asSuper(tenantLogo20261129Sql);
+      await asSuper(birthDate20261130Sql);
     } catch (e: any) {
       t7RerunOk = false;
       t7RerunError = String(e?.message || e);
@@ -4579,6 +4585,49 @@ export async function runSupabaseTests(): Promise<{
         lgSessNew.rows[0]?.u === lgPng &&
         lgClear.ok && lgPublicCleared.rows[0]?.r?.tenant_logo_url === null,
       `link: ${lgLink.error} ${JSON.stringify(lgLink.rows)}; sess: ${JSON.stringify(lgSessLink.rows)}; pub: ${JSON.stringify(lgPublicLink.rows[0]?.r?.tenant_logo_url)} ${lgPublicLink.error}; data: ${lgData.error}; js: ${lgBadJs.error}; http: ${lgBadHttp.ok}; svg: ${lgBadSvg.ok}; big: ${lgBadBig.ok}; after: ${lgAfterBad.rows[0]?.u?.slice(0, 30)}; anon: ${lgAnonUpdate.ok} ${lgAnonUpdate.error} ${lgAfterAnon.rows[0]?.u?.slice(0, 30)}; new: ${JSON.stringify(lgSessNew.rows)}; clear: ${lgClear.error} ${JSON.stringify(lgPublicCleared.rows[0]?.r?.tenant_logo_url)}`
+    );
+
+    // ---------- 97k. Tanggal lahir, usia di Live, dan perlindungan nomor undian babak ----------
+    const bdStage = await makeStage('IG Live Usia', 1, 2);
+    const bdA = await makeEntrant(bdStage, '1931', 'Usia Peserta A');
+    const bdBirth = new Date();
+    bdBirth.setFullYear(bdBirth.getFullYear() - 15);
+    bdBirth.setDate(bdBirth.getDate() - 3);
+    const bdBirthIso = `${bdBirth.getFullYear()}-${String(bdBirth.getMonth() + 1).padStart(2, '0')}-${String(bdBirth.getDate()).padStart(2, '0')}`;
+    const bdSetBirth = await runAs(igAdminId, `UPDATE participants SET birth_date = '${bdBirthIso}' WHERE id = '${bdA.pId}' RETURNING birth_date`);
+    let bdOldError = '';
+    try {
+      await asSuper(`UPDATE participants SET birth_date = '1899-12-31' WHERE id = '${bdA.pId}'`);
+    } catch (e: any) {
+      bdOldError = String(e?.message || e);
+    }
+    const bdStart = await runAs(igAdminId, `SELECT live_session_control('${bdStage}'::uuid, 'start', NULL, NULL, NULL) AS r`);
+    const bdPublic = JSON.stringify((await lvGet()).rows[0]?.r || {});
+    const bdHide = await runAs(igAdminId, `SELECT live_session_control('${bdStage}'::uuid, 'options', NULL, true, NULL) AS r`);
+    await runAs(igAdminId, `SELECT live_session_control('${bdStage}'::uuid, 'stop', NULL, NULL, NULL) AS r`);
+    const bdAge = bdStart.rows[0]?.r?.display?.participant?.age;
+    // Nomor undian babak tidak bisa dikosongkan oleh penyimpanan biasa, tetapi bisa diganti nomor lain
+    await asSuper(`UPDATE stage_participations SET lottery_number = '' WHERE id = '${bdA.spId}'`);
+    const bdAfterEmpty = (await pg.query<{ l: string }>(`SELECT lottery_number AS l FROM stage_participations WHERE id = '${bdA.spId}'`)).rows[0]?.l;
+    await asSuper(`UPDATE stage_participations SET lottery_number = '07' WHERE id = '${bdA.spId}'`);
+    const bdAfterChange = (await pg.query<{ l: string }>(`SELECT lottery_number AS l FROM stage_participations WHERE id = '${bdA.spId}'`)).rows[0]?.l;
+    // Pemulihan dari riwayat undian: nomor yang tertimpa nomor pendaftaran dikembalikan ke hasil undian terakhir
+    const bdB = await makeEntrant(bdStage, '1932', 'Usia Peserta B');
+    await asSuper(`INSERT INTO lottery_draw_logs (tenant_id, stage_id, stage_name, branch_name, actor_name, draw_results, draw_version, draw_mode)
+      VALUES ('${tenantJabarId}', '${bdStage}', 'IG Live Usia', 'Cabang', 'Uji', '[{"participantId":"${bdB.pId}","lotteryNumber":"04"}]'::jsonb, 1, 'both')`);
+    await asSuper(birthDate20261130Sql);
+    const bdRestored = (await pg.query<{ l: string }>(`SELECT lottery_number AS l FROM stage_participations WHERE id = '${bdB.spId}'`)).rows[0]?.l;
+    const bdKeptA = (await pg.query<{ l: string }>(`SELECT lottery_number AS l FROM stage_participations WHERE id = '${bdA.spId}'`)).rows[0]?.l;
+    assert(
+      '97k. Tanggal Lahir & Nomor Undian: admin menyimpan tanggal lahir; layar Live menampilkan usia (bukan tanggal lahir); tanggal < 1900 ditolak; nomor undian babak tidak bisa dikosongkan tetapi bisa diganti; nomor yang tertimpa nomor pendaftaran dipulihkan dari riwayat undian',
+      bdSetBirth.ok && String(bdSetBirth.rows[0]?.birth_date || '').length > 0 &&
+        /participants_birth_date_check/.test(bdOldError) &&
+        bdStart.ok && bdAge === 15 &&
+        bdPublic.includes('"age":15') && !bdPublic.includes(bdBirthIso) &&
+        bdHide.ok && bdHide.rows[0]?.r?.display?.participant?.age === 15 &&
+        bdAfterEmpty === '1931' && bdAfterChange === '07' &&
+        bdRestored === '04' && bdKeptA === '07',
+      `birth: ${bdSetBirth.error} ${JSON.stringify(bdSetBirth.rows)}; old: ${bdOldError}; start: ${bdStart.error} age=${bdAge}; public: ${bdPublic.slice(0, 300)}; hide: ${JSON.stringify(bdHide.rows[0]?.r?.display?.participant)}; empty: ${bdAfterEmpty}; change: ${bdAfterChange}; restored: ${bdRestored}; keptA: ${bdKeptA}`
     );
 
     // ---------- 98. J6: tidak ada lagi tebakan bidang berdasarkan nama ----------

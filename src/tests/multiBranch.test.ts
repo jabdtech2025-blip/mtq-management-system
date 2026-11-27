@@ -21,6 +21,7 @@ import {
 } from '../utils/participantSort';
 import { shouldShowSessionRestore } from '../lib/supabaseClient';
 import { safeTenantLogoUrl, validateTenantLogoLink } from '../utils/tenantLogo';
+import { applyStageLotteryNumbers } from '../utils/participantSort';
 import {
   buildViewFilterKey,
   readViewFilters,
@@ -895,6 +896,27 @@ export function runMultiBranchTests(): { passed: number; failed: number; results
     const withLogo = normalizeLivePublicState({ found: true, tenant_id: 't', tenant_name: 'X', tenant_logo_url: 'https://a.id/l.png', sessions: [] });
     const badLogo = normalizeLivePublicState({ found: true, tenant_id: 't', tenant_name: 'X', tenant_logo_url: 'javascript:alert(1)', sessions: [] });
     expect(withLogo.tenantLogoUrl === 'https://a.id/l.png' && badLogo.tenantLogoUrl === '', 'logo di state publik disaring');
+  });
+
+  check('LT-01. Nomor undian di Rekap/Monitoring = hasil undian babak peserta saat ini; belum diundi memakai nomor pendaftaran', () => {
+    const base = { tenantId: 't', questionId: '', assignedMaqra: '', pageNumber: 1 };
+    const ps = [
+      { ...base, id: 'a', lotteryNumber: '', stageId: 's2', stageName: 'Final' },
+      { ...base, id: 'b', lotteryNumber: '15', stageId: 's1', stageName: 'Penyisihan' },
+      { ...base, id: 'c', lotteryNumber: '', stageName: 'Penyisihan' }
+    ];
+    const sps = [
+      { tenantId: 't', participantId: 'a', stageId: 's1', stageName: 'Penyisihan', lotteryNumber: '03' },
+      { tenantId: 't', participantId: 'a', stageId: 's2', stageName: 'Final', lotteryNumber: '01' },
+      { tenantId: 't', participantId: 'b', stageId: 's1', stageName: 'Penyisihan', lotteryNumber: '' },
+      { tenantId: 't', participantId: 'c', stageId: 's9', stageName: 'Penyisihan', lotteryNumber: '07' },
+      { tenantId: 'lain', participantId: 'b', stageId: 's1', stageName: 'Penyisihan', lotteryNumber: '99' }
+    ];
+    const out = applyStageLotteryNumbers(ps, sps);
+    expect(out[0].lotteryNumber === '01', `babak saat ini (Final): ${out[0].lotteryNumber}`);
+    expect(out[1].lotteryNumber === '15', `belum diundi: nomor pendaftaran (${out[1].lotteryNumber})`);
+    expect(out[2].lotteryNumber === '07', `cocok lewat nama babak: ${out[2].lotteryNumber}`);
+    expect(ps[0].lotteryNumber === '', 'data asli tidak diubah');
   });
 
   check('RF-01. Refresh/F5: layar memuat (bukan halaman login) selama sesi tersimpan dipulihkan', () => {
